@@ -1,0 +1,1706 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>System Design Deep Dive — Part 2</title>
+  <style>
+    :root {
+      --primary: #0d1117;
+      --accent: #0f3460;
+      --highlight: #e94560;
+      --card-bg: #161b22;
+      --text: #e6edf3;
+      --subtext: #8b949e;
+      --code-bg: #0d1117;
+      --border: #30363d;
+      --tag-bg: #21262d;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+      background: var(--primary);
+      color: var(--text);
+      line-height: 1.85;
+    }
+
+    /* ── HEADER ── */
+    header {
+      background: linear-gradient(135deg, #0f3460 0%, #533483 50%, #e94560 100%);
+      padding: 64px 40px;
+      text-align: center;
+    }
+    header h1 { font-size: 2.9rem; font-weight: 800; letter-spacing: -1px; }
+    header p  { font-size: 1.1rem; color: rgba(255,255,255,0.85); margin-top: 10px; }
+    .badge {
+      display: inline-block;
+      background: rgba(255,255,255,0.15);
+      border: 1px solid rgba(255,255,255,0.3);
+      border-radius: 20px;
+      padding: 5px 16px;
+      font-size: 0.8rem;
+      margin-top: 14px;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+    }
+    .badge-row { display: flex; justify-content: center; gap: 10px; flex-wrap: wrap; margin-top: 14px; }
+
+    /* ── TOC ── */
+    nav.toc {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      margin: 40px auto;
+      max-width: 920px;
+      padding: 32px 42px;
+    }
+    nav.toc h2 { color: var(--highlight); font-size: 1rem; margin-bottom: 18px; text-transform: uppercase; letter-spacing: 1.5px; }
+    nav.toc ol { padding-left: 22px; }
+    nav.toc li { margin: 9px 0; }
+    nav.toc a  { color: #58a6ff; text-decoration: none; font-size: 1rem; transition: color 0.2s; }
+    nav.toc a:hover { color: var(--highlight); }
+
+    /* ── MAIN LAYOUT ── */
+    main { max-width: 1020px; margin: 0 auto; padding: 20px 30px 90px; }
+
+    /* ── TOPIC CARD ── */
+    .topic {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      margin-bottom: 64px;
+      overflow: hidden;
+      box-shadow: 0 4px 32px rgba(0,0,0,0.4);
+    }
+    .topic-header {
+      background: linear-gradient(100deg, var(--accent) 0%, #1a1a3e 100%);
+      padding: 32px 42px;
+      border-bottom: 2px solid var(--highlight);
+      display: flex;
+      align-items: center;
+      gap: 20px;
+    }
+    .topic-header .num {
+      background: var(--highlight);
+      color: white;
+      font-size: 1.35rem;
+      font-weight: 800;
+      width: 50px; height: 50px;
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0;
+    }
+    .topic-header h2 { font-size: 1.95rem; font-weight: 700; }
+    .topic-header p  { color: var(--subtext); font-size: 0.95rem; margin-top: 5px; }
+    .topic-body { padding: 38px 42px; }
+
+    /* ── INNER HEADINGS ── */
+    .topic-body h3 {
+      color: #58a6ff;
+      font-size: 1.25rem;
+      margin: 34px 0 13px;
+      padding-left: 14px;
+      border-left: 4px solid var(--highlight);
+    }
+    .topic-body h4 {
+      color: #e3b341;
+      font-size: 1.03rem;
+      margin: 22px 0 9px;
+    }
+    .topic-body p  { color: var(--text); margin-bottom: 14px; }
+    .topic-body ul, .topic-body ol { padding-left: 24px; margin-bottom: 14px; }
+    .topic-body li { margin: 7px 0; color: var(--text); }
+    strong { color: #c9d1d9; }
+
+    /* ── CODE ── */
+    pre {
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 22px 24px;
+      overflow-x: auto;
+      margin: 14px 0 24px;
+      font-size: 0.87rem;
+      line-height: 1.65;
+    }
+    code { font-family: 'Fira Code', 'Cascadia Code', 'Consolas', monospace; color: #c9d1d9; }
+    pre code { color: #c9d1d9; }
+    .kw  { color: #ff79c6; }
+    .fn  { color: #50fa7b; }
+    .str { color: #f1fa8c; }
+    .cm  { color: #6272a4; font-style: italic; }
+    .nm  { color: #bd93f9; }
+    .cls { color: #8be9fd; }
+    .at  { color: #ffb86c; }
+
+    /* ── CALLOUT BOXES ── */
+    .callout {
+      border-radius: 10px;
+      padding: 18px 22px;
+      margin: 18px 0;
+      border-left: 5px solid;
+      font-size: 0.95rem;
+    }
+    .callout.info    { background: #0c2d48; border-color: #58a6ff; }
+    .callout.warn    { background: #2d1f00; border-color: #e3b341; }
+    .callout.success { background: #0d2a0d; border-color: #3fb950; }
+    .callout.danger  { background: #2d0d0d; border-color: #f85149; }
+    .callout.purple  { background: #1a0d2d; border-color: #bc8cff; }
+    .callout strong  { display: block; margin-bottom: 6px; font-size: 0.82rem; text-transform: uppercase; letter-spacing: 0.6px; }
+    .callout.info    strong { color: #58a6ff; }
+    .callout.warn    strong { color: #e3b341; }
+    .callout.success strong { color: #3fb950; }
+    .callout.danger  strong { color: #f85149; }
+    .callout.purple  strong { color: #bc8cff; }
+
+    /* ── DIAGRAM ── */
+    .diagram {
+      background: #010409;
+      border: 1px dashed #444c56;
+      border-radius: 10px;
+      padding: 22px 28px;
+      margin: 16px 0 24px;
+      font-family: 'Fira Code', 'Consolas', monospace;
+      font-size: 0.82rem;
+      color: #8b949e;
+      white-space: pre;
+      overflow-x: auto;
+      line-height: 1.6;
+    }
+    .diagram .hl { color: #79c0ff; }
+    .diagram .ar { color: var(--highlight); }
+    .diagram .gr { color: #3fb950; }
+    .diagram .yw { color: #e3b341; }
+
+    /* ── TABLE ── */
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 16px 0 28px;
+      font-size: 0.9rem;
+    }
+    th {
+      background: #0f3460;
+      color: #e6edf3;
+      padding: 13px 16px;
+      text-align: left;
+      font-size: 0.85rem;
+      letter-spacing: 0.3px;
+    }
+    td {
+      padding: 11px 16px;
+      border-bottom: 1px solid var(--border);
+      color: var(--text);
+      vertical-align: top;
+    }
+    tr:nth-child(even) td { background: rgba(255,255,255,0.025); }
+    tr:hover td { background: rgba(88,166,255,0.05); }
+
+    /* ── TAGS ── */
+    .tags { display: flex; flex-wrap: wrap; gap: 8px; margin: 14px 0 6px; }
+    .tag {
+      background: var(--tag-bg);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 4px 14px;
+      font-size: 0.78rem;
+      color: #79c0ff;
+    }
+
+    /* ── METRIC CARDS ── */
+    .metrics {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      gap: 14px;
+      margin: 18px 0 28px;
+    }
+    .metric-card {
+      background: var(--primary);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 18px 14px;
+      text-align: center;
+    }
+    .metric-card .val { font-size: 1.55rem; font-weight: 700; color: var(--highlight); }
+    .metric-card .lbl { font-size: 0.75rem; color: var(--subtext); margin-top: 5px; line-height: 1.4; }
+
+    /* ── TWO COLUMN ── */
+    .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; margin: 16px 0 24px; }
+    .col-card {
+      background: var(--primary);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 18px 20px;
+    }
+    .col-card h5 { color: #58a6ff; margin-bottom: 10px; font-size: 0.95rem; }
+    .col-card ul { padding-left: 18px; }
+    .col-card li { font-size: 0.88rem; margin: 5px 0; color: var(--subtext); }
+
+    /* ── STEP LIST ── */
+    .steps { counter-reset: step; padding: 0; list-style: none; margin: 16px 0 24px; }
+    .steps li {
+      counter-increment: step;
+      position: relative;
+      padding: 12px 16px 12px 52px;
+      margin: 8px 0;
+      background: var(--primary);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      font-size: 0.93rem;
+    }
+    .steps li::before {
+      content: counter(step);
+      position: absolute;
+      left: 14px;
+      top: 50%;
+      transform: translateY(-50%);
+      background: var(--highlight);
+      color: white;
+      width: 26px; height: 26px;
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 0.78rem;
+      font-weight: 700;
+    }
+
+    /* ── FOOTER ── */
+    footer {
+      text-align: center;
+      padding: 32px;
+      color: var(--subtext);
+      font-size: 0.83rem;
+      border-top: 1px solid var(--border);
+    }
+
+    @media print {
+      body { background: #fff; color: #111; }
+      .topic, .callout, pre, .diagram { border-color: #ccc !important; }
+      .topic-header { background: #1a1a2e !important; }
+      pre, .diagram { background: #f6f8fa !important; color: #111 !important; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ══════════════════════════════════════
+     HEADER
+══════════════════════════════════════ -->
+<header>
+  <h1>⚙️ System Design Deep Dive — Part 2</h1>
+  <p>Internals, mechanisms, algorithms & real-world architecture for senior engineers</p>
+  <div class="badge-row">
+    <span class="badge">9+ Years Experience</span>
+    <span class="badge">Advanced Level</span>
+    <span class="badge">Topics 7 – 13</span>
+  </div>
+</header>
+
+<!-- ══════════════════════════════════════
+     TABLE OF CONTENTS
+══════════════════════════════════════ -->
+<nav class="toc">
+  <h2>📚 Table of Contents</h2>
+  <ol start="7">
+    <li><a href="#http-https">HTTP vs HTTPS — TLS Handshake, Cipher Suites, HTTP/2 & HTTP/3</a></li>
+    <li><a href="#api-gateway">API Gateway — Auth, Rate Limiting, Routing, BFF Pattern</a></li>
+    <li><a href="#circuit-breaker">Circuit Breaker — State Machine, Sliding Window, Hystrix Internals</a></li>
+    <li><a href="#bandwidth">Bandwidth — Throughput, Latency, Queuing Theory, Backpressure</a></li>
+    <li><a href="#cdn">CDN & CDN Caching — PoP Architecture, Cache Hierarchy, Purge Strategies</a></li>
+    <li><a href="#caching">Caching — Cache Warming, Invalidation, Stampede, Distributed Caching</a></li>
+    <li><a href="#tcp-udp">TCP vs UDP — Connection Lifecycle, Flow Control, QUIC, When to Use Each</a></li>
+  </ol>
+</nav>
+
+<main>
+
+<!-- ══════════════════════════════════════════════════════════
+     7. HTTP vs HTTPS
+══════════════════════════════════════════════════════════ -->
+<section class="topic" id="http-https">
+  <div class="topic-header">
+    <div class="num">7</div>
+    <div>
+      <h2>HTTP vs HTTPS</h2>
+      <p>Protocol internals, TLS mechanics, cipher suites, and the evolution to HTTP/2 & HTTP/3</p>
+    </div>
+  </div>
+  <div class="topic-body">
+
+    <div class="tags">
+      <span class="tag">TLS 1.3</span><span class="tag">Cipher Suites</span><span class="tag">mTLS</span>
+      <span class="tag">HTTP/2 Multiplexing</span><span class="tag">HTTP/3 / QUIC</span>
+      <span class="tag">HSTS</span><span class="tag">Certificate Pinning</span>
+    </div>
+
+    <h3>HTTP Internals — How a Request Actually Works</h3>
+    <p>HTTP is a stateless, text-based application-layer protocol running over TCP. Every interaction follows a strict request/response cycle. The raw bytes on the wire for HTTP/1.1:</p>
+
+    <pre><code><span class="cm">── Client → Server (Request) ──────────────────────────────────────</span>
+GET /api/users/42 HTTP/1.1\r\n
+Host: api.example.com\r\n
+Accept: application/json\r\n
+Authorization: Bearer eyJhbGci...\r\n
+Connection: keep-alive\r\n
+\r\n                          <span class="cm">← Blank line = end of headers</span>
+                              <span class="cm">← (no body for GET)</span>
+
+<span class="cm">── Server → Client (Response) ─────────────────────────────────────</span>
+HTTP/1.1 200 OK\r\n
+Content-Type: application/json\r\n
+Content-Length: 87\r\n
+Cache-Control: max-age=300\r\n
+X-Request-ID: abc-123\r\n
+\r\n
+{"id":42,"name":"Alice","email":"alice@example.com","role":"admin"}
+
+<span class="cm">── Problems with HTTP/1.1 ──────────────────────────────────────────</span>
+<span class="cm">Head-of-line blocking: requests queue behind a slow response</span>
+<span class="cm">No header compression: headers repeated verbatim on every request</span>
+<span class="cm">6 parallel TCP connections per origin (browser workaround)</span>
+<span class="cm">No server push: client must request every resource individually</span></code></pre>
+
+    <h3>HTTPS = HTTP + TLS — The TLS Layer</h3>
+    <p>HTTPS doesn't change HTTP at all. It wraps the entire HTTP session inside a <strong>TLS (Transport Layer Security)</strong> tunnel. TLS provides three guarantees:</p>
+    <ul>
+      <li><strong>Confidentiality:</strong> All data encrypted with symmetric keys (AES-GCM). Eavesdroppers see only ciphertext.</li>
+      <li><strong>Integrity:</strong> HMAC/AEAD ensures data wasn't modified in transit (no tampering).</li>
+      <li><strong>Authentication:</strong> X.509 certificates prove the server is who it claims to be (via PKI chain of trust).</li>
+    </ul>
+
+    <h3>TLS 1.3 Handshake — Step by Step Internals</h3>
+    <p>TLS 1.3 (RFC 8446, 2018) dramatically simplified the handshake from TLS 1.2's 2-RTT to <strong>1-RTT</strong> (and 0-RTT for resumption):</p>
+
+    <div class="diagram">
+<span class="hl">TLS 1.3 Full Handshake (1-RTT)</span>
+
+Client                                          Server
+  │                                               │
+  │──── ClientHello ─────────────────────────────►│
+  │     supported_versions: [TLS 1.3]             │
+  │     supported_groups: [x25519, P-256]         │
+  │     key_share: [x25519 public key ephemeral]  │
+  │     cipher_suites: [AES_256_GCM_SHA384, ...]  │
+  │     random: 32 bytes                          │
+  │                                               │
+  │◄─── ServerHello ──────────────────────────────│
+  │     selected_version: TLS 1.3                 │
+  │     key_share: [x25519 server public key]     │
+  │     selected_cipher: AES_256_GCM_SHA384       │
+  │     random: 32 bytes                          │
+  │                                               │
+  │     <span class="gr">← Both sides now compute shared secret via ECDH →</span>
+  │     shared_secret = x25519(client_priv, server_pub)
+  │     = x25519(server_priv, client_pub)  <span class="yw">(same result!)</span>
+  │     Derive: handshake_key, application_key (HKDF)
+  │                                               │
+  │◄─── {Certificate} ────────────────────────────│  <span class="cm">← Encrypted!</span>
+  │◄─── {CertificateVerify} ──────────────────────│  Sig over handshake
+  │◄─── {Finished} ───────────────────────────────│  HMAC of transcript
+  │                                               │
+  │──── {Finished} ─────────────────────────────►│
+  │                                               │
+  │◄═══ Encrypted Application Data (HTTP) ═══════►│  <span class="gr">← Only 1 RTT!</span>
+    </div>
+
+    <h4>Key Exchange — Elliptic Curve Diffie-Hellman (ECDH) Internals</h4>
+    <p>Neither party sends the session key over the wire. They exchange <em>public keys</em>, and each independently computes the same shared secret — a one-way mathematical operation based on elliptic curve discrete logarithm hardness:</p>
+    <pre><code><span class="cm">// x25519 ECDH — conceptually:</span>
+<span class="cm">// Curve25519: y² = x³ + 486662x² + x (mod 2²⁵⁵ - 19)</span>
+
+<span class="cm">// Client generates:</span>
+client_private = random_256bit_scalar()       <span class="cm">// Never sent!</span>
+client_public  = client_private × G           <span class="cm">// G = curve base point</span>
+
+<span class="cm">// Server generates:</span>
+server_private = random_256bit_scalar()       <span class="cm">// Never sent!</span>
+server_public  = server_private × G
+
+<span class="cm">// Exchange public keys. Both compute:</span>
+shared_secret  = client_private × server_public
+               = client_private × (server_private × G)
+               = server_private × (client_private × G)
+               = server_private × client_public
+<span class="cm">// Elliptic curve multiplication is associative → same result both sides</span>
+<span class="cm">// Attacker sees client_public + server_public but cannot compute secret</span>
+<span class="cm">// (Discrete log problem — computationally infeasible)</span>
+
+<span class="cm">// Key derivation (HKDF — HMAC-based Extract-and-Expand):</span>
+handshake_secret = HKDF-Extract(early_secret, shared_secret)
+client_handshake_key = HKDF-Expand(handshake_secret, "c hs traffic", 32)
+server_handshake_key = HKDF-Expand(handshake_secret, "s hs traffic", 32)
+application_key      = HKDF-Expand(master_secret,    "c ap traffic", 32)</code></pre>
+
+    <h4>Perfect Forward Secrecy (PFS)</h4>
+    <p>TLS 1.3 mandates ephemeral key exchange (ECDHE). The server generates a <em>new</em> private key for every handshake and discards it after. Even if an attacker records all traffic today and obtains the server's long-term private key years later, they <strong>cannot decrypt past sessions</strong> — the ephemeral keys are gone.</p>
+
+    <div class="callout danger">
+      <strong>🚨 TLS 1.2 Weakness — Why You Must Disable It</strong>
+      TLS 1.2 allowed RSA key exchange (no PFS), weak cipher suites (RC4, 3DES, CBC mode — vulnerable to BEAST, LUCKY13, POODLE attacks), and required 2-RTT handshake. Always enforce TLS 1.3 minimum. TLS 1.0/1.1 are deprecated by all major browsers since 2020.
+    </div>
+
+    <h3>X.509 Certificate Chain — How Browser Validates Server</h3>
+    <div class="diagram">
+<span class="hl">Certificate Chain of Trust</span>
+
+Browser's Trust Store (pre-installed)
+    ↓ contains
+Root CA Certificate (self-signed, e.g., DigiCert Root G1)
+    ↓ signed
+Intermediate CA Certificate (e.g., DigiCert TLS RSA SHA256 2020 CA1)
+    ↓ signed
+Server Certificate (e.g., *.example.com, valid 90 days)
+
+Browser validation steps:
+  1. Server sends: [Server Cert + Intermediate Cert]
+  2. Browser: Does server cert signature verify with Intermediate CA public key? ✓
+  3. Browser: Does Intermediate CA cert signature verify with Root CA public key? ✓
+  4. Browser: Is Root CA in trust store? ✓
+  5. Browser: Is server cert expired? (NotBefore ≤ now ≤ NotAfter) ✓
+  6. Browser: Does CN/SAN match hostname? (*.example.com matches api.example.com) ✓
+  7. Browser: Is cert revoked? (OCSP stapling / CRL check) ✓
+  → <span class="gr">Chain valid — show padlock</span>
+    </div>
+
+    <h3>Mutual TLS (mTLS) — Two-Way Authentication</h3>
+    <p>Standard TLS only authenticates the server. mTLS requires the <strong>client to also present a certificate</strong>, authenticating both parties. Used in service meshes (Istio), zero-trust networks, and B2B APIs:</p>
+    <pre><code><span class="cm">// mTLS adds steps to standard handshake:</span>
+<span class="cm">// Server sends: CertificateRequest (after ServerHello)</span>
+<span class="cm">// Client sends: its Certificate + CertificateVerify</span>
+<span class="cm">// Server validates client cert against its trusted CA list</span>
+
+<span class="cm">// Nginx mTLS config:</span>
+server {
+  ssl_client_certificate /etc/nginx/client-ca.crt; <span class="cm"># CA that signed client certs</span>
+  ssl_verify_client on;                             <span class="cm"># Require client cert</span>
+  ssl_verify_depth 2;                               <span class="cm"># Allow intermediate CAs</span>
+
+  <span class="cm"># Access client cert info in app:</span>
+  proxy_set_header X-Client-Cert-Subject $ssl_client_s_dn;
+  proxy_set_header X-Client-Cert-Fingerprint $ssl_client_fingerprint;
+}</code></pre>
+
+    <h3>HTTP/2 — Multiplexing Over a Single TCP Connection</h3>
+    <p>HTTP/2 is a <strong>binary framing protocol</strong>. It solves HTTP/1.1's head-of-line blocking by multiplexing multiple logical streams over one TCP connection:</p>
+
+    <div class="diagram">
+<span class="hl">HTTP/1.1 vs HTTP/2 — Connection Model</span>
+
+HTTP/1.1 (6 parallel TCP connections per origin):
+  TCP-1: Request A ─────────────────────────► Response A
+  TCP-2: Request B ─────────────────────────► Response B
+  TCP-3: Request C ──────(slow)──────────────────► Response C
+  TCP-4: Request D ─────────────────────────► Response D
+  <span class="ar">← Each connection has TCP overhead, TLS overhead, HOL blocking within</span>
+
+HTTP/2 (1 TCP connection, multiple streams):
+  TCP-1:
+    Stream 1: HEADERS frame → DATA frame(s)  → Response A
+    Stream 3: HEADERS frame → DATA frame(s)  → Response B
+    Stream 5: HEADERS frame ──────────────────────────────► Response C (slow, doesn't block others!)
+    Stream 7: HEADERS frame → DATA frame(s)  → Response D
+    <span class="gr">← Frames interleaved on same connection. Each stream independent.</span>
+    </div>
+
+    <h4>HTTP/2 Frame Types (Binary Protocol)</h4>
+    <pre><code><span class="cm">// HTTP/2 Frame structure (9-byte header):</span>
++-----------------------------------------------+
+|                Length (24 bits)               |
++---------------+---------------+---------------+
+|  Type (8 bit) | Flags (8 bit) |
++-+-------------+---------------+
+|R|          Stream ID (31 bit) |
++-----------------------------------------------+
+|             Frame Payload                     |
++-----------------------------------------------+
+
+<span class="cm">// Frame Types:</span>
+<span class="cm">// DATA        (0x0): HTTP body chunks</span>
+<span class="cm">// HEADERS     (0x1): HTTP headers (HPACK-compressed)</span>
+<span class="cm">// PRIORITY    (0x2): Stream dependency/weight for server prioritization</span>
+<span class="cm">// RST_STREAM  (0x3): Abort a stream without closing connection</span>
+<span class="cm">// SETTINGS    (0x4): Connection parameters (initial window size, max streams)</span>
+<span class="cm">// PUSH_PROMISE(0x5): Server push — "I'll send /style.css before you ask"</span>
+<span class="cm">// PING        (0x6): Keep-alive / RTT measurement</span>
+<span class="cm">// GOAWAY      (0x7): Graceful connection shutdown</span>
+<span class="cm">// WINDOW_UPDATE(0x8): Flow control — increase receive window</span></code></pre>
+
+    <h4>HPACK Header Compression</h4>
+    <p>HTTP/2 compresses headers using HPACK (RFC 7541). Both client and server maintain a <strong>dynamic header table</strong>. Common headers (Host, Content-Type, Authorization) are sent as 1-byte index references instead of full strings:</p>
+    <pre><code><span class="cm">// First request: send full headers, build table</span>
+:method: GET               → index 2  (static table)
+:path: /api/users          → index 5 + literal "/api/users"
+:authority: example.com    → index 1 + literal "example.com"
+authorization: Bearer xyz  → literal (added to dynamic table at index 62)
+
+<span class="cm">// Second request to same server:</span>
+:method: GET               → 0x82   (1 byte! references index 2)</span>
+:path: /api/orders         → 0x85 + "orders"</span>
+:authority: example.com    → 0x41   (1 byte! cached in dynamic table)</span>
+authorization: Bearer xyz  → 0xBE   (1 byte! cached at index 62)</span>
+<span class="cm">// Headers reduced from ~200 bytes to ~10 bytes!</span></code></pre>
+
+    <h3>HTTP/3 — HTTP over QUIC (UDP-based)</h3>
+    <p>HTTP/2 still has TCP-level head-of-line blocking: if one TCP segment is lost, <em>all</em> HTTP/2 streams stall waiting for retransmission. HTTP/3 eliminates TCP entirely, using <strong>QUIC</strong> (Quick UDP Internet Connections):</p>
+
+    <div class="diagram">
+<span class="hl">Protocol Stack Comparison</span>
+
+HTTP/1.1 &amp; HTTP/2:          HTTP/3:
+┌─────────────────┐         ┌─────────────────┐
+│  HTTP/1.1│HTTP/2│         │     HTTP/3      │
+├─────────────────┤         ├─────────────────┤
+│      TLS 1.3    │         │      QUIC       │ ← TLS 1.3 built-in!
+├─────────────────┤         ├─────────────────┤
+│       TCP       │         │       UDP       │
+├─────────────────┤         ├─────────────────┤
+│       IP        │         │       IP        │
+└─────────────────┘         └─────────────────┘
+
+QUIC advantages:
+  • 0-RTT connection on resumption (vs 3-RTT for TLS 1.2 over TCP)
+  • Independent streams — packet loss only blocks one stream, not all
+  • Connection migration: change IP (WiFi → 4G) without reconnecting
+    (QUIC uses Connection ID, not IP:port tuple like TCP)
+  • Built-in TLS 1.3 — no separate TLS handshake round trip
+    </div>
+
+    <h3>HSTS, Certificate Pinning & Other Security Headers</h3>
+    <pre><code><span class="cm">// HSTS — force HTTPS forever, prevent downgrade attacks</span>
+Strict-Transport-Security: max-age=63072000; includeSubDomains; preload
+<span class="cm">// Browser caches this. For max-age seconds, NEVER tries HTTP.
+// preload: submit to browser preload lists (hardcoded HTTPS before first visit)</span>
+
+<span class="cm">// CSP — prevent XSS by whitelisting content sources</span>
+Content-Security-Policy: default-src 'self'; script-src 'self' cdn.example.com;
+                         img-src *; object-src 'none'; upgrade-insecure-requests
+
+<span class="cm">// Certificate Transparency — all certs must be logged in public CT logs</span>
+<span class="cm">// Browsers reject certs without SCT (Signed Certificate Timestamp)</span>
+<span class="cm">// Allows domain owners to detect misissued certs within hours</span>
+
+<span class="cm">// OCSP Stapling — efficient certificate revocation check</span>
+<span class="cm">// Server fetches OCSP response (time-stamped "cert is valid" from CA)</span>
+<span class="cm">// Staples it to TLS handshake — client doesn't need to contact CA</span>
+<span class="cm">// Without stapling: every TLS connection makes an HTTP request to CA!</span></code></pre>
+
+    <div class="metrics">
+      <div class="metric-card"><div class="val">1-RTT</div><div class="lbl">TLS 1.3 Handshake</div></div>
+      <div class="metric-card"><div class="val">0-RTT</div><div class="lbl">TLS 1.3 Session Resumption</div></div>
+      <div class="metric-card"><div class="val">~90%</div><div class="lbl">Header Size Reduction (HPACK)</div></div>
+      <div class="metric-card"><div class="val">1</div><div class="lbl">TCP Connection (HTTP/2)</div></div>
+      <div class="metric-card"><div class="val">UDP</div><div class="lbl">Transport for HTTP/3</div></div>
+    </div>
+
+  </div>
+</section>
+
+
+<!-- ══════════════════════════════════════════════════════════
+     8. API GATEWAY
+══════════════════════════════════════════════════════════ -->
+<section class="topic" id="api-gateway">
+  <div class="topic-header">
+    <div class="num">8</div>
+    <div>
+      <h2>API Gateway</h2>
+      <p>The single entry point for all client traffic — authentication, routing, transformation, rate limiting & observability</p>
+    </div>
+  </div>
+  <div class="topic-body">
+
+    <div class="tags">
+      <span class="tag">Authentication</span><span class="tag">Rate Limiting</span><span class="tag">Request Routing</span>
+      <span class="tag">BFF Pattern</span><span class="tag">JWT Validation</span><span class="tag">Protocol Translation</span>
+      <span class="tag">Kong / Envoy / AWS API GW</span>
+    </div>
+
+    <h3>What an API Gateway Does — The Full Pipeline</h3>
+    <p>An API Gateway is a reverse proxy that enforces cross-cutting concerns <em>before</em> requests reach your services. Every inbound request traverses a configurable middleware pipeline:</p>
+
+    <div class="diagram">
+<span class="hl">API Gateway Request Pipeline</span>
+
+Inbound Request
+       │
+       ▼
+┌─────────────────────────────────────────────────────────┐
+│  1. TLS Termination        (decrypt HTTPS → HTTP)       │
+│  2. Request Authentication (JWT / API Key / OAuth2)     │
+│  3. Rate Limiting          (per client, per route)      │
+│  4. Request Validation     (schema validation, size)    │
+│  5. IP Allow/Deny List     (WAF rules)                  │
+│  6. Request Transformation (header inject/rewrite)      │
+│  7. Routing                (URL → backend service)      │
+│  8. Load Balancing         (select backend instance)    │
+│  9. Circuit Breaking       (fail fast if backend down)  │
+│ 10. Request Forwarding     (to backend)                 │
+│ 11. Response Transformation (rewrite, aggregate)        │
+│ 12. Response Caching       (cache GET responses)        │
+│ 13. Logging & Tracing      (access log, span inject)    │
+└─────────────────────────────────────────────────────────┘
+       │
+       ▼
+    Client Response
+    </div>
+
+    <h3>JWT Authentication — Internal Validation Flow</h3>
+    <p>JSON Web Tokens (RFC 7519) are the most common API authentication mechanism. A JWT is three Base64URL-encoded sections separated by dots:</p>
+
+    <pre><code><span class="cm">// JWT Structure: header.payload.signature</span>
+eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9          <span class="cm">← Header</span>
+.eyJzdWIiOiJ1c3IxMjMiLCJyb2xlIjoiYWRtaW4iLCJleHAiOjE3MDA=  <span class="cm">← Payload</span>
+.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c  <span class="cm">← Signature</span>
+
+<span class="cm">// Decoded Header:</span>
+{ "alg": "RS256", "typ": "JWT", "kid": "key-id-2024" }
+
+<span class="cm">// Decoded Payload (claims):</span>
+{
+  "sub": "usr123",          <span class="cm">// Subject — user ID</span>
+  "iss": "auth.example.com",<span class="cm">// Issuer</span>
+  "aud": "api.example.com", <span class="cm">// Audience — intended recipient</span>
+  "exp": 1700000000,        <span class="cm">// Expiry (Unix timestamp)</span>
+  "iat": 1699996400,        <span class="cm">// Issued At</span>
+  "jti": "uuid-abc-123",    <span class="cm">// JWT ID — for replay prevention</span>
+  "role": "admin",
+  "scope": "read:users write:orders"
+}
+
+<span class="cm">// Signature (RS256 = RSA + SHA-256):</span>
+signature = RSA_Sign(
+  private_key,
+  SHA256(base64url(header) + "." + base64url(payload))
+)
+
+<span class="cm">// API Gateway validation (NO database call needed!):</span>
+<span class="kw">async function</span> <span class="fn">validateJWT</span>(token) {
+  <span class="kw">const</span> [headerB64, payloadB64, sigB64] = token.<span class="fn">split</span>(<span class="str">'.'</span>);
+  <span class="kw">const</span> header = <span class="fn">JSON.parse</span>(<span class="fn">base64UrlDecode</span>(headerB64));
+
+  <span class="cm">// Fetch public key from JWKS endpoint (cached!)</span>
+  <span class="kw">const</span> publicKey = <span class="kw">await</span> jwksCache.<span class="fn">getKey</span>(header.kid);
+
+  <span class="cm">// 1. Verify signature (cryptographic)</span>
+  <span class="kw">const</span> valid = RSA_Verify(publicKey, sigB64, <span class="str">`${headerB64}.${payloadB64}`</span>);
+  <span class="kw">if</span> (!valid) <span class="kw">throw</span> <span class="kw">new</span> Error(<span class="str">'Invalid signature'</span>);
+
+  <span class="kw">const</span> payload = <span class="fn">JSON.parse</span>(<span class="fn">base64UrlDecode</span>(payloadB64));
+
+  <span class="cm">// 2. Validate claims</span>
+  <span class="kw">if</span> (payload.exp &lt; Date.<span class="fn">now</span>() / <span class="nm">1000</span>) <span class="kw">throw</span> <span class="kw">new</span> Error(<span class="str">'Token expired'</span>);
+  <span class="kw">if</span> (payload.iss !== <span class="str">'auth.example.com'</span>) <span class="kw">throw</span> <span class="kw">new</span> Error(<span class="str">'Wrong issuer'</span>);
+  <span class="kw">if</span> (payload.aud !== <span class="str">'api.example.com'</span>)  <span class="kw">throw</span> <span class="kw">new</span> Error(<span class="str">'Wrong audience'</span>);
+
+  <span class="kw">return</span> payload; <span class="cm">// Trust established — no DB lookup needed!</span>
+}</code></pre>
+
+    <h3>Rate Limiting Algorithms — In Depth</h3>
+
+    <h4>Sliding Window Log Algorithm</h4>
+    <pre><code><span class="cm">// Stores timestamp of every request in a sorted set (Redis ZSET)</span>
+<span class="kw">async function</span> <span class="fn">slidingWindowLog</span>(clientId, limit, windowMs) {
+  <span class="kw">const</span> key = <span class="str">`rl:${clientId}`</span>;
+  <span class="kw">const</span> now = Date.<span class="fn">now</span>();
+  <span class="kw">const</span> windowStart = now - windowMs;
+
+  <span class="cm">// Atomic Redis operations via pipeline:</span>
+  <span class="kw">await</span> redis.<span class="fn">pipeline</span>()
+    .<span class="fn">zremrangebyscore</span>(key, <span class="nm">0</span>, windowStart)   <span class="cm">// Remove expired timestamps</span>
+    .<span class="fn">zadd</span>(key, now, <span class="str">`${now}-${uuid()}`</span>)      <span class="cm">// Add current request</span>
+    .<span class="fn">expire</span>(key, windowMs / <span class="nm">1000</span>)             <span class="cm">// Auto-cleanup</span>
+    .<span class="fn">exec</span>();
+
+  <span class="kw">const</span> count = <span class="kw">await</span> redis.<span class="fn">zcard</span>(key);       <span class="cm">// Count in window</span>
+
+  <span class="kw">if</span> (count > limit) {
+    <span class="kw">const</span> oldest = <span class="kw">await</span> redis.<span class="fn">zrange</span>(key, <span class="nm">0</span>, <span class="nm">0</span>, <span class="str">'WITHSCORES'</span>);
+    <span class="kw">const</span> retryAfter = (oldest[<span class="nm">1</span>] + windowMs - now) / <span class="nm">1000</span>;
+    <span class="kw">throw</span> { status: <span class="nm">429</span>, retryAfter }; <span class="cm">// HTTP 429 Too Many Requests</span>
+  }
+  <span class="cm">// Accurate but high memory — stores every request timestamp</span>
+}</code></pre>
+
+    <h4>Sliding Window Counter (Memory Efficient)</h4>
+    <pre><code><span class="cm">// Approximates sliding window using two fixed-window counters:</span>
+<span class="cm">// current_window_count + (previous_window_count × overlap_ratio)</span>
+
+<span class="kw">function</span> <span class="fn">slidingWindowCounter</span>(clientId, limit, windowSec) {
+  <span class="kw">const</span> now = Math.<span class="fn">floor</span>(Date.<span class="fn">now</span>() / <span class="nm">1000</span>);
+  <span class="kw">const</span> currWindow = Math.<span class="fn">floor</span>(now / windowSec);   <span class="cm">// Current minute bucket</span>
+  <span class="kw">const</span> prevWindow = currWindow - <span class="nm">1</span>;               <span class="cm">// Previous minute bucket</span>
+  <span class="kw">const</span> elapsed = now % windowSec;                  <span class="cm">// Seconds into current window</span>
+  <span class="kw">const</span> overlap = <span class="nm">1</span> - (elapsed / windowSec);       <span class="cm">// Fraction of prev window in range</span>
+
+  <span class="kw">const</span> prevCount = <span class="kw">await</span> redis.<span class="fn">get</span>(<span class="str">`rl:${clientId}:${prevWindow}`</span>) || <span class="nm">0</span>;
+  <span class="kw">const</span> currCount = <span class="kw">await</span> redis.<span class="fn">incr</span>(<span class="str">`rl:${clientId}:${currWindow}`</span>);
+
+  <span class="kw">const</span> estimated = prevCount * overlap + currCount;
+  <span class="kw">return</span> estimated > limit; <span class="cm">// true = rate limited</span>
+  <span class="cm">// Only 2 integers in Redis vs. N timestamps. ~99% accurate.</span>
+}</code></pre>
+
+    <h3>Request Routing Strategies</h3>
+    <table>
+      <tr><th>Routing Type</th><th>Mechanism</th><th>Example</th></tr>
+      <tr><td><strong>Path-based</strong></td><td>URL prefix match</td><td><code>/api/users/*</code> → UserService, <code>/api/orders/*</code> → OrderService</td></tr>
+      <tr><td><strong>Header-based</strong></td><td>Match on request header value</td><td><code>X-Version: v2</code> → v2 backend cluster</td></tr>
+      <tr><td><strong>Method-based</strong></td><td>HTTP verb routing</td><td>GET → read replicas, POST/PUT → primary</td></tr>
+      <tr><td><strong>Canary routing</strong></td><td>Weighted % split</td><td>5% → new version, 95% → stable</td></tr>
+      <tr><td><strong>User-segment routing</strong></td><td>Cookie / claim-based</td><td>beta_user=true → beta backend</td></tr>
+      <tr><td><strong>Geo-routing</strong></td><td>Client IP geolocation</td><td>EU requests → EU region backend</td></tr>
+    </table>
+
+    <h3>BFF Pattern (Backend for Frontend)</h3>
+    <p>A BFF is a specialized API Gateway layer — one BFF per client type (mobile, web, TV). Instead of general-purpose APIs that over-fetch or under-fetch, each BFF aggregates exactly the data each client needs:</p>
+
+    <div class="diagram">
+<span class="hl">BFF Architecture</span>
+
+                    ┌─────────────────┐
+Mobile App ────────►│   Mobile BFF    │──┐
+                    │ (small payload) │  │
+                    └─────────────────┘  │  ┌─────────────┐
+                                         ├─►│ UserService │
+                    ┌─────────────────┐  │  └─────────────┘
+Web Browser ───────►│    Web BFF      │──┤  ┌──────────────┐
+                    │(rich data/SSR)  │  ├─►│ OrderService │
+                    └─────────────────┘  │  └──────────────┘
+                                         │  ┌──────────────┐
+                    ┌─────────────────┐  └─►│ProductService│
+3rd Party API ─────►│  Public API GW  │     └──────────────┘
+                    │(versioned, docs)│
+                    └─────────────────┘
+
+Mobile BFF: fetches User + Orders + Products → combines → 1 response
+  Avoids 3 separate round-trips from mobile (high latency, battery drain)
+    </div>
+
+    <h3>API Gateway vs. Service Mesh — When to Use Each</h3>
+    <table>
+      <tr><th>Concern</th><th>API Gateway</th><th>Service Mesh (Istio/Envoy)</th></tr>
+      <tr><td>Traffic direction</td><td>North-South (external → internal)</td><td>East-West (service ↔ service)</td></tr>
+      <tr><td>Authentication</td><td>JWT, API keys, OAuth2</td><td>mTLS (certificate-based)</td></tr>
+      <tr><td>Rate limiting</td><td>Per-client, business-level</td><td>Per-service, infrastructure-level</td></tr>
+      <tr><td>Observability</td><td>Access logs, per-API metrics</td><td>Distributed tracing, mesh topology</td></tr>
+      <tr><td>Configuration</td><td>Centralized (Kong Admin API)</td><td>Declarative CRDs (Kubernetes)</td></tr>
+      <tr><td>Use together?</td><td colspan="2">Yes — API GW at edge, Service Mesh for internal comms</td></tr>
+    </table>
+
+  </div>
+</section>
+
+
+<!-- ══════════════════════════════════════════════════════════
+     9. CIRCUIT BREAKER
+══════════════════════════════════════════════════════════ -->
+<section class="topic" id="circuit-breaker">
+  <div class="topic-header">
+    <div class="num">9</div>
+    <div>
+      <h2>Circuit Breaker</h2>
+      <p>Preventing cascading failures by automatically detecting and isolating failing dependencies</p>
+    </div>
+  </div>
+  <div class="topic-body">
+
+    <div class="tags">
+      <span class="tag">State Machine</span><span class="tag">Sliding Window</span><span class="tag">Hystrix</span>
+      <span class="tag">Resilience4j</span><span class="tag">Half-Open Probing</span><span class="tag">Fallback Strategy</span>
+    </div>
+
+    <h3>Why Circuit Breakers Exist — The Cascading Failure Problem</h3>
+    <p>Without a circuit breaker, a slow downstream service causes threads/connections to pile up waiting. This exhausts the thread pool of the caller, making it slow too, causing <em>its</em> callers to pile up — a cascading failure that takes down the entire system:</p>
+
+    <div class="diagram">
+<span class="hl">Cascading Failure Without Circuit Breaker</span>
+
+PaymentService DB is slow (800ms per query instead of 10ms)
+       │
+       ▼
+PaymentService threads fill up (all waiting for DB)
+PaymentService response time: 800ms+ → timeouts
+       │
+       ▼
+OrderService threads fill up (all waiting for PaymentService)
+OrderService response time: 800ms+ → timeouts
+       │
+       ▼
+API Gateway connection pool exhausted
+All requests to entire platform timeout
+       │
+       ▼
+<span class="ar">💥 Total outage — one slow DB brought down everything</span>
+
+<span class="gr">With Circuit Breaker:</span>
+After threshold failures → Circuit OPENS
+OrderService gets instant error (0ms) → returns fallback response
+PaymentService gets breathing room to recover
+OrderService degraded (no payment) but operational ✓
+    </div>
+
+    <h3>Circuit Breaker State Machine — Deep Dive</h3>
+
+    <h4>Count-Based Sliding Window</h4>
+    <pre><code><span class="kw">class</span> <span class="cls">CircuitBreaker</span> {
+  <span class="kw">constructor</span>(config) {
+    <span class="kw">this</span>.state = <span class="str">'CLOSED'</span>;
+
+    <span class="cm">// Sliding window: ring buffer of last N call outcomes</span>
+    <span class="kw">this</span>.window = <span class="kw">new</span> <span class="cls">RingBuffer</span>(config.windowSize);  <span class="cm">// e.g., 100 calls</span>
+    <span class="kw">this</span>.failureRateThreshold = config.failureRateThreshold; <span class="cm">// e.g., 50%</span>
+    <span class="kw">this</span>.slowCallRateThreshold = config.slowCallRateThreshold; <span class="cm">// e.g., 80%</span>
+    <span class="kw">this</span>.slowCallDurationThreshold = config.slowCallDuration; <span class="cm">// e.g., 2000ms</span>
+    <span class="kw">this</span>.waitDurationInOpenState = config.waitDuration; <span class="cm">// e.g., 30s</span>
+    <span class="kw">this</span>.permittedCallsInHalfOpen = config.halfOpenCalls; <span class="cm">// e.g., 5</span>
+    <span class="kw">this</span>.minimumCalls = config.minimumCalls; <span class="cm">// e.g., 10 (don't open on 1 failure)</span>
+
+    <span class="kw">this</span>.halfOpenCallCount = <span class="nm">0</span>;
+    <span class="kw">this</span>.openedAt = <span class="kw">null</span>;
+  }
+
+  <span class="kw">async</span> <span class="fn">execute</span>(fn, fallback) {
+    <span class="kw">switch</span> (<span class="kw">this</span>.state) {
+      <span class="kw">case</span> <span class="str">'OPEN'</span>:
+        <span class="kw">if</span> (Date.<span class="fn">now</span>() - <span class="kw">this</span>.openedAt > <span class="kw">this</span>.waitDurationInOpenState) {
+          <span class="kw">this</span>.<span class="fn">transitionTo</span>(<span class="str">'HALF_OPEN'</span>);
+        } <span class="kw">else</span> {
+          <span class="kw">return</span> fallback ? <span class="fn">fallback</span>() : <span class="kw">Promise</span>.<span class="fn">reject</span>(<span class="kw">new</span> Error(<span class="str">'Circuit OPEN'</span>));
+        }
+        <span class="cm">// fallthrough to HALF_OPEN</span>
+
+      <span class="kw">case</span> <span class="str">'HALF_OPEN'</span>:
+        <span class="kw">if</span> (<span class="kw">this</span>.halfOpenCallCount >= <span class="kw">this</span>.permittedCallsInHalfOpen) {
+          <span class="kw">return</span> fallback ? <span class="fn">fallback</span>() : <span class="kw">Promise</span>.<span class="fn">reject</span>(<span class="kw">new</span> Error(<span class="str">'Circuit HALF_OPEN full'</span>));
+        }
+        <span class="kw">this</span>.halfOpenCallCount++;
+        <span class="kw">break</span>;
+
+      <span class="kw">case</span> <span class="str">'CLOSED'</span>: <span class="kw">break</span>;
+    }
+
+    <span class="kw">const</span> start = Date.<span class="fn">now</span>();
+    <span class="kw">try</span> {
+      <span class="kw">const</span> result = <span class="kw">await</span> <span class="fn">fn</span>();
+      <span class="kw">this</span>.<span class="fn">recordSuccess</span>(Date.<span class="fn">now</span>() - start);
+      <span class="kw">return</span> result;
+    } <span class="kw">catch</span> (err) {
+      <span class="kw">this</span>.<span class="fn">recordFailure</span>(Date.<span class="fn">now</span>() - start);
+      <span class="kw">throw</span> err;
+    }
+  }
+
+  <span class="fn">recordSuccess</span>(duration) {
+    <span class="kw">const</span> isSlow = duration > <span class="kw">this</span>.slowCallDurationThreshold;
+    <span class="kw">this</span>.window.<span class="fn">push</span>({ success: !isSlow, slow: isSlow });
+    <span class="kw">this</span>.<span class="fn">evaluate</span>();
+  }
+
+  <span class="fn">recordFailure</span>(duration) {
+    <span class="kw">this</span>.window.<span class="fn">push</span>({ success: <span class="kw">false</span>, slow: <span class="kw">false</span> });
+    <span class="kw">this</span>.<span class="fn">evaluate</span>();
+  }
+
+  <span class="fn">evaluate</span>() {
+    <span class="kw">if</span> (<span class="kw">this</span>.window.size() &lt; <span class="kw">this</span>.minimumCalls) <span class="kw">return</span>; <span class="cm">// Not enough data</span>
+
+    <span class="kw">const</span> stats = <span class="kw">this</span>.window.<span class="fn">stats</span>();
+    <span class="kw">const</span> failureRate = stats.failures / stats.total * <span class="nm">100</span>;
+    <span class="kw">const</span> slowRate    = stats.slow / stats.total * <span class="nm">100</span>;
+
+    <span class="kw">if</span> (<span class="kw">this</span>.state === <span class="str">'HALF_OPEN'</span>) {
+      <span class="kw">if</span> (failureRate > <span class="kw">this</span>.failureRateThreshold || slowRate > <span class="kw">this</span>.slowCallRateThreshold) {
+        <span class="kw">this</span>.<span class="fn">transitionTo</span>(<span class="str">'OPEN'</span>);   <span class="cm">// Still failing — reopen</span>
+      } <span class="kw">else if</span> (<span class="kw">this</span>.halfOpenCallCount >= <span class="kw">this</span>.permittedCallsInHalfOpen) {
+        <span class="kw">this</span>.<span class="fn">transitionTo</span>(<span class="str">'CLOSED'</span>); <span class="cm">// Recovered — close!</span>
+      }
+    } <span class="kw">else if</span> (<span class="kw">this</span>.state === <span class="str">'CLOSED'</span>) {
+      <span class="kw">if</span> (failureRate > <span class="kw">this</span>.failureRateThreshold || slowRate > <span class="kw">this</span>.slowCallRateThreshold) {
+        <span class="kw">this</span>.<span class="fn">transitionTo</span>(<span class="str">'OPEN'</span>);   <span class="cm">// Threshold breached — open!</span>
+      }
+    }
+  }
+
+  <span class="fn">transitionTo</span>(newState) {
+    <span class="kw">this</span>.state = newState;
+    <span class="kw">if</span> (newState === <span class="str">'OPEN'</span>)       { <span class="kw">this</span>.openedAt = Date.<span class="fn">now</span>(); <span class="kw">this</span>.window.<span class="fn">reset</span>(); }
+    <span class="kw">if</span> (newState === <span class="str">'HALF_OPEN'</span>)  { <span class="kw">this</span>.halfOpenCallCount = <span class="nm">0</span>; <span class="kw">this</span>.window.<span class="fn">reset</span>(); }
+    <span class="kw">if</span> (newState === <span class="str">'CLOSED'</span>)     { <span class="kw">this</span>.halfOpenCallCount = <span class="nm">0</span>; <span class="kw">this</span>.window.<span class="fn">reset</span>(); }
+    metrics.<span class="fn">emit</span>(<span class="str">'circuit_breaker_state'</span>, { state: newState });
+  }
+}</code></pre>
+
+    <h3>Time-Based Sliding Window (Resilience4j Default)</h3>
+    <p>Instead of counting the last N calls, track calls in the last N seconds using a circular array of per-second buckets:</p>
+    <pre><code><span class="cm">// Time-based: 10-second window with 1-second buckets</span>
+<span class="cm">// Ring buffer of 10 buckets, each accumulating 1 second of calls</span>
+
+Bucket[0]: {calls: 120, failures: 5, slow: 10}  ← 10s ago
+Bucket[1]: {calls: 115, failures: 3, slow: 8}
+...
+Bucket[9]: {calls: 130, failures: 70, slow: 90}  ← Current second
+                         ↑↑↑ Failure spike!
+
+Total window: 1200 calls, 100 failures = 8.3% failure rate
+If threshold = 5% → OPEN the circuit
+
+<span class="cm">// Advantage over count-based:</span>
+<span class="cm">// Automatically reflects recent behavior</span>
+<span class="cm">// A burst of failures 30 seconds ago doesn't keep circuit open forever</span></code></pre>
+
+    <h3>Fallback Strategies</h3>
+    <table>
+      <tr><th>Strategy</th><th>Implementation</th><th>Best For</th></tr>
+      <tr><td><strong>Static Fallback</strong></td><td>Return hardcoded/default data</td><td>Non-critical enrichment data</td></tr>
+      <tr><td><strong>Cache Fallback</strong></td><td>Return last-known-good cached response</td><td>Frequently read, slowly changing data</td></tr>
+      <tr><td><strong>Graceful Degradation</strong></td><td>Return partial response without failed component</td><td>Recommendation widgets, personalization</td></tr>
+      <tr><td><strong>Queue &amp; Retry</strong></td><td>Queue request, process when service recovers</td><td>Write operations, order placement</td></tr>
+      <tr><td><strong>Fail Fast</strong></td><td>Return immediate error to caller</td><td>Real-time payment processing</td></tr>
+    </table>
+
+    <h3>Bulkhead + Circuit Breaker Together (Defense in Depth)</h3>
+    <div class="diagram">
+<span class="hl">Resilience Layers</span>
+
+OrderService calling 3 dependencies:
+                                    ┌───────────────────┐
+                ┌─ Bulkhead(10) ──►│  Circuit Breaker  │──► PaymentService
+                │   (semaphore)     │  CLOSED/OPEN/HALF │
+OrderService ───┤                   └───────────────────┘
+                │                   ┌───────────────────┐
+                ├─ Bulkhead(5)  ──►│  Circuit Breaker  │──► InventoryService
+                │   (thread pool)   │  CLOSED           │
+                │                   └───────────────────┘
+                │                   ┌───────────────────┐
+                └─ Bulkhead(20) ──►│  Circuit Breaker  │──► NotificationService
+                    (semaphore)     │  OPEN (fast fail) │
+                                    └───────────────────┘
+
+PaymentService degrades:
+  → Its circuit opens → fast fail (0ms)
+  → Its bulkhead's 10 slots freed immediately
+  → OrderService still has capacity for Inventory + Notification calls ✓
+    </div>
+
+  </div>
+</section>
+
+
+<!-- ══════════════════════════════════════════════════════════
+     10. BANDWIDTH
+══════════════════════════════════════════════════════════ -->
+<section class="topic" id="bandwidth">
+  <div class="topic-header">
+    <div class="num">10</div>
+    <div>
+      <h2>Bandwidth</h2>
+      <p>Network capacity, throughput ceilings, latency components, queuing theory & backpressure mechanisms</p>
+    </div>
+  </div>
+  <div class="topic-body">
+
+    <div class="tags">
+      <span class="tag">Throughput vs Latency</span><span class="tag">Little's Law</span><span class="tag">TCP Congestion Control</span>
+      <span class="tag">Backpressure</span><span class="tag">Queuing Theory</span><span class="tag">Bandwidth Estimation</span>
+    </div>
+
+    <h3>Bandwidth vs. Throughput vs. Latency — Precise Definitions</h3>
+
+    <div class="two-col">
+      <div class="col-card">
+        <h5>Bandwidth</h5>
+        <ul>
+          <li>Maximum theoretical data transfer rate of a link</li>
+          <li>A physical/layer-2 property of the medium</li>
+          <li>Measured in bits per second (Mbps, Gbps)</li>
+          <li>Example: 1 Gbps Ethernet NIC</li>
+          <li>You can never exceed this — it's the pipe diameter</li>
+        </ul>
+      </div>
+      <div class="col-card">
+        <h5>Throughput</h5>
+        <ul>
+          <li>Actual data successfully transferred per unit time</li>
+          <li>Always ≤ bandwidth (overhead, retransmissions, protocol headers)</li>
+          <li>Affected by: packet loss, RTT, congestion, CPU limits</li>
+          <li>Example: 800 Mbps on a 1 Gbps link</li>
+          <li>This is what your application actually gets</li>
+        </ul>
+      </div>
+    </div>
+
+    <h4>Latency Components — Where Time Is Spent</h4>
+    <pre><code><span class="cm">Total Request Latency = Σ of all these components:</span>
+
+<span class="nm">1.</span> Propagation Delay   = distance / (speed_of_light × 0.66)
+                       <span class="cm">// Fiber: ~66% of light speed</span>
+                       <span class="cm">// NYC → London (5570km): 5570000 / (3×10⁸×0.66) ≈ 28ms one-way</span>
+
+<span class="nm">2.</span> Transmission Delay  = packet_size / link_bandwidth
+                       <span class="cm">// 1500 byte MTU / 1Gbps = 12 microseconds</span>
+
+<span class="nm">3.</span> Processing Delay    = time to process packet at each hop (router lookup, NAT)
+                       <span class="cm">// Typically 1-10 microseconds per router</span>
+
+<span class="nm">4.</span> Queuing Delay       = time packet waits in router buffer
+                       <span class="cm">// 0 when uncongested, can be 100s of ms when congested!</span>
+                       <span class="cm">// Bufferbloat: oversized router buffers cause enormous queuing delays</span>
+
+<span class="nm">5.</span> TLS Handshake       = 1 RTT (TLS 1.3) or 2 RTT (TLS 1.2)
+<span class="nm">6.</span> DNS Resolution      = 0-200ms (depends on TTL, cache hit rate)
+<span class="nm">7.</span> TCP Slow Start      = initial cwnd=10 segments, grows per RTT
+<span class="nm">8.</span> Server Processing   = time to execute application code, query DB</code></pre>
+
+    <h3>TCP Congestion Control — The Bandwidth Manager</h3>
+    <p>TCP automatically throttles transmission rate based on network congestion signals. Understanding this is critical for optimizing high-throughput services:</p>
+
+    <pre><code><span class="cm">// TCP Congestion Window (cwnd) controls in-flight bytes</span>
+<span class="cm">// Throughput = cwnd / RTT  (simplified)</span>
+
+<span class="cm">// Phase 1: Slow Start</span>
+cwnd = 10 segments (initial window — IW10 since RFC 6928)
+<span class="kw">for each</span> ACK received:
+  cwnd += 1 MSS    <span class="cm">// Exponential growth! Doubles each RTT</span>
+  <span class="cm">// RTT 1: 10→20, RTT 2: 20→40, RTT 3: 40→80...</span>
+
+<span class="cm">// When cwnd reaches ssthresh (slow start threshold):</span>
+<span class="cm">// Phase 2: Congestion Avoidance</span>
+<span class="kw">for each</span> RTT:
+  cwnd += 1 MSS    <span class="cm">// Linear growth (additive increase)</span>
+
+<span class="cm">// Congestion detected (packet loss or ECN signal):</span>
+<span class="cm">// Cubic (Linux default since 3.2) vs Reno (classic):</span>
+
+<span class="cm">// Reno on loss:</span>
+ssthresh = cwnd / 2
+cwnd     = ssthresh    <span class="cm">// Cut in half (multiplicative decrease)</span>
+
+<span class="cm">// CUBIC on loss (more aggressive recovery):</span>
+ssthresh = cwnd × 0.7  <span class="cm">// Only reduce to 70%</span>
+cwnd     = ssthresh
+<span class="cm">// CUBIC follows a cubic function of time since last loss</span>
+<span class="cm">// Faster recovery, better utilization on high-BDP links</span>
+
+<span class="cm">// BBR (Bottleneck Bandwidth and RTT) — Google's algorithm:</span>
+<span class="cm">// Doesn't rely on packet loss as signal (loss = buffer full, too late!)</span>
+<span class="cm">// Continuously probes for actual bottleneck bandwidth and min RTT</span>
+<span class="cm">// Sets cwnd = BDP (Bandwidth-Delay Product)</span>
+BDP = bottleneck_bandwidth × min_RTT
+<span class="cm">// Result: maximizes throughput with minimal queuing delay</span></code></pre>
+
+    <h3>Queuing Theory — M/M/1 Queue Model</h3>
+    <p>Queuing theory predicts system behavior under load. The M/M/1 model (Markovian arrivals, Markovian service, 1 server) is the foundation:</p>
+
+    <pre><code><span class="cm">// Key variables:</span>
+λ (lambda) = arrival rate (requests/second)
+μ (mu)     = service rate (requests/second a single server can handle)
+ρ (rho)    = utilization = λ/μ  (must be &lt; 1 for stable queue)
+
+<span class="cm">// Key formulas:</span>
+Average queue length:   Lq = ρ² / (1 - ρ)
+Average wait time:      Wq = ρ / (μ × (1 - ρ))
+Average response time:  W  = 1 / (μ - λ)   ← Little's Law form
+
+<span class="cm">// CRITICAL INSIGHT — the hockey stick effect:</span>
+<span class="cm">// ρ=0.5 → Wq = 0.5/(μ×0.5) = 1/μ        (1× service time wait)</span>
+<span class="cm">// ρ=0.8 → Wq = 0.8/(μ×0.2) = 4/μ        (4× service time wait!)</span>
+<span class="cm">// ρ=0.9 → Wq = 0.9/(μ×0.1) = 9/μ        (9× service time wait!)</span>
+<span class="cm">// ρ=0.95→ Wq = 0.95/(μ×0.05)= 19/μ      (19× service time wait!)</span>
+
+<span class="cm">// Never design systems to operate above 70% utilization in production!</span>
+<span class="cm">// The latency cliff is steep and response time becomes unpredictable</span></code></pre>
+
+    <div class="callout warn">
+      <strong>⚠️ Little's Law — Universal Throughput Formula</strong>
+      <strong>L = λ × W</strong> (Average items in system = arrival rate × average time in system)<br/>
+      Example: 100 req/s arrive, average response time 200ms → 100 × 0.2 = 20 concurrent requests in flight at any moment. To handle 1000 req/s with 200ms response time, you need 1000 × 0.2 = 200 concurrent request slots (threads, async tasks, or goroutines).
+    </div>
+
+    <h3>Backpressure — Handling Overload Gracefully</h3>
+    <p>When a consumer can't keep up with a producer, backpressure signals upstream to slow down rather than buffering indefinitely (which causes latency blowup and memory exhaustion):</p>
+    <pre><code><span class="cm">// Without backpressure: producer fills unbounded queue → OOM or massive latency</span>
+<span class="cm">// With backpressure: producer slows to match consumer rate</span>
+
+<span class="cm">// TCP backpressure: built-in (receive window)</span>
+<span class="cm">// When app doesn't read from socket, OS receive buffer fills</span>
+<span class="cm">// TCP receiver advertises window=0 → sender must stop</span>
+<span class="cm">// → Natural backpressure from DB all the way to client!</span>
+
+<span class="cm">// Application-level backpressure (e.g., Reactive Streams / Project Reactor):</span>
+<span class="kw">const</span> stream = producer
+  .<span class="fn">pipe</span>(
+    <span class="fn">bufferCount</span>(<span class="nm">100</span>),        <span class="cm">// Buffer up to 100 items</span>
+    <span class="fn">concatMap</span>(batch =>       <span class="cm">// Process 1 batch at a time</span>
+      consumer.<span class="fn">processBatch</span>(batch)
+    ),
+    <span class="fn">onBackpressureDrop</span>()     <span class="cm">// If still too fast: drop oldest items</span>
+  );
+
+<span class="cm">// Kafka backpressure:</span>
+<span class="cm">// Consumer poll loop naturally throttles producer</span>
+<span class="cm">// Consumer lag (topic offset - committed offset) = backpressure metric</span>
+<span class="cm">// Consumer group lag > threshold → alert → scale out consumers</span></code></pre>
+
+    <h3>Bandwidth Planning — Practical Calculations</h3>
+    <pre><code><span class="cm">// Example: Design a video streaming service for 1M concurrent users</span>
+
+<span class="cm">// Video bitrates:</span>
+<span class="cm">// 480p:  1.5 Mbps, 720p: 3 Mbps, 1080p: 8 Mbps, 4K: 25 Mbps</span>
+<span class="cm">// Assume average: 3 Mbps (720p)</span>
+
+total_bandwidth = 1,000,000 users × 3 Mbps = 3,000 Gbps = 3 Tbps
+
+<span class="cm">// No single data center can handle 3 Tbps outbound!</span>
+<span class="cm">// Solution: CDN with 100+ PoPs worldwide</span>
+<span class="cm">// Each PoP handles regional traffic: ~30 Gbps average per PoP</span>
+<span class="cm">// Origin bandwidth (CDN cache miss rate ~1%): 30 Gbps</span>
+
+<span class="cm">// Cost estimation (egress pricing ~$0.08/GB AWS CloudFront):</span>
+monthly_data = 1M users × 2hr/day × 3600s × 3Mbps / 8 / 1e9 GB × 30 days
+             = 1M × 7200 × 3,000,000 / 8 / 1e9 × 30
+             ≈ 81,000 TB/month = 81 PB/month
+monthly_cost = 81,000,000 GB × $0.008/GB  <span class="cm">// Volume discount tier</span>
+             ≈ $648,000/month</code></pre>
+
+  </div>
+</section>
+
+
+<!-- ══════════════════════════════════════════════════════════
+     11. CDN
+══════════════════════════════════════════════════════════ -->
+<section class="topic" id="cdn">
+  <div class="topic-header">
+    <div class="num">11</div>
+    <div>
+      <h2>CDN & CDN Caching</h2>
+      <p>Global edge infrastructure, PoP architecture, cache hierarchy, origin shield & cache purge strategies</p>
+    </div>
+  </div>
+  <div class="topic-body">
+
+    <div class="tags">
+      <span class="tag">PoP / Edge Node</span><span class="tag">Anycast Routing</span><span class="tag">Origin Shield</span>
+      <span class="tag">Cache-Control Headers</span><span class="tag">Surrogate Keys</span><span class="tag">Stale-While-Revalidate</span>
+    </div>
+
+    <h3>CDN Architecture — How Traffic Reaches the Nearest Edge</h3>
+    <p>A CDN operates a global network of <strong>Points of Presence (PoPs)</strong> — data centers in 30–300+ cities. Traffic is routed to the nearest PoP via <strong>Anycast BGP</strong>: multiple PoPs announce the same IP prefix, and BGP's shortest-path routing selects the topographically closest one.</p>
+
+    <div class="diagram">
+<span class="hl">CDN Global Architecture</span>
+
+                        ┌─────────────────────────────────┐
+                        │     Origin Server (US-EAST)      │
+                        │     origin.example.com           │
+                        └──────────────┬──────────────────┘
+                                       │ Origin Shield (optional)
+                                       │ ┌──────────────────┐
+                                       └►│ Shield PoP (IAD) │ ← All edge misses funnel here
+                                         └───────┬──────────┘
+                          ┌────────────────┬──────┘
+              ┌───────────▼──┐  ┌──────────▼──────┐  ┌────────────────┐
+              │  PoP: LHR    │  │   PoP: NRT      │  │   PoP: SIN     │
+              │  (London)    │  │   (Tokyo)       │  │  (Singapore)   │
+              │  ~50 servers │  │   ~80 servers   │  │  ~40 servers   │
+              └──────┬───────┘  └────────┬────────┘  └───────┬────────┘
+                     │                   │                    │
+              UK Users                Japan Users        SEA Users
+              (5ms RTT)               (3ms RTT)          (4ms RTT)
+    </div>
+
+    <h3>CDN Request Lifecycle — Internals</h3>
+    <ol class="steps">
+      <li><strong>DNS Resolution:</strong> Browser resolves <code>cdn.example.com</code>. CDN's authoritative DNS (e.g., Route 53, NS1) uses ECS (EDNS Client Subnet) to detect user's region and returns nearest PoP IP via Anycast.</li>
+      <li><strong>TCP + TLS to Edge:</strong> Connection goes to nearest PoP (3–30ms). PoP terminates TLS using certificates stored at edge (no round-trip to origin for TLS).</li>
+      <li><strong>Cache Lookup:</strong> Edge node checks local in-memory cache (L1) → disk cache (L2) → peer PoP cache (L3, via internal network) → origin shield → origin.</li>
+      <li><strong>Cache HIT:</strong> Response served directly from edge. Typical: 2–15ms total. Sets <code>Age</code> header = time since cached.</li>
+      <li><strong>Cache MISS:</strong> Edge makes request to origin (or shield). Caches response per Cache-Control headers. Returns to user. Sets <code>X-Cache: MISS</code>.</li>
+      <li><strong>Stale Response:</strong> If TTL expired but origin unreachable, serve stale + background revalidation (stale-while-revalidate).</li>
+    </ol>
+
+    <h3>Cache-Control Headers — The CDN's Instructions</h3>
+    <pre><code><span class="cm">// Origin response headers controlling CDN behavior:</span>
+
+<span class="cm">// Cache publicly for 1 hour, must revalidate after</span>
+Cache-Control: public, max-age=3600, s-maxage=86400
+<span class="cm">// max-age=3600    → browser cache TTL (1 hour)</span>
+<span class="cm">// s-maxage=86400  → CDN/shared cache TTL (24 hours) — overrides max-age for CDN</span>
+
+<span class="cm">// Serve stale content while revalidating in background</span>
+Cache-Control: public, max-age=60, stale-while-revalidate=3600
+<span class="cm">// For 60s: serve fresh cached response</span>
+<span class="cm">// 60–3660s: serve STALE response immediately + revalidate in background</span>
+<span class="cm">// User gets instant response, content refreshes eventually</span>
+
+<span class="cm">// Serve stale if origin is down (error tolerance)</span>
+Cache-Control: public, max-age=300, stale-if-error=86400
+<span class="cm">// If origin returns 5xx or times out: serve up to 24h old cached response</span>
+
+<span class="cm">// Vary header: cache different versions based on request header</span>
+Vary: Accept-Encoding
+<span class="cm">// CDN caches separate copies for gzip vs brotli vs identity</span>
+Vary: Accept-Language
+<span class="cm">// CDN caches separate copies per language — avoid Vary: * (disables caching!)</span>
+
+<span class="cm">// ETag-based conditional caching:</span>
+ETag: "abc123hash"
+<span class="cm">// Client sends: If-None-Match: "abc123hash"</span>
+<span class="cm">// Origin: 304 Not Modified (no body) if unchanged</span>
+<span class="cm">// CDN refreshes TTL without re-fetching body — bandwidth saving</span></code></pre>
+
+    <h3>Origin Shield — The Collapse Pattern</h3>
+    <p>Without origin shield, a cache miss in Paris, Tokyo, and Sydney simultaneously sends 3 requests to the origin. With shield, all PoPs first check a designated "shield" PoP. Only the shield ever contacts the origin, collapsing N parallel origin requests to 1:</p>
+    <pre><code><span class="cm">// Without origin shield (thundering herd on origin):</span>
+Tokyo   → MISS → Origin (request 1)  ←──┐
+London  → MISS → Origin (request 2)  ←──┤ Same object!
+Sydney  → MISS → Origin (request 3)  ←──┘ 3 origin hits
+
+<span class="cm">// With origin shield (request collapsing):</span>
+Tokyo  → MISS → Shield PoP → Origin (request 1)  ← Only 1 origin hit!
+London → MISS → Shield PoP → (waits for inflight request)
+Sydney → MISS → Shield PoP → (waits for inflight request)
+<span class="cm">// All 3 get response from 1 origin fetch — "request coalescing"</span></code></pre>
+
+    <h3>Cache Invalidation at CDN Scale</h3>
+
+    <h4>URL-Based Purge</h4>
+    <pre><code><span class="cm">// Cloudflare API purge (single URL)</span>
+curl -X POST https://api.cloudflare.com/client/v4/zones/{zone_id}/purge_cache \
+  -H "Authorization: Bearer {token}" \
+  -H "Content-Type: application/json" \
+  -d '{"files":["https://example.com/api/products/123"]}'
+
+<span class="cm">// Problem: if you have 1M product pages, purging each URL is impractical</span></code></pre>
+
+    <h4>Surrogate Keys / Cache Tags (The Scalable Solution)</h4>
+    <p>Fastly, Cloudflare, and Varnish support tagging cached objects with multiple keys. A single purge call invalidates all objects sharing a tag:</p>
+    <pre><code><span class="cm">// Origin response: tag all pages that contain product #123</span>
+Surrogate-Key: product-123 category-electronics homepage-featured
+<span class="cm">// or Cloudflare uses: Cache-Tag header</span>
+
+<span class="cm">// Product #123 price changes → purge by tag:</span>
+curl -X POST .../purge_cache \
+  -d '{"tags":["product-123"]}'
+
+<span class="cm">// Instantly invalidates:</span>
+<span class="cm">// - /products/123 (product page)</span>
+<span class="cm">// - /category/electronics (listing page)</span>
+<span class="cm">// - /api/search?q=product123 (search results)</span>
+<span class="cm">// - /homepage (featured product section)</span>
+<span class="cm">// All with ONE API call across ALL global PoPs!</span></code></pre>
+
+    <h3>Dynamic Content at the Edge — Edge Computing</h3>
+    <p>Modern CDNs run code at edge nodes (Cloudflare Workers, Lambda@Edge, Fastly Compute@Edge), enabling logic that was once only possible at origin:</p>
+    <pre><code><span class="cm">// Cloudflare Worker: A/B testing at the edge (no origin round-trip!)</span>
+<span class="at">addEventListener</span>(<span class="str">'fetch'</span>, event => {
+  event.<span class="fn">respondWith</span>(<span class="fn">handleRequest</span>(event.request));
+});
+
+<span class="kw">async function</span> <span class="fn">handleRequest</span>(request) {
+  <span class="kw">const</span> cookie = request.headers.<span class="fn">get</span>(<span class="str">'Cookie'</span>) || <span class="str">''</span>;
+
+  <span class="cm">// Assign variant (sticky via cookie)</span>
+  <span class="kw">let</span> variant = cookie.<span class="fn">match</span>(<span class="str">/ab_variant=(\w+)/</span>)?.[<span class="nm">1</span>];
+  <span class="kw">if</span> (!variant) {
+    variant = Math.<span class="fn">random</span>() &lt; <span class="nm">0.5</span> ? <span class="str">'control'</span> : <span class="str">'treatment'</span>;
+  }
+
+  <span class="cm">// Route to different backend based on variant</span>
+  <span class="kw">const</span> url = variant === <span class="str">'treatment'</span>
+    ? <span class="str">'https://new.origin.example.com'</span> + request.url.pathname
+    : <span class="str">'https://origin.example.com'</span> + request.url.pathname;
+
+  <span class="kw">const</span> response = <span class="kw">await</span> <span class="fn">fetch</span>(url, request);
+  <span class="kw">const</span> newResponse = <span class="kw">new</span> <span class="cls">Response</span>(response.body, response);
+  newResponse.headers.<span class="fn">append</span>(<span class="str">'Set-Cookie'</span>, <span class="str">`ab_variant=${variant}; Max-Age=86400`</span>);
+  <span class="kw">return</span> newResponse;
+  <span class="cm">// Executed in 0ms added latency — runs at the PoP, not origin!</span>
+}</code></pre>
+
+    <div class="metrics">
+      <div class="metric-card"><div class="val">300+</div><div class="lbl">Cloudflare PoPs Worldwide</div></div>
+      <div class="metric-card"><div class="val">~95%</div><div class="lbl">Typical CDN Cache Hit Ratio</div></div>
+      <div class="metric-card"><div class="val">&lt;50ms</div><div class="lbl">Edge Response (Cache Hit)</div></div>
+      <div class="metric-card"><div class="val">10×</div><div class="lbl">Bandwidth Cost Reduction</div></div>
+      <div class="metric-card"><div class="val">&lt;50ms</div><div class="lbl">Global Purge Propagation</div></div>
+    </div>
+
+  </div>
+</section>
+
+
+<!-- ══════════════════════════════════════════════════════════
+     12. CACHING
+══════════════════════════════════════════════════════════ -->
+<section class="topic" id="caching">
+  <div class="topic-header">
+    <div class="num">12</div>
+    <div>
+      <h2>Caching — Concepts, Warming & Invalidation</h2>
+      <p>Cache hierarchy, eviction algorithms, warming strategies, stampede prevention & distributed caching internals</p>
+    </div>
+  </div>
+  <div class="topic-body">
+
+    <div class="tags">
+      <span class="tag">LRU / LFU / ARC</span><span class="tag">Cache Warming</span><span class="tag">Cache Invalidation</span>
+      <span class="tag">Stampede Prevention</span><span class="tag">Redis Cluster</span><span class="tag">Write-Through</span>
+      <span class="tag">Negative Caching</span><span class="tag">Probabilistic Early Expiry</span>
+    </div>
+
+    <h3>Cache Hierarchy — Levels and Characteristics</h3>
+
+    <table>
+      <tr><th>Level</th><th>Location</th><th>Latency</th><th>Size</th><th>Example</th></tr>
+      <tr><td><strong>L1 CPU Cache</strong></td><td>On-die, per-core</td><td>~1ns (4 cycles)</td><td>32–64 KB</td><td>Hardware managed</td></tr>
+      <tr><td><strong>L2 CPU Cache</strong></td><td>On-die, per-core</td><td>~4ns (12 cycles)</td><td>256 KB–4 MB</td><td>Hardware managed</td></tr>
+      <tr><td><strong>L3 CPU Cache</strong></td><td>On-die, shared</td><td>~12ns (40 cycles)</td><td>8–64 MB</td><td>Hardware managed</td></tr>
+      <tr><td><strong>Main Memory (RAM)</strong></td><td>DIMM, on motherboard</td><td>~60–100ns</td><td>32 GB–2 TB</td><td>malloc, JVM heap</td></tr>
+      <tr><td><strong>In-Process Cache</strong></td><td>Application heap</td><td>~100ns–1µs</td><td>GBs</td><td>Caffeine, Guava Cache</td></tr>
+      <tr><td><strong>Distributed Cache</strong></td><td>Separate cache server</td><td>~0.5–3ms</td><td>TBs</td><td>Redis, Memcached</td></tr>
+      <tr><td><strong>CDN Edge Cache</strong></td><td>PoP geographically near</td><td>~2–30ms</td><td>TBs</td><td>Cloudflare, Fastly</td></tr>
+      <tr><td><strong>Database Cache</strong></td><td>DB buffer pool (RAM)</td><td>~1–10ms</td><td>GBs</td><td>InnoDB Buffer Pool</td></tr>
+    </table>
+
+    <h3>Cache Eviction Algorithms — Internals</h3>
+
+    <h4>LRU — Least Recently Used (O(1) Implementation)</h4>
+    <pre><code><span class="cm">// LRU = Doubly Linked List + HashMap</span>
+<span class="cm">// List head = Most Recently Used (MRU)</span>
+<span class="cm">// List tail = Least Recently Used (LRU) ← evict from here</span>
+
+<span class="kw">class</span> <span class="cls">LRUCache</span> {
+  <span class="kw">constructor</span>(capacity) {
+    <span class="kw">this</span>.capacity = capacity;
+    <span class="kw">this</span>.map = <span class="kw">new</span> Map();        <span class="cm">// key → node (O(1) lookup)</span>
+    <span class="kw">this</span>.head = { key: <span class="kw">null</span> };   <span class="cm">// dummy MRU sentinel</span>
+    <span class="kw">this</span>.tail = { key: <span class="kw">null</span> };   <span class="cm">// dummy LRU sentinel</span>
+    <span class="kw">this</span>.head.next = <span class="kw">this</span>.tail;
+    <span class="kw">this</span>.tail.prev = <span class="kw">this</span>.head;
+  }
+
+  <span class="fn">get</span>(key) {
+    <span class="kw">const</span> node = <span class="kw">this</span>.map.<span class="fn">get</span>(key);
+    <span class="kw">if</span> (!node) <span class="kw">return</span> -<span class="nm">1</span>;          <span class="cm">// Cache MISS</span>
+    <span class="kw">this</span>.<span class="fn">moveToFront</span>(node);         <span class="cm">// Mark as recently used</span>
+    <span class="kw">return</span> node.val;
+  }
+
+  <span class="fn">put</span>(key, val) {
+    <span class="kw">if</span> (<span class="kw">this</span>.map.<span class="fn">has</span>(key)) {
+      <span class="kw">const</span> node = <span class="kw">this</span>.map.<span class="fn">get</span>(key);
+      node.val = val;
+      <span class="kw">this</span>.<span class="fn">moveToFront</span>(node);
+    } <span class="kw">else</span> {
+      <span class="kw">if</span> (<span class="kw">this</span>.map.size >= <span class="kw">this</span>.capacity) {
+        <span class="kw">const</span> lru = <span class="kw">this</span>.tail.prev; <span class="cm">// Least recently used</span>
+        <span class="kw">this</span>.<span class="fn">remove</span>(lru);           <span class="cm">// O(1) — we have the pointer</span>
+        <span class="kw">this</span>.map.<span class="fn">delete</span>(lru.key);
+      }
+      <span class="kw">const</span> node = { key, val, prev: <span class="kw">null</span>, next: <span class="kw">null</span> };
+      <span class="kw">this</span>.<span class="fn">addToFront</span>(node);
+      <span class="kw">this</span>.map.<span class="fn">set</span>(key, node);
+    }
+  }
+  <span class="cm">// All operations O(1): HashMap lookup + linked list pointer manipulation</span>
+}</code></pre>
+
+    <h4>LFU — Least Frequently Used (O(1) with Frequency Buckets)</h4>
+    <pre><code><span class="cm">// LFU evicts the item with lowest access COUNT (not recency)</span>
+<span class="cm">// Better for hot item preservation (e.g., homepage never evicted)</span>
+<span class="cm">// O(1) implementation: frequency buckets + doubly linked list per bucket</span>
+
+<span class="cm">// Data structure:</span>
+<span class="cm">// minFreq  → pointer to lowest frequency bucket (for O(1) eviction)</span>
+<span class="cm">// freqMap  → {frequency → DoublyLinkedList of nodes with that frequency}</span>
+<span class="cm">// keyMap   → {key → node} for O(1) lookup</span>
+
+<span class="kw">class</span> <span class="cls">LFUCache</span> {
+  <span class="fn">get</span>(key) {
+    <span class="kw">const</span> node = keyMap.<span class="fn">get</span>(key);  <span class="cm">// O(1)</span>
+    <span class="cm">// Move from freq bucket N to freq bucket N+1</span>
+    freqMap.<span class="fn">get</span>(node.freq).<span class="fn">remove</span>(node);       <span class="cm">// O(1)</span>
+    <span class="kw">if</span> (freqMap.<span class="fn">get</span>(node.freq).isEmpty() && node.freq === minFreq)
+      minFreq++;                                  <span class="cm">// O(1)</span>
+    node.freq++;
+    freqMap.<span class="fn">getOrCreate</span>(node.freq).<span class="fn">addToFront</span>(node); <span class="cm">// O(1)</span>
+    <span class="kw">return</span> node.val;
+  }
+  <span class="fn">evict</span>() {
+    <span class="cm">// Evict LRU item from minFreq bucket</span>
+    freqMap.<span class="fn">get</span>(minFreq).<span class="fn">removeTail</span>();           <span class="cm">// O(1)</span>
+  }
+}
+<span class="cm">// TinyLFU (Window-TinyLFU): used by Caffeine Java cache</span>
+<span class="cm">// Uses Count-Min Sketch (probabilistic) to approximate frequency</span>
+<span class="cm">// with O(1) space — no need to store exact count per item</span></code></pre>
+
+    <h3>Cache Warming Strategies</h3>
+    <p>A cold cache (after deployment, restart, or flush) causes a <strong>cache stampede</strong> — all requests hit the database simultaneously. Cache warming pre-populates the cache before serving traffic:</p>
+
+    <h4>Strategy 1: Eager Warming (Bulk Pre-load)</h4>
+    <pre><code><span class="cm">// Before deployment: pre-populate cache with hot data</span>
+<span class="kw">async function</span> <span class="fn">warmCache</span>() {
+  <span class="cm">// Query analytics to find top 10,000 most-requested items</span>
+  <span class="kw">const</span> hotKeys = <span class="kw">await</span> analytics.<span class="fn">getTopKeys</span>(<span class="nm">10000</span>);
+
+  <span class="cm">// Batch load from DB in parallel (rate-limited to not overload DB)</span>
+  <span class="kw">await</span> <span class="fn">pMap</span>(hotKeys, <span class="kw">async</span> key => {
+    <span class="kw">const</span> value = <span class="kw">await</span> db.<span class="fn">get</span>(key);
+    <span class="kw">await</span> cache.<span class="fn">set</span>(key, value, { ttl: <span class="nm">3600</span> });
+  }, { concurrency: <span class="nm">50</span> }); <span class="cm">// max 50 parallel DB queries</span>
+
+  console.<span class="fn">log</span>(<span class="str">'Cache warm — ready for traffic'</span>);
+  <span class="cm">// Only then switch load balancer to new deployment</span>
+}</code></pre>
+
+    <h4>Strategy 2: Lazy Warming with Request Shadowing</h4>
+    <pre><code><span class="cm">// Route 1% of production traffic to new instance before full cutover</span>
+<span class="cm">// Requests populate cache organically</span>
+<span class="cm">// Monitor cache hit rate — when it reaches 80%+, cutover full traffic</span>
+
+<span class="cm">// Nginx configuration for traffic shadowing:</span>
+location /api/ {
+  proxy_pass http://production;
+
+  <span class="cm"># Mirror 1% to new instance (async, doesn't affect response)</span>
+  mirror /mirror;
+  mirror_request_body on;
+}
+location /mirror {
+  internal;
+  proxy_pass http://new-instance;    <span class="cm"># Warms new instance cache</span>
+}</code></pre>
+
+    <h4>Strategy 3: Probabilistic Early Expiry (Cache Stampede Prevention)</h4>
+    <p>The most sophisticated strategy — prevents stampede <em>before</em> TTL expires by probabilistically refreshing ahead of time:</p>
+    <pre><code><span class="cm">// XFetch Algorithm (probabilistic early expiry)</span>
+<span class="cm">// Instead of all threads rushing to refresh when TTL hits exactly 0,</span>
+<span class="cm">// each cache read independently decides whether to refresh early</span>
+
+<span class="kw">async function</span> <span class="fn">xfetchGet</span>(key, recomputeFn, beta = <span class="nm">1.0</span>) {
+  <span class="kw">const</span> cached = <span class="kw">await</span> cache.<span class="fn">getWithMetadata</span>(key);
+  <span class="cm">// cached = { value, ttl_remaining, last_compute_time }</span>
+
+  <span class="kw">if</span> (!cached) <span class="kw">return</span> <span class="kw">await</span> <span class="fn">recompute</span>(key, recomputeFn);
+
+  <span class="cm">// Probabilistic early refresh formula:</span>
+  <span class="cm">// earlyExpiry = -last_compute_time × beta × log(random())</span>
+  <span class="kw">const</span> earlyExpiry = -cached.computeTime * beta * Math.<span class="fn">log</span>(Math.<span class="fn">random</span>());
+
+  <span class="kw">if</span> (cached.ttl_remaining - earlyExpiry &lt;= <span class="nm">0</span>) {
+    <span class="cm">// Refresh NOW (before TTL=0) with probability based on compute time</span>
+    <span class="cm">// Slower-to-compute items start refreshing earlier</span>
+    <span class="cm">// Only ONE process triggers this (probabilistically) — others get cached value</span>
+    <span class="kw">return</span> <span class="kw">await</span> <span class="fn">recompute</span>(key, recomputeFn);
+  }
+
+  <span class="kw">return</span> cached.value;
+}</code></pre>
+
+    <h3>Cache Invalidation Strategies</h3>
+
+    <div class="callout purple">
+      <strong>💬 Phil Karlton's Famous Quote</strong>
+      "There are only two hard things in Computer Science: cache invalidation and naming things." — The reason: distributed systems have no global clock, no atomic multi-key updates, and race conditions between cache writes and DB writes are subtle and catastrophic.
+    </div>
+
+    <h4>TTL-Based Expiry (Simplest)</h4>
+    <p>Items expire automatically after a fixed time. Simple but introduces <strong>eventual consistency windows</strong>. The application must tolerate stale data for up to TTL seconds.</p>
+
+    <h4>Event-Driven Invalidation (Most Accurate)</h4>
+    <pre><code><span class="cm">// Pattern: write-through with event-driven cache invalidation</span>
+
+<span class="cm">// Step 1: Update database</span>
+<span class="kw">await</span> db.<span class="fn">update</span>(<span class="str">'products'</span>, { id: <span class="nm">123</span>, price: <span class="nm">99.99</span> });
+
+<span class="cm">// Step 2: Publish change event (Kafka / SNS)</span>
+<span class="kw">await</span> eventBus.<span class="fn">publish</span>(<span class="str">'product.updated'</span>, { id: <span class="nm">123</span>, fields: [<span class="str">'price'</span>] });
+
+<span class="cm">// Step 3: Cache invalidation consumer (async)</span>
+eventBus.<span class="fn">subscribe</span>(<span class="str">'product.updated'</span>, <span class="kw">async</span> (event) => {
+  <span class="kw">await</span> cache.<span class="fn">delete</span>(<span class="str">`product:${event.id}`</span>);
+  <span class="kw">await</span> cache.<span class="fn">delete</span>(<span class="str">`product:${event.id}:recommendations`</span>);
+  <span class="kw">await</span> cache.<span class="fn">delete</span>(<span class="str">`category:${event.categoryId}`</span>); <span class="cm">// dependent keys</span>
+});
+<span class="cm">// Problem: event processing lag = brief inconsistency window</span>
+<span class="cm">// Problem: if consumer crashes, cache stays stale</span>
+<span class="cm">// Solution: exactly-once consumer + idempotent invalidation</span></code></pre>
+
+    <h4>Cache-Aside with Version Stamps</h4>
+    <pre><code><span class="cm">// Store version alongside value — reject stale reads</span>
+<span class="kw">async function</span> <span class="fn">versionedGet</span>(key) {
+  <span class="kw">const</span> cached = <span class="kw">await</span> cache.<span class="fn">get</span>(key);
+  <span class="kw">if</span> (cached) {
+    <span class="cm">// Check version in DB (lightweight query)</span>
+    <span class="kw">const</span> currentVersion = <span class="kw">await</span> db.<span class="fn">query</span>(<span class="str">`SELECT version FROM products WHERE id=?`</span>, key);
+    <span class="kw">if</span> (cached.version === currentVersion) <span class="kw">return</span> cached.value; <span class="cm">// Fresh!</span>
+    <span class="cm">// Version mismatch → evict and fetch fresh</span>
+    <span class="kw">await</span> cache.<span class="fn">delete</span>(key);
+  }
+  <span class="kw">const</span> fresh = <span class="kw">await</span> db.<span class="fn">query</span>(<span class="str">`SELECT * FROM products WHERE id=?`</span>, key);
+  <span class="kw">await</span> cache.<span class="fn">set</span>(key, { value: fresh.data, version: fresh.version });
+  <span class="kw">return</span> fresh.data;
+}</code></pre>
+
+    <h3>Negative Caching — Cache the Absence</h3>
+    <pre><code><span class="cm">// Without negative caching:</span>
+<span class="cm">// Attacker hits GET /users/nonexistent millions of times</span>
+<span class="cm">// Every request hits DB (SELECT finds nothing → DB full table scan!)</span>
+<span class="cm">// DB overwhelmed with guaranteed-miss queries</span>
+
+<span class="cm">// With negative caching:</span>
+<span class="kw">async function</span> <span class="fn">getUser</span>(id) {
+  <span class="kw">const</span> cached = <span class="kw">await</span> cache.<span class="fn">get</span>(<span class="str">`user:${id}`</span>);
+  <span class="kw">if</span> (cached === <span class="str">'NOT_FOUND'</span>) <span class="kw">return null</span>; <span class="cm">// Negative cache hit</span>
+  <span class="kw">if</span> (cached) <span class="kw">return</span> cached;
+
+  <span class="kw">const</span> user = <span class="kw">await</span> db.<span class="fn">findUser</span>(id);
+
+  <span class="kw">if</span> (!user) {
+    <span class="cm">// Cache the "not found" result for 60 seconds</span>
+    <span class="kw">await</span> cache.<span class="fn">set</span>(<span class="str">`user:${id}`</span>, <span class="str">'NOT_FOUND'</span>, { ttl: <span class="nm">60</span> });
+    <span class="kw">return null</span>;
+  }
+  <span class="kw">await</span> cache.<span class="fn">set</span>(<span class="str">`user:${id}`</span>, user, { ttl: <span class="nm">3600</span> });
+  <span class="kw">return</span> user;
+}
+
+<span class="cm">// Bloom filter — space-efficient "definitely not exists" check</span>
+<span class="cm">// Before querying DB or cache, check bloom filter (1MB can represent 10M IDs)</span>
+<span class="cm">// Bloom says "maybe exists"? → check cache/DB</span>
+<span class="cm">// Bloom says "definitely NOT exists"? → return 404 immediately</span>
+<span class="cm">// False positive rate ~1% — configurable with filter size</span></code></pre>
+
+    <h3>Redis Cluster — Distributed Cache Internals</h3>
+    <pre><code><span class="cm">// Redis Cluster shards data across 16,384 hash slots</span>
+<span class="cm">// Key → CRC16(key) % 16384 → determines which slot (and thus which node)</span>
+
+<span class="cm">// 3-node cluster: each node owns ~5461 slots</span>
+<span class="cm">// Node A: slots 0–5460</span>
+<span class="cm">// Node B: slots 5461–10922</span>
+<span class="cm">// Node C: slots 10923–16383</span>
+
+<span class="cm">// Hash tags: force multiple keys to same slot (for multi-key operations)</span>
+SET user:{123}:profile "..."     <span class="cm">← hash of "123" → slot 5542 → Node B</span>
+SET user:{123}:preferences "..."  <span class="cm">← same hash → Node B</span>
+<span class="cm">// Now MGET user:{123}:profile user:{123}:preferences is a single-shard op!</span>
+
+<span class="cm">// Replication: each primary node has 1+ replica</span>
+<span class="cm">// Primary A → Replica A' (async replication via RESP protocol)</span>
+<span class="cm">// If Primary A fails:</span>
+<span class="cm">//   Other primaries vote (need majority — quorum)</span>
+<span class="cm">//   Replica A' promoted to primary</span>
+<span class="cm">//   Clients redirected via CLUSTER SLOTS response</span>
+<span class="cm">// Failover completes in ~5-30 seconds (cluster-node-timeout setting)</span></code></pre>
+
+  </div>
+</section>
+
+
+<!-- ══════════════════════════════════════════════════════════
+     13. TCP vs UDP
+══════════════════════════════════════════════════════════ -->
+<section class="topic" id="tcp-udp">
+  <div class="topic-header">
+    <div class="num">13</div>
+    <div>
+      <h2>TCP vs UDP</h2>
+      <p>Connection lifecycle, flow control, congestion control, QUIC, and when to choose each protocol</p>
+    </div>
+  </div>
+  <div class="topic-body">
+
+    <div class="tags">
+      <span class="tag">3-Way Handshake</span><span class="tag">Flow Control</span><span class="tag">Congestion Control</span>
+      <span class="tag">Head-of-Line Blocking</span><span class="tag">UDP Multicast</span><span class="tag">QUIC</span>
+      <span class="tag">Nagle's Algorithm</span>
+    </div>
+
+    <h3>Fundamental Difference — The Core Trade-off</h3>
+
+    <table>
+      <tr><th>Feature</th><th>TCP</th><th>UDP</th></tr>
+      <tr><td>Connection</td><td>Connection-oriented (3-way handshake)</td><td>Connectionless (fire-and-forget)</td></tr>
+      <tr><td>Reliability</td><td>Guaranteed delivery (ACKs + retransmission)</td><td>Best-effort — packets may be lost, duplicated, reordered</td></tr>
+      <tr><td>Ordering</td><td>In-order delivery guaranteed</td><td>No ordering — receiver sees packets in arrival order</td></tr>
+      <tr><td>Flow Control</td><td>Receiver window prevents sender overflow</td><td>None — receiver must handle any rate</td></tr>
+      <tr><td>Congestion Control</td><td>Built-in (CUBIC, BBR, Reno)</td><td>None — application responsible</td></tr>
+      <tr><td>Header Size</td><td>20–60 bytes</td><td>8 bytes (fixed)</td></tr>
+      <tr><td>Overhead</td><td>High (ACKs, retransmission buffers, state)</td><td>Minimal</td></tr>
+      <tr><td>Throughput</td><td>Lower (flow + congestion control)</td><td>Higher (no control overhead)</td></tr>
+      <tr><td>Use Cases</td><td>HTTP, HTTPS, SSH, SMTP, FTP, databases</td><td>DNS, video streaming, VoIP, gaming, DHCP</td></tr>
+    </table>
+
+    <h3>TCP Connection Lifecycle — Every Byte on the Wire</h3>
+
+    <h4>Three-Way Handshake (Connection Establishment)</h4>
+    <pre><code><span class="cm">// TCP Segment structure (simplified):</span>
+<span class="cm">// [SrcPort][DstPort][SeqNum][AckNum][Flags][Window][Checksum][Data]</span>
+
+<span class="cm">Step 1 — SYN (Client → Server):</span>
+SrcPort=49152  DstPort=443
+SeqNum=1000    AckNum=0
+Flags=SYN
+Window=65535   <span class="cm">← Receiver's initial buffer size</span>
+Options: MSS=1460, SACK permitted, WScale=7, Timestamps
+
+<span class="cm">Step 2 — SYN-ACK (Server → Client):</span>
+SeqNum=5000    AckNum=1001   <span class="cm">← Acknowledges client's SYN (seq+1)</span>
+Flags=SYN|ACK
+Window=28960   <span class="cm">← Server's receive window</span>
+Options: MSS=1460, SACK permitted, WScale=9
+
+<span class="cm">Step 3 — ACK (Client → Server):</span>
+SeqNum=1001    AckNum=5001   <span class="cm">← Acknowledges server's SYN</span>
+Flags=ACK
+<span class="cm">← Connection ESTABLISHED. Client can send data immediately after this!</span>
+
+<span class="cm">Total cost: 1 full RTT before first data byte is sent</span>
+<span class="cm">TCP Fast Open (TFO): sends data in SYN packet on resumed connections</span>
+<span class="cm">Reduces first-request latency by 1 RTT (like 0-RTT TLS resumption)</span></code></pre>
+
+    <h4>Connection Termination (Four-Way Handshake)</h4>
+    <pre><code><span class="cm">// TCP supports half-close: each side closes independently</span>
+
+Client: FIN → SeqNum=2000           <span class="cm">← "I'm done sending"</span>
+Server: ACK → AckNum=2001           <span class="cm">← "Got it" (may still send data)</span>
+Server: [sends remaining data...]
+Server: FIN → SeqNum=6000           <span class="cm">← "I'm done too"</span>
+Client: ACK → AckNum=6001           <span class="cm">← "Got it"</span>
+
+<span class="cm">// Client enters TIME_WAIT state for 2×MSL (Maximum Segment Lifetime)</span>
+<span class="cm">// MSL = 60s typically → TIME_WAIT = 120 seconds!</span>
+<span class="cm">// Purpose: ensure server receives final ACK if lost (would retransmit FIN)</span>
+<span class="cm">// Problem: high-volume servers exhaust ephemeral ports (32768–60999)</span>
+<span class="cm">// Solution: SO_REUSEADDR socket option, or TCP keepalive to avoid close</span></code></pre>
+
+    <h3>TCP Flow Control — Receiver Window</h3>
+    <p>Prevents the sender from overwhelming the receiver's buffer. The receiver advertises how much buffer space it has (receive window). Sender may not have more than <code>min(cwnd, rwnd)</code> bytes unacknowledged:</p>
+    <pre><code><span class="cm">// Receiver buffer fills up → advertises smaller window</span>
+Server → Client: ACK, Window=0    <span class="cm">← "Stop sending! My buffer is full!"</span>
+<span class="cm">// Sender pauses — sends only ZWP (Zero Window Probe) to detect recovery</span>
+
+Server → Client: ACK, Window=8192 <span class="cm">← "Resume — I freed 8KB"</span>
+<span class="cm">// Sender resumes</span>
+
+<span class="cm">// Silly Window Syndrome: receiver advertises tiny windows</span>
+<span class="cm">// Solution: Clark's algorithm — don't advertise window until ≥ MSS or ½ buffer</span>
+
+<span class="cm">// Window Scaling (RFC 7323):</span>
+<span class="cm">// 16-bit window field → max 65535 bytes</span>
+<span class="cm">// For 100ms RTT link: max throughput = 65535 / 0.1 = 5.2 Mbps (bottleneck!)</span>
+<span class="cm">// WScale option multiplies window by 2^scale (up to 2^14 = 16384)</span>
+<span class="cm">// WScale=7: window up to 65535 × 128 = 8MB → enables high-speed transfers</span></code></pre>
+
+    <h3>TCP Head-of-Line Blocking — The Core Problem</h3>
+    <pre><code><span class="cm">// TCP delivers bytes IN ORDER to the application</span>
+<span class="cm">// If packet 3 is lost in a sequence 1,2,3,4,5:</span>
+
+Network:    [1]  [2]  [X]  [4]  [5]     ← Packet 3 LOST
+                       ↓
+Receiver:  Receives 1,2 → delivers to app ✓
+           Receives 4,5 → buffers (out of order, can't deliver yet!)
+                           ↑ Waits for retransmission

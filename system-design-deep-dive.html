@@ -1,0 +1,1375 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>System Design Deep Dive</title>
+  <style>
+    :root {
+      --primary: #1a1a2e;
+      --accent: #0f3460;
+      --highlight: #e94560;
+      --card-bg: #16213e;
+      --text: #eaeaea;
+      --subtext: #a8b2c1;
+      --code-bg: #0d1117;
+      --border: #30363d;
+      --tag-bg: #21262d;
+      --success: #238636;
+      --warning: #9e6a03;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+      background: var(--primary);
+      color: var(--text);
+      line-height: 1.8;
+    }
+
+    /* ── HEADER ── */
+    header {
+      background: linear-gradient(135deg, #0f3460 0%, #e94560 100%);
+      padding: 60px 40px;
+      text-align: center;
+    }
+    header h1 { font-size: 3rem; font-weight: 800; letter-spacing: -1px; }
+    header p  { font-size: 1.15rem; color: rgba(255,255,255,0.85); margin-top: 10px; }
+    .badge {
+      display: inline-block;
+      background: rgba(255,255,255,0.15);
+      border: 1px solid rgba(255,255,255,0.3);
+      border-radius: 20px;
+      padding: 4px 14px;
+      font-size: 0.8rem;
+      margin-top: 14px;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+    }
+
+    /* ── TOC ── */
+    nav.toc {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      margin: 40px auto;
+      max-width: 900px;
+      padding: 30px 40px;
+    }
+    nav.toc h2 { color: var(--highlight); font-size: 1.1rem; margin-bottom: 16px; text-transform: uppercase; letter-spacing: 1px; }
+    nav.toc ol { padding-left: 20px; }
+    nav.toc li { margin: 8px 0; }
+    nav.toc a  { color: #58a6ff; text-decoration: none; font-size: 1rem; transition: color 0.2s; }
+    nav.toc a:hover { color: var(--highlight); }
+
+    /* ── MAIN LAYOUT ── */
+    main { max-width: 1000px; margin: 0 auto; padding: 20px 30px 80px; }
+
+    /* ── SECTION ── */
+    .topic {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      margin-bottom: 60px;
+      overflow: hidden;
+    }
+    .topic-header {
+      background: linear-gradient(90deg, var(--accent), #1a1a3e);
+      padding: 30px 40px;
+      border-bottom: 2px solid var(--highlight);
+      display: flex;
+      align-items: center;
+      gap: 18px;
+    }
+    .topic-header .num {
+      background: var(--highlight);
+      color: white;
+      font-size: 1.4rem;
+      font-weight: 800;
+      width: 48px; height: 48px;
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0;
+    }
+    .topic-header h2 { font-size: 2rem; font-weight: 700; }
+    .topic-header p  { color: var(--subtext); font-size: 0.95rem; margin-top: 4px; }
+
+    .topic-body { padding: 36px 40px; }
+
+    /* ── HEADINGS INSIDE BODY ── */
+    .topic-body h3 {
+      color: #58a6ff;
+      font-size: 1.3rem;
+      margin: 32px 0 12px;
+      padding-left: 12px;
+      border-left: 4px solid var(--highlight);
+    }
+    .topic-body h4 {
+      color: #e3b341;
+      font-size: 1.05rem;
+      margin: 22px 0 8px;
+    }
+    .topic-body p  { color: var(--text); margin-bottom: 14px; }
+    .topic-body ul, .topic-body ol { padding-left: 22px; margin-bottom: 14px; }
+    .topic-body li { margin: 6px 0; color: var(--text); }
+
+    /* ── CODE ── */
+    pre {
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 20px;
+      overflow-x: auto;
+      margin: 16px 0 24px;
+      font-size: 0.88rem;
+      line-height: 1.6;
+    }
+    code { font-family: 'Fira Code', 'Cascadia Code', monospace; color: #c9d1d9; }
+    pre code { color: #c9d1d9; }
+    .kw  { color: #ff79c6; }
+    .fn  { color: #50fa7b; }
+    .str { color: #f1fa8c; }
+    .cm  { color: #6272a4; font-style: italic; }
+    .num { color: #bd93f9; }
+    .cls { color: #8be9fd; }
+
+    /* ── CALLOUT BOXES ── */
+    .callout {
+      border-radius: 10px;
+      padding: 18px 22px;
+      margin: 18px 0;
+      border-left: 5px solid;
+    }
+    .callout.info    { background: #0c2d48; border-color: #58a6ff; }
+    .callout.warn    { background: #2d1f00; border-color: #e3b341; }
+    .callout.success { background: #0d2a0d; border-color: #3fb950; }
+    .callout.danger  { background: #2d0d0d; border-color: #f85149; }
+    .callout strong  { display: block; margin-bottom: 6px; font-size: 0.9rem; text-transform: uppercase; letter-spacing: 0.5px; }
+    .callout.info    strong { color: #58a6ff; }
+    .callout.warn    strong { color: #e3b341; }
+    .callout.success strong { color: #3fb950; }
+    .callout.danger  strong { color: #f85149; }
+
+    /* ── DIAGRAM / ASCII ── */
+    .diagram {
+      background: var(--code-bg);
+      border: 1px dashed #444c56;
+      border-radius: 10px;
+      padding: 22px 28px;
+      margin: 18px 0 24px;
+      font-family: 'Fira Code', monospace;
+      font-size: 0.83rem;
+      color: #8b949e;
+      white-space: pre;
+      overflow-x: auto;
+    }
+    .diagram .hl { color: #79c0ff; }
+    .diagram .ar { color: var(--highlight); }
+
+    /* ── COMPARISON TABLE ── */
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 18px 0 26px;
+      font-size: 0.92rem;
+    }
+    th {
+      background: var(--accent);
+      color: white;
+      padding: 12px 16px;
+      text-align: left;
+    }
+    td {
+      padding: 11px 16px;
+      border-bottom: 1px solid var(--border);
+      color: var(--text);
+    }
+    tr:nth-child(even) td { background: rgba(255,255,255,0.03); }
+    tr:hover td { background: rgba(255,255,255,0.06); }
+
+    /* ── PILL TAGS ── */
+    .tags { display: flex; flex-wrap: wrap; gap: 8px; margin: 14px 0; }
+    .tag {
+      background: var(--tag-bg);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 4px 14px;
+      font-size: 0.8rem;
+      color: #79c0ff;
+    }
+
+    /* ── METRIC CARDS ── */
+    .metrics {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 14px;
+      margin: 18px 0 28px;
+    }
+    .metric-card {
+      background: var(--primary);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 18px;
+      text-align: center;
+    }
+    .metric-card .val { font-size: 1.6rem; font-weight: 700; color: var(--highlight); }
+    .metric-card .lbl { font-size: 0.78rem; color: var(--subtext); margin-top: 4px; }
+
+    /* ── FOOTER ── */
+    footer {
+      text-align: center;
+      padding: 30px;
+      color: var(--subtext);
+      font-size: 0.85rem;
+      border-top: 1px solid var(--border);
+    }
+
+    /* ── PRINT ── */
+    @media print {
+      body { background: white; color: black; }
+      .topic { border: 1px solid #ccc; page-break-inside: avoid; }
+      pre, .diagram { background: #f6f8fa; color: black; border-color: #ccc; }
+      header { background: #1a1a2e !important; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ════════════════════════════════════════════════════
+     HEADER
+════════════════════════════════════════════════════ -->
+<header>
+  <h1>⚙️ System Design Deep Dive</h1>
+  <p>A senior engineer's reference — internals, mechanisms & real-world examples</p>
+  <span class="badge">9+ Years Experience · Advanced Level</span>
+</header>
+
+<!-- ════════════════════════════════════════════════════
+     TABLE OF CONTENTS
+════════════════════════════════════════════════════ -->
+<nav class="toc">
+  <h2>📚 Table of Contents</h2>
+  <ol>
+    <li><a href="#scalability">Scalability — Vertical, Horizontal, Sharding, Caching</a></li>
+    <li><a href="#availability">Availability — SLA/SLO, Redundancy, Failover, CAP Theorem</a></li>
+    <li><a href="#load-balancing">Load Balancing — Algorithms, L4 vs L7, Health Checks, Session Persistence</a></li>
+    <li><a href="#reliability">Reliability — Fault Tolerance, Circuit Breaker, Chaos Engineering, Retries</a></li>
+    <li><a href="#proxy-servers">Proxy Servers — Forward, Reverse, Transparent, API Gateway</a></li>
+    <li><a href="#dns">DNS — Resolution Chain, Record Types, TTL, DNSSEC, GeoDNS</a></li>
+  </ol>
+</nav>
+
+<main>
+
+<!-- ════════════════════════════════════════════════════
+     1. SCALABILITY
+════════════════════════════════════════════════════ -->
+<section class="topic" id="scalability">
+  <div class="topic-header">
+    <div class="num">1</div>
+    <div>
+      <h2>Scalability</h2>
+      <p>The ability of a system to handle growing load without degrading performance</p>
+    </div>
+  </div>
+  <div class="topic-body">
+
+    <div class="tags">
+      <span class="tag">Horizontal Scaling</span>
+      <span class="tag">Vertical Scaling</span>
+      <span class="tag">Sharding</span>
+      <span class="tag">Caching</span>
+      <span class="tag">CDN</span>
+      <span class="tag">Stateless Design</span>
+    </div>
+
+    <h3>What is Scalability, Really?</h3>
+    <p>Scalability is not just "adding more servers." It's a <strong>mathematical relationship</strong> between input load (requests/second, data size, users) and system resources (CPU, memory, I/O, network). A perfectly scalable system maintains a <em>linear or sub-linear cost curve</em> as load grows. In practice, every system has scalability bottlenecks — the art is finding and eliminating them systematically.</p>
+
+    <div class="callout info">
+      <strong>📐 Amdahl's Law</strong>
+      If a fraction <code>P</code> of a program can be parallelized, the maximum speedup with <code>N</code> processors is:
+      <code>Speedup = 1 / ((1 - P) + P/N)</code>. Even with infinite machines, the sequential portion caps your gain. This is why truly scalable systems minimize serial bottlenecks.
+    </div>
+
+    <h3>Vertical Scaling (Scale Up)</h3>
+    <p>Adding more resources (CPU cores, RAM, faster NVMe SSDs, higher-bandwidth NICs) to a <strong>single machine</strong>. The OS and application see a larger resource pool without architectural change.</p>
+
+    <h4>How It Works Internally</h4>
+    <ul>
+      <li><strong>NUMA (Non-Uniform Memory Access):</strong> Modern multi-socket servers have NUMA nodes. Adding CPUs doesn't always give linear speedup because cross-socket memory access is 2–5× slower than local access. Apps must be NUMA-aware.</li>
+      <li><strong>CPU Cache Contention:</strong> More cores sharing L3 cache can cause cache thrashing. High-performance apps (Redis, Nginx) pin threads to cores (<code>taskset</code>, CPU affinity) to maximize L1/L2 cache hits.</li>
+      <li><strong>I/O Bottleneck:</strong> A single machine's PCIe bus, SATA/NVMe channels, and NIC bandwidth are finite. Vertical scaling hits hardware ceilings (e.g., max 12 NVMe drives per PCIe 4.0 x16 slot).</li>
+    </ul>
+
+    <div class="callout warn">
+      <strong>⚠️ Hard Ceiling</strong>
+      AWS's largest EC2 instance (u-24tb1.metal) has 448 vCPUs and 24 TB RAM. Beyond this, you <em>must</em> scale horizontally. Also, vertical scaling usually requires downtime for hardware upgrades.
+    </div>
+
+    <h3>Horizontal Scaling (Scale Out)</h3>
+    <p>Adding more machines to distribute load. This is the foundation of modern cloud-native architecture. Requires the application to be <strong>stateless</strong> — any instance can handle any request.</p>
+
+    <h4>Stateless vs. Stateful: The Core Challenge</h4>
+    <pre><code><span class="cm">// ❌ Stateful — session stored in-memory on one server</span>
+<span class="kw">class</span> <span class="cls">UserSession</span> {
+  <span class="kw">private</span> Map&lt;String, Object&gt; sessions = <span class="kw">new</span> HashMap&lt;&gt;();
+
+  <span class="kw">public void</span> <span class="fn">setSession</span>(String userId, Object data) {
+    sessions.<span class="fn">put</span>(userId, data); <span class="cm">// Dies if this server goes away!</span>
+  }
+}
+
+<span class="cm">// ✅ Stateless — session stored externally (Redis Cluster)</span>
+<span class="kw">class</span> <span class="cls">UserSession</span> {
+  <span class="kw">private</span> RedisCluster redis;
+
+  <span class="kw">public void</span> <span class="fn">setSession</span>(String userId, Object data) {
+    redis.<span class="fn">setex</span>(<span class="str">"session:"</span> + userId, <span class="num">3600</span>, <span class="fn">serialize</span>(data));
+    <span class="cm">// Any server can read this session — true horizontal scaling</span>
+  }
+}</code></pre>
+
+    <h4>Consistent Hashing — How Distributed Systems Route Requests</h4>
+    <p>When you have N servers, naïve <code>hash(key) % N</code> routing breaks when N changes (a server is added/removed), causing ~100% cache misses. Consistent hashing solves this:</p>
+
+    <div class="diagram">
+<span class="hl">Consistent Hash Ring (360° virtual circle)</span>
+
+         Node A (hash=50)
+              ↑
+   350 ──────────────── 50
+  /    <span class="ar">←request(hash=30)→ Node A</span>    \
+300                                100
+  \                               /
+   250 ──────────────── 150
+              ↓
+         Node B (hash=200)
+
+<span class="cm">Adding Node C at hash=120:</span>
+  Only keys in range [50, 120] move from Node B → Node C
+  All other keys remain on their nodes  ✓ Minimal disruption
+    </div>
+
+    <p>Real-world: Cassandra, DynamoDB, and Riak use consistent hashing with <strong>virtual nodes (vnodes)</strong> — each physical node owns multiple positions on the ring, ensuring even distribution even with heterogeneous hardware.</p>
+
+    <h3>Database Scalability Patterns</h3>
+
+    <h4>Read Replicas</h4>
+    <p>The primary (master) handles writes. Replicas asynchronously (or semi-synchronously) copy the binary log (MySQL binlog, PostgreSQL WAL). Read traffic is fanned out to replicas.</p>
+    <ul>
+      <li><strong>Replication Lag:</strong> Asynchronous replication means replicas can be milliseconds to seconds behind. Reading your own writes must be handled carefully (read-your-writes consistency — route post-write reads to primary for a TTL window).</li>
+      <li><strong>Semi-synchronous Replication:</strong> Primary waits for at least one replica to acknowledge before committing. Adds latency but prevents data loss on primary crash.</li>
+    </ul>
+
+    <h4>Database Sharding (Horizontal Partitioning)</h4>
+    <p>Splitting data across multiple independent database nodes. Each shard is a complete, independent database containing a subset of rows.</p>
+
+    <table>
+      <tr><th>Sharding Strategy</th><th>How It Works</th><th>Pros</th><th>Cons</th></tr>
+      <tr><td><strong>Range-based</strong></td><td>Shard by key range (A–M on Shard 1, N–Z on Shard 2)</td><td>Simple range queries</td><td>Hotspots if data isn't uniform</td></tr>
+      <tr><td><strong>Hash-based</strong></td><td><code>shard = hash(key) % N</code></td><td>Even distribution</td><td>Range queries cross shards</td></tr>
+      <tr><td><strong>Directory-based</strong></td><td>Lookup table maps key → shard</td><td>Flexible, easy resharding</td><td>Lookup table is a bottleneck</td></tr>
+      <tr><td><strong>Geo-based</strong></td><td>Users in US → US shard, EU → EU shard</td><td>Data locality, compliance</td><td>Cross-region queries slow</td></tr>
+    </table>
+
+    <div class="callout danger">
+      <strong>🚨 Cross-Shard Joins — The Sharding Nightmare</strong>
+      SQL joins across shards require scatter-gather: query all shards, collect results in application memory, join in code. This is slow and bypasses RDBMS query optimizer. Design shard keys to co-locate related data (e.g., shard by <code>tenant_id</code> so all tenant data is on one shard).
+    </div>
+
+    <h3>Caching Architecture</h3>
+    <h4>Cache Write Policies (Internals)</h4>
+    <pre><code><span class="cm">// Write-Through: synchronously write to cache AND DB</span>
+<span class="kw">async function</span> <span class="fn">writeThrough</span>(key, value) {
+  <span class="kw">await</span> db.<span class="fn">write</span>(key, value);      <span class="cm">// ① Write to DB first</span>
+  <span class="kw">await</span> cache.<span class="fn">set</span>(key, value);     <span class="cm">// ② Write to cache</span>
+  <span class="cm">// ✓ Cache always consistent. ✗ Write latency = DB latency</span>
+}
+
+<span class="cm">// Write-Back (Write-Behind): write to cache only, async flush to DB</span>
+<span class="kw">async function</span> <span class="fn">writeBack</span>(key, value) {
+  <span class="kw">await</span> cache.<span class="fn">set</span>(key, value, { dirty: <span class="kw">true</span> }); <span class="cm">// ① Write cache only</span>
+  queue.<span class="fn">push</span>({ key, value });                     <span class="cm">// ② Enqueue for async flush</span>
+  <span class="cm">// ✓ Low write latency. ✗ Data loss if cache crashes before flush!</span>
+}
+
+<span class="cm">// Cache-Aside (Lazy Loading): most common pattern</span>
+<span class="kw">async function</span> <span class="fn">get</span>(key) {
+  <span class="kw">let</span> val = <span class="kw">await</span> cache.<span class="fn">get</span>(key);
+  <span class="kw">if</span> (!val) {                               <span class="cm">// Cache MISS</span>
+    val = <span class="kw">await</span> db.<span class="fn">read</span>(key);              <span class="cm">// Fetch from DB</span>
+    <span class="kw">await</span> cache.<span class="fn">set</span>(key, val, { ttl: <span class="num">300</span> }); <span class="cm">// Populate cache</span>
+  }
+  <span class="kw">return</span> val;
+}</code></pre>
+
+    <h4>Cache Eviction Algorithms (Internals)</h4>
+    <ul>
+      <li><strong>LRU (Least Recently Used):</strong> Implemented as a doubly-linked list + hash map. O(1) get/put. Most recently used moves to head; evict from tail.</li>
+      <li><strong>LFU (Least Frequently Used):</strong> Tracks access frequency. Uses a min-heap or frequency bucket list. Better than LRU for skewed access patterns (Zipfian distributions — common in real-world web traffic).</li>
+      <li><strong>ARC (Adaptive Replacement Cache):</strong> Used by ZFS. Maintains two LRU lists (recent + frequent) and adapts their sizes based on workload.</li>
+    </ul>
+
+    <h3>CDN (Content Delivery Network) Internals</h3>
+    <p>CDNs are geographically distributed caches (PoPs — Points of Presence). They use <strong>Anycast routing</strong>: multiple CDN nodes advertise the same IP address, and BGP routes requests to the topologically closest PoP.</p>
+
+    <div class="diagram">
+<span class="hl">CDN Request Flow</span>
+
+User (Mumbai) ──DNS lookup──→ CDN DNS
+                              returns IP of Mumbai PoP <span class="ar">←Anycast</span>
+User ──HTTP GET /image.jpg──→ Mumbai PoP
+                              Cache HIT? → Return immediately (2ms RTT)
+                              Cache MISS? → Origin fetch
+                                  Mumbai PoP ──→ Origin (US) (200ms)
+                                  Cache image at Mumbai PoP
+                                  Return to user
+    </div>
+
+    <div class="metrics">
+      <div class="metric-card"><div class="val">99%</div><div class="lbl">Cache Hit Rate (CDN)</div></div>
+      <div class="metric-card"><div class="val">~2ms</div><div class="lbl">Edge Response (Cache Hit)</div></div>
+      <div class="metric-card"><div class="val">200ms+</div><div class="lbl">Origin Response (Miss)</div></div>
+      <div class="metric-card"><div class="val">10×</div><div class="lbl">Throughput gain vs. no CDN</div></div>
+    </div>
+
+  </div>
+</section>
+
+
+<!-- ════════════════════════════════════════════════════
+     2. AVAILABILITY
+════════════════════════════════════════════════════ -->
+<section class="topic" id="availability">
+  <div class="topic-header">
+    <div class="num">2</div>
+    <div>
+      <h2>Availability</h2>
+      <p>The fraction of time a system is operational and serving requests correctly</p>
+    </div>
+  </div>
+  <div class="topic-body">
+
+    <div class="tags">
+      <span class="tag">SLA / SLO / SLI</span>
+      <span class="tag">Redundancy</span>
+      <span class="tag">Failover</span>
+      <span class="tag">CAP Theorem</span>
+      <span class="tag">MTTR / MTBF</span>
+    </div>
+
+    <h3>The Mathematics of Availability</h3>
+    <p><strong>Availability = MTBF / (MTBF + MTTR)</strong><br/>Where MTBF = Mean Time Between Failures, MTTR = Mean Time To Recovery.</p>
+
+    <table>
+      <tr><th>Availability</th><th>Annual Downtime</th><th>Monthly Downtime</th><th>Required For</th></tr>
+      <tr><td>99% ("two nines")</td><td>87.6 hours</td><td>7.3 hours</td><td>Internal tools</td></tr>
+      <tr><td>99.9% ("three nines")</td><td>8.76 hours</td><td>43.8 minutes</td><td>Most SaaS products</td></tr>
+      <tr><td>99.99% ("four nines")</td><td>52.6 minutes</td><td>4.4 minutes</td><td>Financial systems</td></tr>
+      <tr><td>99.999% ("five nines")</td><td>5.26 minutes</td><td>26.3 seconds</td><td>Telecom, banking core</td></tr>
+      <tr><td>99.9999% ("six nines")</td><td>31.5 seconds</td><td>2.6 seconds</td><td>Mission-critical infra</td></tr>
+    </table>
+
+    <div class="callout info">
+      <strong>📊 SLI, SLO, SLA — The Hierarchy</strong>
+      <strong>SLI (Service Level Indicator):</strong> The actual measured metric (e.g., request success rate = successful_requests / total_requests).<br/>
+      <strong>SLO (Service Level Objective):</strong> Internal target (e.g., 99.9% success rate over 30 days).<br/>
+      <strong>SLA (Service Level Agreement):</strong> External contractual commitment with financial penalties. SLA is always looser than SLO (you need a buffer).
+    </div>
+
+    <h3>Availability in Series vs. Parallel</h3>
+    <h4>Series (all components must work)</h4>
+    <pre><code><span class="cm">// If Availability(A) = 99.9%, Availability(B) = 99.9%</span>
+<span class="cm">// Series: A → B → C  (all must work)</span>
+<span class="fn">AvailabilityTotal</span> = <span class="num">0.999</span> × <span class="num">0.999</span> = <span class="num">0.998</span> (<span class="num">99.8</span>%)
+<span class="cm">// Adding components DEGRADES availability!</span>
+
+<span class="cm">// Parallel (redundant): request succeeds if ANY component works</span>
+<span class="fn">AvailabilityTotal</span> = <span class="num">1</span> - ((<span class="num">1</span> - <span class="num">0.999</span>) × (<span class="num">1</span> - <span class="num">0.999</span>))
+                 = <span class="num">1</span> - <span class="num">0.000001</span> = <span class="num">0.999999</span> (<span class="num">99.9999</span>%)
+<span class="cm">// Two 99.9% components in parallel → six nines!</span></code></pre>
+
+    <h3>Redundancy Patterns</h3>
+
+    <h4>Active-Active Redundancy</h4>
+    <p>All nodes are live and serving traffic simultaneously. Load balancer distributes requests across all nodes. No failover needed — if one node dies, load balancer removes it and traffic flows to remaining nodes.</p>
+    <div class="diagram">
+<span class="hl">Active-Active (both nodes serve traffic)</span>
+
+Client → Load Balancer → ┌─ Node A (serving 50%) ─┐
+                         └─ Node B (serving 50%) ─┘
+
+Node A fails:
+Client → Load Balancer → Node B (serving 100%)  <span class="ar">← instant, no failover delay</span>
+    </div>
+
+    <h4>Active-Passive (Hot Standby / Cold Standby)</h4>
+    <p>One primary node serves traffic; standby node is idle (hot standby: fully provisioned and running; cold standby: powered off, takes minutes to start).</p>
+    <ul>
+      <li><strong>Hot Standby:</strong> Failover in seconds. Uses keepalived/VRRP to transfer a <strong>Virtual IP (VIP)</strong> to the standby when primary fails heartbeat checks.</li>
+      <li><strong>Cold Standby:</strong> Lower cost, but failover takes minutes (boot time + data sync). Used for disaster recovery, not high availability.</li>
+    </ul>
+
+    <h4>How VRRP (Virtual Router Redundancy Protocol) Works</h4>
+    <pre><code><span class="cm"># Primary server sends VRRP advertisement every 1 second</span>
+VRRP Advertisement: {
+  priority: <span class="num">100</span>,        <span class="cm">// Higher = preferred master</span>
+  virtual_ip: <span class="str">"10.0.0.1"</span>,
+  auth_type: AH
+}
+
+<span class="cm"># Standby listens. If no advertisement for (3 × interval) = 3s:</span>
+<span class="cm"># Standby assumes primary is dead. Takes over VIP.</span>
+<span class="cm"># Sends Gratuitous ARP: "10.0.0.1 is at MAC:AA:BB:CC:DD"</span>
+<span class="cm"># Switches update ARP tables. Traffic flows to standby.</span></code></pre>
+
+    <h3>CAP Theorem — The Fundamental Trade-off</h3>
+    <p>In a distributed system experiencing a network partition, you can guarantee at most <strong>two of three</strong> properties: Consistency, Availability, Partition Tolerance. Since network partitions are inevitable in distributed systems, you <em>must choose</em> between CP or AP.</p>
+
+    <table>
+      <tr><th>Choice</th><th>Behavior During Partition</th><th>Examples</th></tr>
+      <tr><td><strong>CP (Consistency + Partition Tolerance)</strong></td><td>Returns error or waits rather than returning stale data. Sacrifices availability.</td><td>ZooKeeper, HBase, etcd, MongoDB (default)</td></tr>
+      <tr><td><strong>AP (Availability + Partition Tolerance)</strong></td><td>Returns best-effort (possibly stale) data. Never returns error. Sacrifices strong consistency.</td><td>Cassandra, DynamoDB, CouchDB, Riak</td></tr>
+    </table>
+
+    <div class="callout warn">
+      <strong>⚠️ PACELC — The More Complete Model</strong>
+      CAP only describes partition behavior. PACELC extends it: Even without partition (E), systems must trade off Latency (L) vs. Consistency (C). DynamoDB (AP/EL): high availability + low latency + eventual consistency. CockroachDB (CP/EC): strong consistency at cost of higher latency.
+    </div>
+
+    <h3>Multi-Region Availability Architecture</h3>
+    <div class="diagram">
+<span class="hl">Active-Active Multi-Region (99.99%+ Availability)</span>
+
+         ┌────────────────────────────────────────┐
+         │         Global Load Balancer           │
+         │     (AWS Route 53 / Cloudflare)        │
+         └───────────┬────────────────┬───────────┘
+                     │                │
+           ┌─────────▼──────┐  ┌──────▼──────────┐
+           │   US-EAST-1    │  │   EU-WEST-1      │
+           │  ┌──────────┐  │  │  ┌──────────┐   │
+           │  │ App Tier │  │  │  │ App Tier │   │
+           │  └────┬─────┘  │  │  └────┬─────┘   │
+           │  ┌────▼─────┐  │  │  ┌────▼─────┐   │
+           │  │ DB Primary│◄─┼──┼─►│ DB Replica│  │
+           │  └──────────┘  │  │  └──────────┘   │
+           └────────────────┘  └─────────────────┘
+                          <span class="ar">← Cross-region replication →</span>
+
+Failure scenario: US-EAST-1 goes down
+Route 53 health check fails → DNS TTL expires (60s)
+All traffic reroutes to EU-WEST-1 → EU DB promoted to primary
+    </div>
+
+    <h3>Error Budget — The SRE Approach</h3>
+    <p>Google SRE introduced the <strong>Error Budget</strong> concept: if your SLO is 99.9% uptime, your monthly error budget is <strong>43.8 minutes of downtime</strong>. Feature teams can "spend" this budget on risky deployments. If the budget is exhausted, all deployments freeze until budget replenishes.</p>
+    <pre><code><span class="cm">// Error Budget Calculation</span>
+<span class="kw">const</span> SLO = <span class="num">0.999</span>;                          <span class="cm">// 99.9%</span>
+<span class="kw">const</span> minutesPerMonth = <span class="num">30</span> × <span class="num">24</span> × <span class="num">60</span>;      <span class="cm">// 43,200</span>
+<span class="kw">const</span> errorBudget = minutesPerMonth × (<span class="num">1</span> - SLO); <span class="cm">// 43.2 minutes</span>
+
+<span class="cm">// Burn Rate — how fast you're consuming the budget</span>
+<span class="cm">// If error rate is 1% (10x over the 0.1% SLO), burn rate = 10×</span>
+<span class="cm">// Budget exhausted in 43.2/10 = 4.32 minutes → PagerDuty alert!</span></code></pre>
+
+  </div>
+</section>
+
+
+<!-- ════════════════════════════════════════════════════
+     3. LOAD BALANCING
+════════════════════════════════════════════════════ -->
+<section class="topic" id="load-balancing">
+  <div class="topic-header">
+    <div class="num">3</div>
+    <div>
+      <h2>Load Balancing</h2>
+      <p>Distributing incoming traffic across multiple servers to optimize resource utilization</p>
+    </div>
+  </div>
+  <div class="topic-body">
+
+    <div class="tags">
+      <span class="tag">L4 vs L7</span>
+      <span class="tag">Round Robin</span>
+      <span class="tag">Least Connections</span>
+      <span class="tag">Health Checks</span>
+      <span class="tag">Session Persistence</span>
+      <span class="tag">HAProxy</span>
+    </div>
+
+    <h3>Layer 4 vs. Layer 7 Load Balancing</h3>
+    <p>The OSI layer at which the load balancer operates determines what information it can use for routing decisions.</p>
+
+    <table>
+      <tr><th>Feature</th><th>L4 (Transport Layer)</th><th>L7 (Application Layer)</th></tr>
+      <tr><td>Sees</td><td>IP address, TCP/UDP port</td><td>HTTP headers, URL, cookies, body</td></tr>
+      <tr><td>TLS termination</td><td>No (passes through)</td><td>Yes (decrypts, inspects, re-encrypts)</td></tr>
+      <tr><td>Content-based routing</td><td>No</td><td>Yes (/api → API servers, /static → CDN)</td></tr>
+      <tr><td>Performance</td><td>Very fast (kernel-space, no parsing)</td><td>Slower (userspace, full HTTP parse)</td></tr>
+      <tr><td>Use case</td><td>High-throughput, low-latency</td><td>Microservices, API gateway, A/B testing</td></tr>
+      <tr><td>Examples</td><td>AWS NLB, LVS, IPVS</td><td>AWS ALB, Nginx, HAProxy (HTTP mode), Envoy</td></tr>
+    </table>
+
+    <h4>L4 Load Balancing Internals (Linux IPVS)</h4>
+    <p>Linux's IP Virtual Server (IPVS) works at the kernel's netfilter layer. It modifies packet destination NAT (DNAT) at wire speed:</p>
+    <pre><code><span class="cm"># Linux IPVS internal flow:</span>
+<span class="cm"># 1. Packet arrives at LB's VIP (10.0.0.1:80)</span>
+<span class="cm"># 2. netfilter hook intercepts at NF_IP_LOCAL_IN</span>
+<span class="cm"># 3. IPVS looks up connection table (hash on src_ip:src_port:dst_ip:dst_port)</span>
+<span class="cm"># 4. New connection: select backend via scheduling algorithm</span>
+<span class="cm"># 5. DNAT: rewrite dst_ip to selected backend (192.168.1.5:80)</span>
+<span class="cm"># 6. Packet forwarded via routing table</span>
+<span class="cm"># 7. Subsequent packets for same connection: table lookup → same backend</span>
+
+<span class="cm"># IPVS forwarding modes:</span>
+<span class="cm"># NAT mode: LB translates IPs both ways (bottleneck for return traffic)</span>
+<span class="cm"># DR (Direct Routing): backend replies directly to client (LB not in return path!)</span>
+<span class="cm"># Tunneling: encapsulate packets in IP-in-IP (cross-network DR)</span></code></pre>
+
+    <h4>L7 Load Balancing Internals (Nginx/HAProxy)</h4>
+    <div class="diagram">
+<span class="hl">L7 Load Balancer — Request Lifecycle</span>
+
+Client → TCP handshake with LB
+       → TLS handshake (LB decrypts — sees plaintext HTTP)
+       → HTTP Request parsed: Method, URL, Headers, Body
+       → Routing Rules evaluated:
+           if URL starts with /api/v2  → Backend Pool A
+           if Header "X-Region: EU"   → Backend Pool EU
+           if Cookie "beta=true"      → Backend Pool Canary
+       → New TCP connection to selected backend (connection pool reuse)
+       → Forward request (may rewrite headers: X-Forwarded-For, X-Real-IP)
+       → Backend responds → LB forwards to client
+       → Access log written
+    </div>
+
+    <h3>Load Balancing Algorithms — Deep Dive</h3>
+
+    <h4>Round Robin</h4>
+    <p>Requests distributed sequentially: Server 1 → Server 2 → Server 3 → Server 1... Implemented as an atomic counter modulo N. Problem: ignores server load — a server handling a 10-second DB query gets the same RPS as an idle server.</p>
+
+    <h4>Weighted Round Robin</h4>
+    <p>Servers assigned weights proportional to capacity. A server with weight 3 gets 3× the requests of a weight-1 server. HAProxy implements this with a max-weight GCD algorithm to interleave requests smoothly.</p>
+
+    <h4>Least Connections</h4>
+    <p>Route to the backend with fewest <em>active</em> connections. Implemented with an atomic integer per backend. Better than round robin for long-lived connections (WebSockets, file uploads).</p>
+    <pre><code><span class="cm">// Least Connections — internal selection logic</span>
+<span class="kw">function</span> <span class="fn">selectBackend</span>(backends) {
+  <span class="kw">let</span> minConn = Infinity, selected = <span class="kw">null</span>;
+  <span class="kw">for</span> (<span class="kw">const</span> backend <span class="kw">of</span> backends) {
+    <span class="kw">if</span> (backend.healthy && backend.activeConns &lt; minConn) {
+      minConn = backend.activeConns;
+      selected = backend;
+    }
+  }
+  selected.activeConns++;   <span class="cm">// Atomic increment</span>
+  <span class="kw">return</span> selected;
+}
+<span class="cm">// On response: selected.activeConns--  (atomic decrement)</span></code></pre>
+
+    <h4>Least Response Time</h4>
+    <p>Combines least connections with lowest average response time. HAProxy tracks a rolling average of backend response times using Exponential Moving Average (EMA): <code>newEMA = α × latestSample + (1-α) × oldEMA</code>. The backend scoring: <code>score = activeConns × avgResponseTime</code>. Lowest score wins.</p>
+
+    <h4>IP Hash (Sticky Load Balancing without Cookies)</h4>
+    <p><code>backend = hash(client_ip) % N</code>. Same client always goes to same server. Issue: clients behind NAT share an IP → overload one backend. CDNs often use X-Forwarded-For hash instead.</p>
+
+    <h4>Power of Two Random Choices (P2C)</h4>
+    <p>Used by Envoy proxy. Instead of tracking all backends (O(N) scan), pick 2 random backends and route to the better one. Achieves near-optimal load balancing with O(1) selection. Mathematically proven to achieve O(log log N) max load vs. O(log N / log log N) for random selection.</p>
+
+    <h3>Health Checks — How LBs Detect Failures</h3>
+
+    <h4>Passive Health Checks</h4>
+    <p>Monitor real traffic. If a backend returns 5xx errors or times out above a threshold, mark it unhealthy. No extra traffic overhead but detection is reactive (some real user requests fail before detection).</p>
+
+    <h4>Active Health Checks</h4>
+    <p>LB sends synthetic probe requests (HTTP GET /health, TCP connect, or ICMP ping) at regular intervals:</p>
+    <pre><code><span class="cm"># HAProxy health check configuration</span>
+backend api_servers
+  option httpchk GET /health HTTP/1.1\r\nHost:\ internal
+  http-check expect status 200-299
+  default-server inter 2s     <span class="cm"># check every 2 seconds</span>
+                  fall 3      <span class="cm"># 3 consecutive failures → mark DOWN</span>
+                  rise 2      <span class="cm"># 2 consecutive successes → mark UP</span>
+                  timeout connect 1s
+                  timeout check 2s</code></pre>
+
+    <h3>Session Persistence (Sticky Sessions)</h3>
+    <p>Stateful apps require the same client to always hit the same backend. The LB must track client → server affinity:</p>
+
+    <ul>
+      <li><strong>Cookie-based stickiness:</strong> LB inserts a cookie (e.g., <code>SERVERID=backend3</code>) in the first response. Subsequent requests include this cookie → LB routes to same backend.</li>
+      <li><strong>Table-based stickiness:</strong> LB maintains an in-memory table mapping <code>client_ip → backend</code>. Problem: table doesn't survive LB restart. Solution: distributed table in Redis.</li>
+    </ul>
+
+    <div class="callout warn">
+      <strong>⚠️ Sticky Sessions Are an Anti-Pattern for Scale</strong>
+      They create uneven load (one backend handles all sessions of heavy users), complicate failover (session lost on backend failure), and prevent true stateless scaling. Prefer externalizing state (Redis, JWT) and eliminating the need for stickiness.
+    </div>
+
+    <h3>Global Server Load Balancing (GSLB)</h3>
+    <p>DNS-based routing across data centers or cloud regions. Route 53, Cloudflare, and Akamai perform GSLB:</p>
+    <ul>
+      <li><strong>Latency-based routing:</strong> DNS resolver returns the region with lowest RTT from the client's PoP.</li>
+      <li><strong>Failover routing:</strong> Health check fails → remove region from DNS response.</li>
+      <li><strong>Geoproximity routing:</strong> Route based on client's geographic coordinates.</li>
+      <li><strong>Weighted routing:</strong> Send 10% of traffic to new region (canary deployment at DNS level).</li>
+    </ul>
+
+    <h3>Load Balancer High Availability</h3>
+    <p>The LB itself is a single point of failure. Solutions:</p>
+    <div class="diagram">
+<span class="hl">HA Load Balancer Setup (keepalived + VRRP)</span>
+
+                    VIP: 10.0.0.1 (Floating IP)
+                           ↑
+           ┌───────────────┴───────────────┐
+     ┌─────▼──────┐               ┌────────▼─────┐
+     │  LB Active │               │  LB Standby  │
+     │  (Master)  │←──Heartbeat──►│  (Backup)    │
+     │  prio=150  │               │  prio=100    │
+     └─────┬──────┘               └──────────────┘
+           │
+    ┌──────┼──────┐
+  Server1 Server2 Server3
+    </div>
+
+  </div>
+</section>
+
+
+<!-- ════════════════════════════════════════════════════
+     4. RELIABILITY
+════════════════════════════════════════════════════ -->
+<section class="topic" id="reliability">
+  <div class="topic-header">
+    <div class="num">4</div>
+    <div>
+      <h2>Reliability</h2>
+      <p>The ability of a system to function correctly and consistently over time, even under adverse conditions</p>
+    </div>
+  </div>
+  <div class="topic-body">
+
+    <div class="tags">
+      <span class="tag">Fault Tolerance</span>
+      <span class="tag">Circuit Breaker</span>
+      <span class="tag">Retry with Backoff</span>
+      <span class="tag">Bulkhead Pattern</span>
+      <span class="tag">Chaos Engineering</span>
+      <span class="tag">Idempotency</span>
+    </div>
+
+    <h3>Reliability vs. Availability — The Distinction</h3>
+    <p>A system can be <em>available</em> (responding) but <em>unreliable</em> (returning wrong results). <strong>Reliability = correct behavior consistently</strong>. Example: a search engine that's up 100% of the time but returns random results is 100% available and 0% reliable. Reliability encompasses correctness, consistency, and predictability.</p>
+
+    <h3>Failure Modes Taxonomy</h3>
+    <table>
+      <tr><th>Failure Type</th><th>Description</th><th>Detection Difficulty</th></tr>
+      <tr><td>Crash failures</td><td>Node stops and stays stopped (process dies)</td><td>Easy — heartbeat stops</td></tr>
+      <tr><td>Omission failures</td><td>Node stops sending/receiving messages intermittently</td><td>Medium — requires timeouts</td></tr>
+      <tr><td>Timing failures</td><td>Response outside expected time window (too slow)</td><td>Medium — requires deadline tracking</td></tr>
+      <tr><td>Byzantine failures</td><td>Node sends arbitrary/malicious responses (hardware corruption, bugs)</td><td>Hard — requires BFT algorithms</td></tr>
+      <tr><td>Network partition</td><td>Nodes can't communicate but both are alive</td><td>Hard — looks like crash to each side</td></tr>
+    </table>
+
+    <h3>Circuit Breaker Pattern — Internals</h3>
+    <p>Inspired by electrical circuit breakers. Prevents cascading failures when a downstream service is degraded. The circuit breaker is a state machine:</p>
+
+    <div class="diagram">
+<span class="hl">Circuit Breaker State Machine</span>
+
+         Failure threshold exceeded
+  CLOSED ──────────────────────────────→ OPEN
+  (normal)                               (fail fast)
+     ↑                                       │
+     │ Success threshold met         timeout │
+     │                                       ▼
+  CLOSED ←──────── success ─────── HALF-OPEN
+                                   (probe with 1 request)
+    </div>
+
+    <pre><code><span class="kw">class</span> <span class="cls">CircuitBreaker</span> {
+  <span class="kw">constructor</span>(options) {
+    <span class="kw">this</span>.state = <span class="str">'CLOSED'</span>;
+    <span class="kw">this</span>.failureCount = <span class="num">0</span>;
+    <span class="kw">this</span>.failureThreshold = options.failureThreshold || <span class="num">5</span>;
+    <span class="kw">this</span>.recoveryTimeout = options.recoveryTimeout || <span class="num">30000</span>; <span class="cm">// 30s</span>
+    <span class="kw">this</span>.successThreshold = options.successThreshold || <span class="num">2</span>;
+    <span class="kw">this</span>.successCount = <span class="num">0</span>;
+    <span class="kw">this</span>.lastFailureTime = <span class="kw">null</span>;
+  }
+
+  <span class="kw">async</span> <span class="fn">execute</span>(fn) {
+    <span class="kw">if</span> (<span class="kw">this</span>.state === <span class="str">'OPEN'</span>) {
+      <span class="kw">const</span> elapsed = Date.<span class="fn">now</span>() - <span class="kw">this</span>.lastFailureTime;
+      <span class="kw">if</span> (elapsed > <span class="kw">this</span>.recoveryTimeout) {
+        <span class="kw">this</span>.state = <span class="str">'HALF_OPEN'</span>; <span class="cm">// Try one probe request</span>
+      } <span class="kw">else</span> {
+        <span class="kw">throw new</span> Error(<span class="str">'Circuit OPEN: fast fail'</span>); <span class="cm">// Don't even try</span>
+      }
+    }
+
+    <span class="kw">try</span> {
+      <span class="kw">const</span> result = <span class="kw">await</span> <span class="fn">fn</span>();
+      <span class="kw">this</span>.<span class="fn">onSuccess</span>();
+      <span class="kw">return</span> result;
+    } <span class="kw">catch</span> (err) {
+      <span class="kw">this</span>.<span class="fn">onFailure</span>();
+      <span class="kw">throw</span> err;
+    }
+  }
+
+  <span class="fn">onSuccess</span>() {
+    <span class="kw">this</span>.failureCount = <span class="num">0</span>;
+    <span class="kw">if</span> (<span class="kw">this</span>.state === <span class="str">'HALF_OPEN'</span>) {
+      <span class="kw">this</span>.successCount++;
+      <span class="kw">if</span> (<span class="kw">this</span>.successCount >= <span class="kw">this</span>.successThreshold) {
+        <span class="kw">this</span>.state = <span class="str">'CLOSED'</span>; <span class="cm">// Recovered!</span>
+        <span class="kw">this</span>.successCount = <span class="num">0</span>;
+      }
+    }
+  }
+
+  <span class="fn">onFailure</span>() {
+    <span class="kw">this</span>.failureCount++;
+    <span class="kw">this</span>.lastFailureTime = Date.<span class="fn">now</span>();
+    <span class="kw">if</span> (<span class="kw">this</span>.failureCount >= <span class="kw">this</span>.failureThreshold || <span class="kw">this</span>.state === <span class="str">'HALF_OPEN'</span>) {
+      <span class="kw">this</span>.state = <span class="str">'OPEN'</span>; <span class="cm">// Trip the breaker</span>
+      console.<span class="fn">log</span>(<span class="str">'🔴 Circuit opened — fast-failing requests'</span>);
+    }
+  }
+}</code></pre>
+
+    <h3>Retry with Exponential Backoff and Jitter</h3>
+    <p>Retrying immediately on failure hammers an already-struggling service. Exponential backoff spaces out retries. Jitter prevents "thundering herd" (all clients retrying at the same millisecond):</p>
+    <pre><code><span class="kw">async function</span> <span class="fn">retryWithBackoff</span>(fn, maxRetries = <span class="num">5</span>) {
+  <span class="kw">for</span> (<span class="kw">let</span> attempt = <span class="num">0</span>; attempt &lt;= maxRetries; attempt++) {
+    <span class="kw">try</span> {
+      <span class="kw">return await</span> <span class="fn">fn</span>();
+    } <span class="kw">catch</span> (err) {
+      <span class="kw">if</span> (attempt === maxRetries) <span class="kw">throw</span> err;
+      <span class="kw">if</span> (!<span class="fn">isRetryable</span>(err)) <span class="kw">throw</span> err; <span class="cm">// Don't retry 400 Bad Request</span>
+
+      <span class="cm">// Full jitter: random(0, min(cap, base * 2^attempt))</span>
+      <span class="kw">const</span> cap = <span class="num">30000</span>;       <span class="cm">// 30s max</span>
+      <span class="kw">const</span> base = <span class="num">100</span>;        <span class="cm">// 100ms initial</span>
+      <span class="kw">const</span> delay = Math.<span class="fn">random</span>() * Math.<span class="fn">min</span>(cap, base * <span class="num">2</span> ** attempt);
+      <span class="cm">// Attempt 0: 0–100ms, Attempt 1: 0–200ms, Attempt 2: 0–400ms...</span>
+      <span class="kw">await</span> <span class="fn">sleep</span>(delay);
+    }
+  }
+}
+
+<span class="kw">function</span> <span class="fn">isRetryable</span>(err) {
+  <span class="cm">// Retry on: 429, 500, 502, 503, 504, network errors</span>
+  <span class="cm">// Don't retry: 400, 401, 403, 404 (client errors — retrying won't help)</span>
+  <span class="kw">return</span> [<span class="num">429</span>, <span class="num">500</span>, <span class="num">502</span>, <span class="num">503</span>, <span class="num">504</span>].<span class="fn">includes</span>(err.statusCode) || err.<span class="fn">isNetworkError</span>();
+}</code></pre>
+
+    <h3>Bulkhead Pattern</h3>
+    <p>Isolate components so a failure in one doesn't drain resources from others. Named after ship hull compartments — if one section floods, watertight doors contain the damage.</p>
+    <pre><code><span class="cm">// Without bulkhead: all services share one thread pool</span>
+<span class="cm">// If PaymentService is slow → threads fill up → UserService also starves!</span>
+
+<span class="cm">// With bulkhead: separate thread pools per service</span>
+<span class="kw">const</span> paymentPool  = <span class="kw">new</span> <span class="cls">ThreadPool</span>({ maxThreads: <span class="num">10</span> });
+<span class="kw">const</span> inventoryPool = <span class="kw">new</span> <span class="cls">ThreadPool</span>({ maxThreads: <span class="num">10</span> });
+<span class="kw">const</span> userPool     = <span class="kw">new</span> <span class="cls">ThreadPool</span>({ maxThreads: <span class="num">20</span> });
+
+<span class="cm">// PaymentService slow? Its pool saturates, but UserService pool is untouched</span>
+<span class="cm">// Semaphore-based bulkhead: limit concurrent calls to one dependency</span>
+<span class="kw">const</span> semaphore = <span class="kw">new</span> <span class="cls">Semaphore</span>(<span class="num">5</span>); <span class="cm">// max 5 concurrent DB calls</span>
+<span class="kw">await</span> semaphore.<span class="fn">acquire</span>();
+<span class="kw">try</span> { <span class="kw">await</span> db.<span class="fn">query</span>(); }
+<span class="kw">finally</span> { semaphore.<span class="fn">release</span>(); }</code></pre>
+
+    <h3>Idempotency — Critical for Reliable APIs</h3>
+    <p>An operation is idempotent if executing it multiple times has the same effect as executing it once. Essential for safe retries (network failures may cause duplicate requests).</p>
+
+    <table>
+      <tr><th>HTTP Method</th><th>Idempotent?</th><th>Why</th></tr>
+      <tr><td>GET</td><td>✅ Yes</td><td>Read-only, no side effects</td></tr>
+      <tr><td>PUT</td><td>✅ Yes</td><td>Full replacement — result is same regardless of how many times called</td></tr>
+      <tr><td>DELETE</td><td>✅ Yes</td><td>First call deletes, subsequent calls are no-ops (resource already gone)</td></tr>
+      <tr><td>POST</td><td>❌ No</td><td>Creates new resource each time — calling twice = two resources</td></tr>
+      <tr><td>PATCH</td><td>❌ Not always</td><td>Depends on operation (increment vs. set)</td></tr>
+    </table>
+
+    <pre><code><span class="cm">// Making POST idempotent with Idempotency Keys</span>
+<span class="cm">// Client generates a UUID and includes it in header</span>
+POST /payments
+Idempotency-Key: 550e8400-e29b-41d4-a716-446655440000
+
+<span class="cm">// Server logic:</span>
+<span class="kw">async function</span> <span class="fn">createPayment</span>(req) {
+  <span class="kw">const</span> key = req.headers[<span class="str">'idempotency-key'</span>];
+  <span class="kw">if</span> (!key) <span class="kw">throw new</span> Error(<span class="str">'Idempotency-Key required'</span>);
+
+  <span class="cm">// Check if we've seen this key before (Redis with TTL)</span>
+  <span class="kw">const</span> cached = <span class="kw">await</span> redis.<span class="fn">get</span>(<span class="str">`idem:`</span> + key);
+  <span class="kw">if</span> (cached) <span class="kw">return</span> <span class="fn">JSON.parse</span>(cached); <span class="cm">// Return same response!</span>
+
+  <span class="kw">const</span> result = <span class="kw">await</span> db.<span class="fn">createPayment</span>(req.body);
+
+  <span class="cm">// Store result with 24h TTL</span>
+  <span class="kw">await</span> redis.<span class="fn">setex</span>(<span class="str">`idem:`</span> + key, <span class="num">86400</span>, <span class="fn">JSON.stringify</span>(result));
+  <span class="kw">return</span> result;
+}</code></pre>
+
+    <h3>Chaos Engineering</h3>
+    <p>Deliberately injecting failures into production (or production-like) environments to discover weaknesses before they cause incidents. Pioneered by Netflix's Chaos Monkey.</p>
+
+    <div class="callout success">
+      <strong>✅ Chaos Engineering Maturity Model</strong>
+      Level 1: Run chaos in dev/staging.<br/>
+      Level 2: Run chaos in production during business hours with kill switch.<br/>
+      Level 3: Automated continuous chaos in production with automated rollback.<br/>
+      Netflix, Google, Amazon operate at Level 3.
+    </div>
+
+    <h4>Common Chaos Experiments</h4>
+    <ul>
+      <li><strong>Latency injection:</strong> Add 100–500ms to all calls to Service X. Does the system gracefully degrade?</li>
+      <li><strong>Instance termination:</strong> Kill random EC2 instances (Chaos Monkey). Are ASG auto-healing and deployment pipelines working?</li>
+      <li><strong>Network partition:</strong> Block traffic between AZs. Does multi-AZ failover work?</li>
+      <li><strong>CPU stress:</strong> Pin CPU at 90% on database. Do application-level timeouts trigger correctly?</li>
+      <li><strong>Disk full:</strong> Fill up disk on logging server. Does the app handle ENOSPC without crashing?</li>
+    </ul>
+
+  </div>
+</section>
+
+
+<!-- ════════════════════════════════════════════════════
+     5. PROXY SERVERS
+════════════════════════════════════════════════════ -->
+<section class="topic" id="proxy-servers">
+  <div class="topic-header">
+    <div class="num">5</div>
+    <div>
+      <h2>Proxy Servers</h2>
+      <p>Intermediaries that intercept, inspect, and forward network traffic between clients and servers</p>
+    </div>
+  </div>
+  <div class="topic-body">
+
+    <div class="tags">
+      <span class="tag">Forward Proxy</span>
+      <span class="tag">Reverse Proxy</span>
+      <span class="tag">Transparent Proxy</span>
+      <span class="tag">MITM</span>
+      <span class="tag">TLS Termination</span>
+      <span class="tag">API Gateway</span>
+    </div>
+
+    <h3>Forward Proxy — Internals</h3>
+    <p>Sits between clients and the internet. Clients are explicitly configured to send requests to the proxy (or traffic is transparently redirected). The proxy makes requests on clients' behalf.</p>
+
+    <div class="diagram">
+<span class="hl">Forward Proxy</span>
+
+ Corp Network             DMZ              Internet
+┌──────────┐          ┌────────┐         ┌──────────┐
+│  Client  │─HTTP──→  │ Squid  │─HTTP──→ │ Google   │
+│ 10.0.0.5 │          │  Proxy │         │ 142.x.x  │
+└──────────┘          └────────┘         └──────────┘
+   knows about proxy    ↑                  sees proxy IP, not client IP
+                        │
+               ┌─────────────────┐
+               │ Filtering rules  │
+               │ URL blocklist    │
+               │ SSL inspection   │
+               │ Access logging   │
+               └─────────────────┘
+    </div>
+
+    <h4>HTTP CONNECT Tunneling (for HTTPS)</h4>
+    <p>For HTTPS requests, a forward proxy can't inspect the encrypted payload. The client uses the <code>CONNECT</code> method to request a TCP tunnel through the proxy:</p>
+    <pre><code><span class="cm">// Client sends to proxy:</span>
+CONNECT www.google.com:<span class="num">443</span> HTTP/<span class="num">1.1</span>
+Host: www.google.com:<span class="num">443</span>
+
+<span class="cm">// Proxy responds:</span>
+HTTP/<span class="num">1.1</span> <span class="num">200</span> Connection Established
+
+<span class="cm">// Now client does TLS handshake directly with google.com THROUGH the proxy</span>
+<span class="cm">// Proxy is a blind TCP pipe — it forwards bytes without seeing content</span>
+<span class="cm">// SSL inspection proxies (Zscaler, Blue Coat) perform MITM:</span>
+<span class="cm">//   - Proxy presents its own CA-signed cert to client</span>
+<span class="cm">//   - Proxy makes separate TLS connection to server</span>
+<span class="cm">//   - Proxy decrypts, inspects, re-encrypts both directions</span></code></pre>
+
+    <h3>Reverse Proxy — Internals</h3>
+    <p>Clients don't know backend servers exist. They connect to the reverse proxy's IP (exposed publicly). The proxy forwards to internal backends. This is the most common proxy in production systems (Nginx, HAProxy, Envoy, Caddy).</p>
+
+    <div class="diagram">
+<span class="hl">Reverse Proxy — Full Request Flow</span>
+
+Internet                 Reverse Proxy (Nginx)        Internal Network
+                         ┌─────────────────────┐
+Client ──HTTPS──→ VIP ──→│ TLS Termination      │──→ Backend 1 (HTTP)
+  sees only             │ Rate Limiting         │──→ Backend 2 (HTTP)
+  proxy's IP            │ Auth Header Injection │──→ Backend 3 (HTTP)
+                         │ Request Routing       │
+                         │ Response Compression  │
+                         │ Access Logging        │
+                         └─────────────────────┘
+    </div>
+
+    <h4>Nginx as Reverse Proxy — Internals</h4>
+    <p>Nginx uses an event-driven, non-blocking I/O model with worker processes (one per CPU core). Each worker uses <code>epoll</code> (Linux) to handle thousands of simultaneous connections:</p>
+    <pre><code><span class="cm"># nginx.conf — reverse proxy with caching and rate limiting</span>
+upstream api_backend {
+  least_conn;                        <span class="cm"># Load balancing algorithm</span>
+  server 10.0.1.1:8080 weight=3;
+  server 10.0.1.2:8080 weight=3;
+  server 10.0.1.3:8080 backup;      <span class="cm"># Only used if others fail</span>
+  keepalive 32;                      <span class="cm"># Persistent connections to backend</span>
+}
+
+proxy_cache_path /var/cache/nginx   <span class="cm"># Proxy cache configuration</span>
+  levels=1:2
+  keys_zone=api_cache:10m           <span class="cm"># 10MB shared memory for keys</span>
+  max_size=1g
+  inactive=60m;
+
+server {
+  listen 443 ssl http2;
+  ssl_certificate     /etc/ssl/cert.pem;
+  ssl_certificate_key /etc/ssl/key.pem;
+
+  location /api/ {
+    limit_req zone=api_rate burst=20;  <span class="cm"># Rate limiting (token bucket)</span>
+    proxy_pass http://api_backend;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_cache api_cache;
+    proxy_cache_valid 200 5m;          <span class="cm"># Cache 200 responses for 5 minutes</span>
+    proxy_cache_use_stale error timeout; <span class="cm"># Serve stale on backend error</span>
+  }
+}</code></pre>
+
+    <h3>Transparent Proxy</h3>
+    <p>Clients are unaware of the proxy. Traffic is intercepted at the network level using iptables/nftables rules (REDIRECT or TPROXY targets). No client configuration required.</p>
+    <pre><code><span class="cm"># iptables transparent proxy — redirect all HTTP to local proxy on port 3128</span>
+iptables -t nat -A PREROUTING \
+  -i eth0 \
+  -p tcp \
+  --dport 80 \
+  -j REDIRECT --to-port 3128
+
+<span class="cm"># The proxy process must use SO_ORIGINAL_DST socket option</span>
+<span class="cm"># to retrieve the original destination IP the client intended</span>
+getsockopt(fd, SOL_IP, SO_ORIGINAL_DST, &original_addr, &len);</code></pre>
+
+    <h3>Service Mesh Sidecar Proxy (Envoy)</h3>
+    <p>In microservices, each service instance is paired with a sidecar proxy (Envoy). All inter-service traffic flows through the sidecar, enabling transparent observability, mTLS, retries, and circuit breaking without application code changes.</p>
+
+    <div class="diagram">
+<span class="hl">Service Mesh with Envoy Sidecar</span>
+
+Service A Pod               Service B Pod
+┌───────────────────┐       ┌───────────────────┐
+│ App Container     │       │ App Container     │
+│  127.0.0.1:8080   │       │  127.0.0.1:8080   │
+└────────┬──────────┘       └────────┬──────────┘
+         │ localhost                  │ localhost
+┌────────▼──────────┐       ┌────────▼──────────┐
+│ Envoy Sidecar     │──mTLS→│ Envoy Sidecar     │
+│ Outbound: 15001   │       │ Inbound: 15006    │
+│ - mTLS            │       │ - mTLS validation │
+│ - Retries         │       │ - Rate limiting   │
+│ - Circuit breaker │       │ - Access logging  │
+│ - Tracing (Jaeger)│       │ - Authz check     │
+└───────────────────┘       └───────────────────┘
+         ↕
+  Istio Control Plane (istiod)
+  Pushes config via xDS API (gRPC streaming)
+    </div>
+
+    <h3>API Gateway — Extended Reverse Proxy</h3>
+    <p>An API Gateway is a feature-rich reverse proxy handling cross-cutting concerns:</p>
+
+    <table>
+      <tr><th>Feature</th><th>How It Works Internally</th></tr>
+      <tr><td>Authentication</td><td>JWT validation (HMAC/RSA signature check), API key lookup in Redis, OAuth2 token introspection</td></tr>
+      <tr><td>Rate Limiting</td><td>Token bucket or sliding window counter per client_id in Redis. Distributed: Lua script in Redis for atomic check-and-decrement</td></tr>
+      <tr><td>Request Transformation</td><td>JSON path mapping, header injection/removal, protocol translation (REST → gRPC)</td></tr>
+      <tr><td>Response Caching</td><td>Cache-Control header aware, ETags, Vary header handling</td></tr>
+      <tr><td>Request Aggregation</td><td>Fan out to multiple services, aggregate responses (BFF pattern)</td></tr>
+      <tr><td>Circuit Breaking</td><td>Per-route state machine (see Circuit Breaker section)</td></tr>
+    </table>
+
+    <h4>Rate Limiting — Token Bucket Algorithm (Internals)</h4>
+    <pre><code><span class="cm">-- Redis Lua script: atomic token bucket rate limiter</span>
+<span class="kw">local</span> key = KEYS[<span class="num">1</span>]         <span class="cm">-- e.g. "ratelimit:user:123"</span>
+<span class="kw">local</span> capacity = <span class="fn">tonumber</span>(ARGV[<span class="num">1</span>])   <span class="cm">-- max tokens (e.g. 100)</span>
+<span class="kw">local</span> refill_rate = <span class="fn">tonumber</span>(ARGV[<span class="num">2</span>]) <span class="cm">-- tokens per second (e.g. 10)</span>
+<span class="kw">local</span> now = <span class="fn">tonumber</span>(ARGV[<span class="num">3</span>])         <span class="cm">-- current timestamp (ms)</span>
+<span class="kw">local</span> cost = <span class="fn">tonumber</span>(ARGV[<span class="num">4</span>])         <span class="cm">-- tokens this request costs (1)</span>
+
+<span class="kw">local</span> bucket = redis.<span class="fn">call</span>(<span class="str">'HMGET'</span>, key, <span class="str">'tokens'</span>, <span class="str">'last_refill'</span>)
+<span class="kw">local</span> tokens = <span class="fn">tonumber</span>(bucket[<span class="num">1</span>]) or capacity
+<span class="kw">local</span> last_refill = <span class="fn">tonumber</span>(bucket[<span class="num">2</span>]) or now
+
+<span class="cm">-- Refill tokens based on elapsed time</span>
+<span class="kw">local</span> elapsed = (now - last_refill) / <span class="num">1000</span>
+tokens = math.<span class="fn">min</span>(capacity, tokens + elapsed * refill_rate)
+
+<span class="kw">if</span> tokens >= cost <span class="kw">then</span>
+  tokens = tokens - cost
+  redis.<span class="fn">call</span>(<span class="str">'HMSET'</span>, key, <span class="str">'tokens'</span>, tokens, <span class="str">'last_refill'</span>, now)
+  redis.<span class="fn">call</span>(<span class="str">'EXPIRE'</span>, key, <span class="num">3600</span>)
+  <span class="kw">return</span> <span class="num">1</span>  <span class="cm">-- Allowed</span>
+<span class="kw">else</span>
+  <span class="kw">return</span> <span class="num">0</span>  <span class="cm">-- Rate limited (HTTP 429)</span>
+<span class="kw">end</span></code></pre>
+
+  </div>
+</section>
+
+
+<!-- ════════════════════════════════════════════════════
+     6. DNS
+════════════════════════════════════════════════════ -->
+<section class="topic" id="dns">
+  <div class="topic-header">
+    <div class="num">6</div>
+    <div>
+      <h2>DNS (Domain Name System)</h2>
+      <p>The internet's distributed, hierarchical naming system — translating human-readable hostnames to IP addresses</p>
+    </div>
+  </div>
+  <div class="topic-body">
+
+    <div class="tags">
+      <span class="tag">Resolution Chain</span>
+      <span class="tag">Record Types</span>
+      <span class="tag">TTL</span>
+      <span class="tag">DNSSEC</span>
+      <span class="tag">GeoDNS</span>
+      <span class="tag">Split-Horizon DNS</span>
+    </div>
+
+    <h3>DNS Architecture — The Hierarchy</h3>
+    <p>DNS is a globally distributed, hierarchical database with ~1.3 billion records. It's organized as an inverted tree:</p>
+
+    <div class="diagram">
+<span class="hl">DNS Hierarchy</span>
+
+                    <span class="hl">. (Root)</span>              ← 13 root server clusters (A–M)
+                    (managed by IANA)        ← Anycast — 1000+ physical servers
+           ┌────────────────────────────┐
+           ▼            ▼              ▼
+         .com          .org           .io        ← TLD servers
+      (Verisign)    (PIR)          (IANA)
+           ▼
+        google.com                              ← Authoritative NS
+     (ns1.google.com, ns2.google.com)           ← Google's name servers
+           ▼
+        www.google.com → A record → 142.250.x.x  ← Final answer
+    </div>
+
+    <h3>DNS Resolution — Full Walk-Through</h3>
+    <p>When you type <code>www.example.com</code> in your browser, here's exactly what happens:</p>
+
+    <div class="diagram">
+<span class="hl">DNS Resolution Chain (recursive + iterative)</span>
+
+Browser → OS Resolver (check /etc/hosts, local cache)
+  ↓ Cache MISS
+OS → Recursive Resolver (ISP's 8.8.8.8 or 1.1.1.1)
+  ↓ Resolver cache MISS
+Recursive Resolver → Root Server (.)
+  ← "I don't know www.example.com, but .com TLD is at 192.5.6.30"
+  ↓
+Recursive Resolver → .com TLD Server (192.5.6.30)
+  ← "I don't know, but example.com NS is at ns1.example.com (205.251.x.x)"
+  ↓
+Recursive Resolver → Authoritative NS (ns1.example.com)
+  ← "www.example.com → A record → 93.184.216.34, TTL=3600"
+  ↓
+Recursive Resolver → OS (caches for TTL=3600s)
+  ↓
+OS → Browser (caches internally)
+Browser → TCP connect to 93.184.216.34:443
+    </div>
+
+    <h4>The Roles Explained</h4>
+    <ul>
+      <li><strong>Stub Resolver:</strong> Lives in OS (libc's <code>getaddrinfo()</code>). Doesn't do recursion — delegates to configured recursive resolver.</li>
+      <li><strong>Recursive Resolver (Full Service Resolver):</strong> Does all the work. Caches responses. Examples: 8.8.8.8 (Google), 1.1.1.1 (Cloudflare), ISP resolvers.</li>
+      <li><strong>Root Servers:</strong> 13 named clusters (A.root-servers.net through M.root-servers.net), each running hundreds of Anycast nodes globally. They only know where TLD servers are.</li>
+      <li><strong>TLD Name Servers:</strong> Know which authoritative servers serve each second-level domain (e.g., <code>.com</code> TLD knows about <code>example.com</code> → <code>ns1.example.com</code>).</li>
+      <li><strong>Authoritative Name Servers:</strong> The final source of truth. Return actual A/AAAA/CNAME records. Managed by domain owner (Route 53, Cloudflare DNS, ns1.com).</li>
+    </ul>
+
+    <h3>DNS Record Types — Deep Dive</h3>
+    <table>
+      <tr><th>Record</th><th>Purpose</th><th>Example</th><th>Internal Details</th></tr>
+      <tr><td><strong>A</strong></td><td>Hostname → IPv4</td><td><code>www → 93.184.216.34</code></td><td>32-bit IPv4. Can have multiple A records → DNS round-robin LB</td></tr>
+      <tr><td><strong>AAAA</strong></td><td>Hostname → IPv6</td><td><code>www → 2606:2800::1</code></td><td>128-bit IPv6. OS prefers AAAA over A if both exist (Happy Eyeballs)</td></tr>
+      <tr><td><strong>CNAME</strong></td><td>Alias → canonical name</td><td><code>blog → www.example.com</code></td><td>Resolver follows chain. Max chain depth ~10. Can't coexist with other records at same name.</td></tr>
+      <tr><td><strong>MX</strong></td><td>Mail server</td><td><code>@ → mail.example.com (priority 10)</code></td><td>Priority field — lower = preferred. Multiple MX = failover</td></tr>
+      <tr><td><strong>TXT</strong></td><td>Arbitrary text</td><td>SPF, DKIM, domain verification</td><td>SPF: "v=spf1 include:_spf.google.com ~all" — limits mail spoofing</td></tr>
+      <tr><td><strong>NS</strong></td><td>Name servers for zone</td><td><code>example.com → ns1.example.com</code></td><td>Delegation record — TLD stores these, not the domain owner's zone</td></tr>
+      <tr><td><strong>SOA</strong></td><td>Zone metadata</td><td>Serial, refresh, retry, expire, minimum TTL</td><td>Serial incremented on zone change — triggers secondary NS to re-transfer</td></tr>
+      <tr><td><strong>SRV</strong></td><td>Service location</td><td><code>_http._tcp.example.com → priority weight port target</code></td><td>Used by SIP, XMPP, Kubernetes service discovery</td></tr>
+      <tr><td><strong>PTR</strong></td><td>Reverse lookup (IP → hostname)</td><td><code>34.216.184.93.in-addr.arpa → www.example.com</code></td><td>Lives in in-addr.arpa zone. Used for email server validation.</td></tr>
+      <tr><td><strong>CAA</strong></td><td>Certificate Authority Authorization</td><td><code>0 issue "letsencrypt.org"</code></td><td>Specifies which CAs can issue TLS certs for domain — prevents misissued certs</td></tr>
+    </table>
+
+    <h3>TTL (Time to Live) — The Caching Knob</h3>
+    <p>TTL is set by the zone owner on each DNS record. It controls how long resolvers and clients cache the answer before re-querying.</p>
+    <pre><code>www.example.com.  300  IN  A  93.184.216.34
+<span class="cm">#                 ^^^           </span>
+<span class="cm">#                 TTL=300s (5 minutes)</span>
+
+<span class="cm"># TTL Trade-offs:</span>
+<span class="cm"># Low TTL (30–60s): Fast failover, but high query volume to your DNS servers</span>
+<span class="cm"># High TTL (3600s+): Fewer queries, but slow propagation on IP changes</span>
+
+<span class="cm"># Production pattern for planned failovers:</span>
+<span class="cm"># 1. Two weeks before: Lower TTL from 3600 to 60 seconds</span>
+<span class="cm"># 2. Wait for old TTL to expire everywhere (3600s)</span>
+<span class="cm"># 3. Change IP — clients pick up change within 60s</span>
+<span class="cm"># 4. After migration: raise TTL back to 3600s</span></code></pre>
+
+    <h3>DNSSEC — Cryptographic Authentication</h3>
+    <p>DNS responses are unsigned by default — vulnerable to cache poisoning attacks (Kaminsky attack 2008: inject fake DNS responses by flooding with guesses). DNSSEC adds cryptographic signatures:</p>
+
+    <div class="diagram">
+<span class="hl">DNSSEC Chain of Trust</span>
+
+Root (.) zone
+  DNSKEY (KSK): public key for root
+  DS record signed by IANA's root private key
+       ↓ trust delegated
+.com TLD zone
+  DNSKEY (KSK): .com's public key
+  DS record in root zone = hash of .com's DNSKEY
+       ↓ trust delegated
+example.com zone
+  DNSKEY (ZSK): zone signing key (rotated frequently)
+  RRSIG on every record set = signature using ZSK
+  DS record in .com zone = hash of example.com DNSKEY
+
+Resolver verifies:
+  1. Root DNSKEY trusted (hardcoded trust anchor)
+  2. .com DS matches .com DNSKEY  ✓
+  3. example.com DS matches example.com DNSKEY  ✓
+  4. RRSIG on A record validates against ZSK  ✓
+  → Response is authentic and unmodified
+    </div>
+
+    <pre><code><span class="cm"># DNSSEC record types:</span>
+<span class="cm"># DNSKEY: Public key published in zone</span>
+<span class="cm"># RRSIG: Signature over an RRset (set of records of same type)</span>
+<span class="cm"># DS: Delegation Signer — hash of child zone's DNSKEY, stored in parent</span>
+<span class="cm"># NSEC/NSEC3: Authenticated denial of existence</span>
+<span class="cm">#   (proves a name/record doesn't exist without leaking all zone names)</span>
+
+<span class="cm"># NSEC3 prevents zone enumeration (NSEC walking):</span>
+<span class="cm"># Instead of: a.example.com → c.example.com (reveals b doesn't exist)</span>
+<span class="cm"># Uses:        H(a) → H(c) (hashed names — can't reverse to enumerate zone)</span></code></pre>
+
+    <h3>GeoDNS — DNS-Based Traffic Routing</h3>
+    <p>Authoritative DNS servers return different answers based on the <strong>source IP of the recursive resolver</strong> (which proxies the client's region):</p>
+    <pre><code><span class="cm">// Route 53 Latency-Based Routing (pseudo-config):</span>
+www.example.com {
+  record: <span class="str">"52.1.x.x"</span>   region: us-east-1    latency-routing: true
+  record: <span class="str">"52.2.x.x"</span>   region: eu-west-1    latency-routing: true
+  record: <span class="str">"52.3.x.x"</span>   region: ap-east-1    latency-routing: true
+}
+<span class="cm">// Query from Tokyo resolver → Route 53 → returns ap-east-1 IP
+// Query from London resolver → Route 53 → returns eu-west-1 IP</span>
+
+<span class="cm">// ECS (EDNS Client Subnet) — RFC 7871:</span>
+<span class="cm">// Problem: Recursive resolver may be far from actual client</span>
+<span class="cm">// ECS solution: Resolver includes client's /24 prefix in DNS query</span>
+<span class="cm">// Authoritative can make geography decision based on real client subnet</span>
+<span class="cm">// Deployed by Google, Cloudflare, OpenDNS resolvers</span></code></pre>
+
+    <h3>Split-Horizon DNS (Split-Brain DNS)</h3>
+    <p>Same hostname resolves to different IPs depending on where the query originates. Internal queries (from corporate network or VPC) get private IPs; external queries get public IPs.</p>
+    <pre><code><span class="cm"># External DNS (Cloudflare / Route 53 public zone):</span>
+api.example.com  →  52.100.200.300  (public load balancer IP)
+
+<span class="cm"># Internal DNS (Route 53 private zone / corporate DNS):</span>
+api.example.com  →  10.0.1.50  (internal load balancer — no internet round-trip!)
+
+<span class="cm"># Implemented in AWS with Route 53 Private Hosted Zones:</span>
+<span class="cm"># Private zone associated with VPC overrides public zone for queries from VPC</span>
+<span class="cm"># Internal services get low-latency direct routing, security (no public exposure)</span></code></pre>
+
+    <h3>DNS Caching Layers and Cache Poisoning</h3>
+
+    <h4>Caching Layers (request flows through all)</h4>
+    <ol>
+      <li><strong>Browser DNS cache:</strong> chrome://net-internals/#dns. Respects TTL. Typically 60s min even for lower TTLs.</li>
+      <li><strong>OS resolver cache:</strong> nscd (Linux), mDNSResponder (macOS). Reads /etc/hosts first.</li>
+      <li><strong>Recursive resolver cache:</strong> ISP/corporate resolver. Shared across all clients — cache is warm for popular domains.</li>
+      <li><strong>Authoritative server cache:</strong> In-memory zone data (BIND, PowerDNS). Refreshed via zone transfer (AXFR/IXFR).</li>
+    </ol>
+
+    <h4>Kaminsky Cache Poisoning Attack (2008) — The Mechanics</h4>
+    <pre><code><span class="cm">// Attack flow (before DNSSEC was widespread):</span>
+<span class="cm">// 1. Attacker controls evil.com</span>
+<span class="cm">// 2. Attacker asks resolver: "What is random1234.evil.com?"</span>
+<span class="cm">// 3. Resolver queries ns1.evil.com (attacker-controlled)</span>
+<span class="cm">// 4. Attacker floods resolver with fake responses claiming:</span>
+<span class="cm">//    "random1234.evil.com → 1.2.3.4"</span>
+<span class="cm">//    AND "bank.com NS is ns1.evil.com" (in additional section)</span>
+<span class="cm">// 5. If attacker guesses 16-bit transaction ID before real response:</span>
+<span class="cm">//    Resolver caches poisoned NS record for bank.com!</span>
+<span class="cm">//    All users asking for bank.com → attacker's server</span>
+
+<span class="cm">// Mitigations:</span>
+<span class="cm">// - Source port randomization (16-bit port + 16-bit txid = 32-bit entropy)</span>
+<span class="cm">// - 0x20 encoding (randomize case, e.g., "bAnK.CoM" — response must match)</span>
+<span class="cm">// - DNSSEC (cryptographic — no guessing possible)</span></code></pre>
+
+    <h3>DNS over HTTPS (DoH) and DNS over TLS (DoT)</h3>
+    <p>Traditional DNS is plaintext UDP on port 53 — ISPs and network operators can surveil or manipulate all DNS queries. DoH and DoT encrypt DNS:</p>
+
+    <table>
+      <tr><th></th><th>DNS over TLS (DoT)</th><th>DNS over HTTPS (DoH)</th></tr>
+      <tr><td>Port</td><td>853 (TCP)</td><td>443 (TCP) — same as HTTPS</td></tr>
+      <tr><td>Protocol</td><td>TLS wrapping DNS wire format</td><td>HTTPS: GET/POST with application/dns-message</td></tr>
+      <tr><td>Detectability</td><td>Visible (port 853 is DNS-specific)</td><td>Indistinguishable from HTTPS traffic</td></tr>
+      <tr><td>Adoption</td><td>Android 9+ Private DNS, Stubby</td><td>Firefox, Chrome, Cloudflare 1.1.1.1</td></tr>
+    </table>
+
+    <pre><code><span class="cm">// DoH request (RFC 8484):</span>
+GET /dns-query?dns=AAABAAABAAAAAAAWM2RuczEBcDEBb3JnAAABAAE HTTP/2
+Host: cloudflare-dns.com
+Accept: application/dns-message
+
+<span class="cm">// Base64url-encoded DNS wire format query for www.example.com A record</span>
+<span class="cm">// Response: binary DNS message in application/dns-message Content-Type</span></code></pre>
+
+    <div class="callout success">
+      <strong>✅ DNS for System Design Interviews — Key Points</strong>
+      1. DNS is the first thing that happens on every request — its TTL directly affects failover time.<br/>
+      2. Low TTL (60s) = fast failover but 60× more DNS queries (cost + load on NS).<br/>
+      3. GeoDNS/latency routing is a key tool for multi-region architecture.<br/>
+      4. DNS TTL propagation delay must be factored into incident response plans.<br/>
+      5. Split-horizon DNS is essential for internal service discovery in cloud architectures.
+    </div>
+
+  </div>
+</section>
+
+</main>
+
+<footer>
+  <p>System Design Deep Dive · Advanced Reference Document · All 6 Core Topics Covered</p>
+  <p style="margin-top:6px; font-size:0.78rem;">Scalability · Availability · Load Balancing · Reliability · Proxy Servers · DNS</p>
+</footer>
+
+</body>
+</html>

@@ -1,0 +1,1166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>System Design Deep Dive - Advanced Technical Guide</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            line-height: 1.8;
+            max-width: 1100px;
+            margin: 0 auto;
+            padding: 40px;
+            background: #f8f9fa;
+            color: #2c3e50;
+        }
+        h1 {
+            text-align: center;
+            color: #1a252f;
+            border-bottom: 3px solid #3498db;
+            padding-bottom: 15px;
+            font-size: 2.2em;
+        }
+        h2 {
+            color: #2980b9;
+            border-left: 5px solid #3498db;
+            padding-left: 15px;
+            margin-top: 50px;
+            font-size: 1.8em;
+        }
+        h3 {
+            color: #34495e;
+            margin-top: 30px;
+            font-size: 1.4em;
+        }
+        h4 {
+            color: #555;
+            margin-top: 20px;
+            font-size: 1.1em;
+        }
+        .section {
+            background: #fff;
+            padding: 30px;
+            border-radius: 8px;
+            margin: 20px 0;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.08);
+        }
+        code {
+            background: #ecf0f1;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9em;
+        }
+        pre {
+            background: #2c3e50;
+            color: #ecf0f1;
+            padding: 20px;
+            border-radius: 6px;
+            overflow-x: auto;
+            font-size: 0.9em;
+            line-height: 1.5;
+        }
+        .example {
+            background: #eaf6ff;
+            border-left: 4px solid #3498db;
+            padding: 15px 20px;
+            margin: 15px 0;
+            border-radius: 0 6px 6px 0;
+        }
+        .important {
+            background: #fef9e7;
+            border-left: 4px solid #f39c12;
+            padding: 15px 20px;
+            margin: 15px 0;
+            border-radius: 0 6px 6px 0;
+        }
+        .diagram {
+            background: #f4f6f9;
+            border: 1px solid #ddd;
+            padding: 20px;
+            margin: 15px 0;
+            border-radius: 6px;
+            font-family: 'Courier New', monospace;
+            white-space: pre;
+            overflow-x: auto;
+            font-size: 0.85em;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 15px 0;
+        }
+        th, td {
+            border: 1px solid #ddd;
+            padding: 12px;
+            text-align: left;
+        }
+        th {
+            background: #3498db;
+            color: white;
+        }
+        tr:nth-child(even) {
+            background: #f2f2f2;
+        }
+        .toc {
+            background: #fff;
+            padding: 25px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.08);
+        }
+        .toc a {
+            text-decoration: none;
+            color: #2980b9;
+            display: block;
+            padding: 5px 0;
+        }
+        .toc a:hover {
+            color: #1a5276;
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+
+<h1>System Design Deep Dive</h1>
+<p style="text-align:center; font-size:1.1em; color:#555;">An Advanced Technical Guide for Experienced Engineers</p>
+
+<div class="toc">
+    <h3>Table of Contents</h3>
+    <a href="#scalability">1. Scalability</a>
+    <a href="#availability">2. Availability</a>
+    <a href="#load-balancing">3. Load Balancing</a>
+    <a href="#reliability">4. Reliability</a>
+    <a href="#proxy-servers">5. Proxy Servers</a>
+    <a href="#dns">6. DNS (Domain Name System)</a>
+</div>
+
+<!-- ==================== SCALABILITY ==================== -->
+<h2 id="scalability">1. Scalability</h2>
+<div class="section">
+
+    <h3>1.1 What Scalability Really Means Internally</h3>
+    <p>Scalability is the capability of a system to handle a growing amount of work by adding resources. It's not just "adding more servers"—it involves fundamental architectural decisions about how data flows, how state is managed, and how components communicate under increasing load.</p>
+    <p>A system is scalable if its performance characteristics (latency, throughput) degrade gracefully—or not at all—as the workload increases proportionally with added resources.</p>
+
+    <h3>1.2 Vertical Scaling (Scale Up)</h3>
+    <p>Vertical scaling means increasing the capacity of a single machine—adding more CPU cores, RAM, faster SSDs, or upgrading to a more powerful NIC.</p>
+
+    <h4>How It Works Internally:</h4>
+    <ul>
+        <li><strong>CPU Scaling:</strong> Adding cores allows the OS scheduler (e.g., Linux CFS - Completely Fair Scheduler) to distribute threads across cores. However, Amdahl's Law limits the speedup: <code>Speedup = 1 / (S + (1-S)/N)</code> where S is the serial fraction and N is the number of processors.</li>
+        <li><strong>Memory Scaling:</strong> More RAM means larger page caches, reducing disk I/O. The kernel's virtual memory manager uses page tables (4-level on x86_64) to map virtual addresses to physical frames. More RAM = fewer page faults = fewer expensive disk reads.</li>
+        <li><strong>Disk I/O Scaling:</strong> NVMe SSDs communicate via PCIe lanes directly, bypassing the SATA/AHCI bottleneck. They support multiple I/O queues (up to 65,535) compared to SATA's single queue of depth 32.</li>
+    </ul>
+
+    <div class="important">
+        <strong>Limitations:</strong> There's a hardware ceiling (you can't buy a single machine with 10TB RAM easily). Single point of failure remains. Context switching overhead increases with too many threads on limited cores. NUMA (Non-Uniform Memory Access) effects mean not all RAM access is equal on multi-socket systems.
+    </div>
+
+    <h3>1.3 Horizontal Scaling (Scale Out)</h3>
+    <p>Horizontal scaling means adding more machines to distribute the workload. This is what modern distributed systems rely on.</p>
+
+    <h4>How It Works Internally:</h4>
+
+    <h4>1.3.1 Stateless Service Scaling</h4>
+    <p>Stateless services (e.g., API servers) are the easiest to scale horizontally. Each request contains all information needed to process it. No shared mutable state between instances.</p>
+    <pre>
+// Stateless API server - any instance can handle any request
+app.get('/user/:id', async (req, res) => {
+    // All state comes from the request + external data store
+    const user = await database.query('SELECT * FROM users WHERE id = ?', [req.params.id]);
+    res.json(user);
+});
+    </pre>
+    <p>Behind the scenes, a load balancer distributes incoming TCP connections across instances. Each instance maintains its own connection pool to the database.</p>
+
+    <h4>1.3.2 Stateful Service Scaling - The Hard Problem</h4>
+    <p>When services hold state (sessions, caches, in-memory data), scaling requires:</p>
+    <ul>
+        <li><strong>Sticky Sessions:</strong> The load balancer routes requests from the same client to the same backend (using cookies or IP hash). Problem: uneven load distribution, failover loses state.</li>
+        <li><strong>Externalized State:</strong> Move state to a shared store (Redis, Memcached). Now services are stateless again, but you've moved the scaling problem to the data layer.</li>
+        <li><strong>Partitioned State (Sharding):</strong> Distribute state across nodes using consistent hashing or range-based partitioning.</li>
+    </ul>
+
+    <h4>1.3.3 Database Horizontal Scaling</h4>
+    <p><strong>Sharding</strong> partitions data across multiple database instances. Each shard holds a subset of the data.</p>
+
+    <div class="diagram">
+    Sharding Strategies:
+
+    1. Hash-Based Sharding:
+       shard_id = hash(partition_key) % num_shards
+
+       User ID 12345 → hash(12345) = 0xA3F2... → mod 4 → Shard 2
+
+    2. Range-Based Sharding:
+       Users A-F → Shard 1
+       Users G-M → Shard 2
+       Users N-S → Shard 3
+       Users T-Z → Shard 4
+
+    3. Directory-Based Sharding:
+       Lookup service maps keys → shards
+       Flexible but adds latency + single point of failure
+    </div>
+
+    <p><strong>Consistent Hashing (Deep Dive):</strong></p>
+    <p>Traditional modular hashing (<code>hash(key) % N</code>) breaks when N changes—almost all keys remap. Consistent hashing solves this:</p>
+    <ul>
+        <li>Imagine a ring of values [0, 2^32 - 1]</li>
+        <li>Each node is hashed to a position on the ring</li>
+        <li>Each key is hashed and walks clockwise to find its assigned node</li>
+        <li>When a node is added/removed, only K/N keys need to move (where K = total keys, N = total nodes)</li>
+        <li><strong>Virtual nodes:</strong> Each physical node maps to multiple positions on the ring (e.g., 150-200 vnodes) to ensure even distribution. Without vnodes, node removal can cause cascading hotspots.</li>
+    </ul>
+
+    <pre>
+// Consistent Hashing Implementation Concept
+class ConsistentHash {
+    constructor(nodes, virtualNodeCount = 150) {
+        this.ring = new TreeMap(); // sorted map
+        for (const node of nodes) {
+            for (let i = 0; i < virtualNodeCount; i++) {
+                const hash = md5(`${node}-vnode-${i}`);
+                this.ring.set(hash, node);
+            }
+        }
+    }
+
+    getNode(key) {
+        const hash = md5(key);
+        // Find the first node position >= hash (clockwise walk)
+        const entry = this.ring.ceilingEntry(hash);
+        return entry ? entry.value : this.ring.firstEntry().value;
+    }
+}
+    </pre>
+
+    <h3>1.4 Data Replication Strategies</h3>
+
+    <h4>1.4.1 Single-Leader Replication</h4>
+    <p>One node (leader/primary) accepts writes. Replicas receive a replication log (WAL - Write-Ahead Log in PostgreSQL, binlog in MySQL).</p>
+    <ul>
+        <li><strong>Synchronous replication:</strong> Leader waits for at least one replica to acknowledge before confirming write to client. Guarantees durability but adds latency.</li>
+        <li><strong>Asynchronous replication:</strong> Leader confirms immediately. Replicas may lag (replication lag). Risk: if leader dies, confirmed writes may be lost.</li>
+        <li><strong>Semi-synchronous:</strong> One replica is synchronous, rest are async. Best trade-off for most systems.</li>
+    </ul>
+
+    <h4>1.4.2 Multi-Leader Replication</h4>
+    <p>Multiple nodes accept writes. Used in multi-datacenter setups. Challenge: write conflicts when two leaders modify the same data.</p>
+    <p><strong>Conflict Resolution Strategies:</strong></p>
+    <ul>
+        <li><strong>Last Writer Wins (LWW):</strong> Timestamp-based. Simple but loses data. Used by Cassandra.</li>
+        <li><strong>Merge:</strong> Concatenate/union conflicting values (CRDTs - Conflict-free Replicated Data Types).</li>
+        <li><strong>Custom resolution:</strong> Application-level logic (e.g., Git-style manual merge).</li>
+    </ul>
+
+    <h4>1.4.3 Leaderless Replication (Dynamo-style)</h4>
+    <p>Any node accepts reads/writes. Uses quorum: <code>W + R > N</code> for consistency (W = write acknowledgments needed, R = read nodes queried, N = total replicas).</p>
+
+    <div class="example">
+        <strong>Example - Cassandra with N=3, W=2, R=2:</strong><br>
+        Write goes to all 3 replicas. Client waits for 2 ACKs. Read queries 2 replicas and takes the value with the highest timestamp. Since W+R (4) > N (3), at least one node in the read set has the latest write → strong consistency.
+    </div>
+
+    <h3>1.5 Caching for Scalability</h3>
+
+    <h4>Cache Patterns (Internal Mechanics):</h4>
+    <table>
+        <tr><th>Pattern</th><th>How It Works</th><th>Trade-offs</th></tr>
+        <tr>
+            <td><strong>Cache-Aside (Lazy Loading)</strong></td>
+            <td>App checks cache first. On miss, reads from DB, populates cache, returns data. On write, app updates DB and invalidates/updates cache.</td>
+            <td>Cache misses cause extra latency (cache check + DB read + cache write). Stale data possible if DB is updated without cache invalidation.</td>
+        </tr>
+        <tr>
+            <td><strong>Write-Through</strong></td>
+            <td>Every write goes to cache AND database synchronously. Reads always hit cache.</td>
+            <td>Write latency increases (two writes per operation). Cache always consistent. Cold start problem (cache is empty initially).</td>
+        </tr>
+        <tr>
+            <td><strong>Write-Behind (Write-Back)</strong></td>
+            <td>Writes go to cache only. Cache asynchronously flushes to DB in batches.</td>
+            <td>Extremely fast writes. Risk of data loss if cache node dies before flush. Complex to implement correctly.</td>
+        </tr>
+        <tr>
+            <td><strong>Read-Through</strong></td>
+            <td>Cache itself is responsible for loading data from DB on miss. App only talks to cache.</td>
+            <td>Simpler application code. Cache library must support DB integration.</td>
+        </tr>
+    </table>
+
+    <h4>Cache Eviction - LRU Internals:</h4>
+    <p>Redis implements an approximated LRU. Instead of maintaining a linked list of all keys (expensive), it samples N random keys and evicts the one with the oldest access time. This is O(1) per eviction vs O(N) for true LRU.</p>
+    <pre>
+// Redis approximated LRU (conceptual)
+// Each key stores a 24-bit timestamp of last access (in seconds, wrapping)
+// On eviction: sample 5 keys, evict the one with oldest timestamp
+// This approximation is within 3% accuracy of true LRU with sample size 10
+    </pre>
+
+    <h3>1.6 Scalability Anti-Patterns</h3>
+    <ul>
+        <li><strong>Distributed Monolith:</strong> Microservices that are tightly coupled—deploying one requires deploying others. You get the complexity of distribution without the scaling benefits.</li>
+        <li><strong>Shared Mutable State:</strong> Multiple services writing to the same database table. Creates hidden coupling and contention.</li>
+        <li><strong>N+1 Query Problem at Scale:</strong> Fetching a list of 1000 items, then making 1000 individual queries for related data. At scale, this explodes latency.</li>
+        <li><strong>Synchronous Chains:</strong> Service A → B → C → D synchronously. Latency is additive. Failure in any link breaks the chain.</li>
+    </ul>
+
+</div>
+
+<!-- ==================== AVAILABILITY ==================== -->
+<h2 id="availability">2. Availability</h2>
+<div class="section">
+
+    <h3>2.1 Defining Availability Mathematically</h3>
+    <p>Availability = <code>Uptime / (Uptime + Downtime)</code> over a given period.</p>
+
+    <table>
+        <tr><th>Availability %</th><th>Downtime/Year</th><th>Downtime/Month</th><th>Downtime/Week</th></tr>
+        <tr><td>99% (two nines)</td><td>3.65 days</td><td>7.31 hours</td><td>1.68 hours</td></tr>
+        <tr><td>99.9% (three nines)</td><td>8.77 hours</td><td>43.83 min</td><td>10.08 min</td></tr>
+        <tr><td>99.99% (four nines)</td><td>52.6 min</td><td>4.38 min</td><td>1.01 min</td></tr>
+        <tr><td>99.999% (five nines)</td><td>5.26 min</td><td>26.3 sec</td><td>6.05 sec</td></tr>
+    </table>
+
+    <h3>2.2 Serial vs Parallel Availability</h3>
+
+    <h4>Components in Series (all must work):</h4>
+    <p><code>A_total = A1 × A2 × A3 × ... × An</code></p>
+    <div class="example">
+        <strong>Example:</strong> Load Balancer (99.99%) → App Server (99.99%) → Database (99.99%)<br>
+        Total = 0.9999 × 0.9999 × 0.9999 = 99.97% — worse than any individual component!
+    </div>
+
+    <h4>Components in Parallel (any one must work):</h4>
+    <p><code>A_total = 1 - (1 - A1) × (1 - A2) × ... × (1 - An)</code></p>
+    <div class="example">
+        <strong>Example:</strong> Two database replicas, each 99.9% available:<br>
+        Total = 1 - (0.001 × 0.001) = 1 - 0.000001 = 99.9999% — dramatically better!
+    </div>
+
+    <h3>2.3 Failure Detection Mechanisms</h3>
+
+    <h4>2.3.1 Heartbeats</h4>
+    <p>Nodes periodically send "I'm alive" messages. If no heartbeat is received within a timeout, the node is considered dead.</p>
+    <ul>
+        <li><strong>Timeout tuning:</strong> Too short → false positives (healthy node marked dead due to network jitter). Too long → slow detection of actual failures.</li>
+        <li><strong>Phi Accrual Failure Detector (Cassandra):</strong> Instead of binary alive/dead, calculates a suspicion level (phi) based on the statistical distribution of heartbeat inter-arrival times. Adapts to network conditions automatically.</li>
+    </ul>
+    <pre>
+// Phi Accrual Failure Detector concept
+// Maintains a sliding window of heartbeat arrival intervals
+// Calculates phi = -log10(1 - CDF(timeSinceLastHeartbeat))
+// If phi > threshold (e.g., 8), node is considered dead
+// Phi of 1 = 10% chance of false positive
+// Phi of 8 = 0.00000001% chance of false positive
+    </pre>
+
+    <h4>2.3.2 Gossip Protocols</h4>
+    <p>Each node periodically picks a random peer and exchanges state information. Information propagates exponentially—reaches all N nodes in O(log N) rounds.</p>
+    <p><strong>How it works internally:</strong></p>
+    <ol>
+        <li>Each node maintains a list of all members with their heartbeat counters and timestamps</li>
+        <li>Every T seconds, a node increments its own heartbeat counter</li>
+        <li>It picks a random peer and sends its full member list</li>
+        <li>The receiving peer merges the list (keeping higher heartbeat counters)</li>
+        <li>If a member's heartbeat hasn't increased in T_fail seconds, it's marked suspicious</li>
+        <li>After T_cleanup more seconds, it's removed from the list</li>
+    </ol>
+
+    <h3>2.4 Redundancy Patterns</h3>
+
+    <h4>2.4.1 Active-Passive (Failover)</h4>
+    <div class="diagram">
+    ┌─────────────┐     Heartbeat     ┌─────────────┐
+    │   Primary   │ ←───────────────→ │   Standby   │
+    │  (Active)   │                    │  (Passive)  │
+    └──────┬──────┘                    └──────┬──────┘
+           │                                  │
+           │  Replication (sync/async)        │
+           │  WAL shipping / streaming        │
+           └──────────────────────────────────┘
+
+    On primary failure:
+    1. Standby detects missing heartbeats
+    2. Standby promotes itself to primary
+    3. VIP (Virtual IP) floats to new primary
+    4. Clients reconnect transparently
+    </div>
+    <p><strong>Split-Brain Problem:</strong> Both nodes think they're primary (network partition between them, but both can reach clients). Solutions:</p>
+    <ul>
+        <li><strong>STONITH (Shoot The Other Node In The Head):</strong> Fencing mechanism that power-cycles the other node via IPMI/iLO.</li>
+        <li><strong>Quorum-based:</strong> Need majority of cluster to agree on who is primary. With 2 nodes, add a witness/arbiter.</li>
+        <li><strong>Lease-based:</strong> Primary holds a time-limited lease from a distributed lock service (ZooKeeper, etcd). Must renew before expiry or lose primary status.</li>
+    </ul>
+
+    <h4>2.4.2 Active-Active</h4>
+    <p>All nodes handle traffic simultaneously. More complex but better resource utilization and no failover delay.</p>
+    <ul>
+        <li>Stateless services: straightforward—all instances serve requests</li>
+        <li>Stateful services: requires distributed consensus or conflict resolution</li>
+        <li>Databases: multi-primary with conflict resolution (CRDTs, vector clocks, application-level merge)</li>
+    </ul>
+
+    <h3>2.5 Consensus Algorithms for High Availability</h3>
+
+    <h4>2.5.1 Raft (used in etcd, CockroachDB, TiKV)</h4>
+    <p>Raft ensures a cluster of nodes agrees on a sequence of operations despite failures.</p>
+    <ol>
+        <li><strong>Leader Election:</strong> Nodes start as followers. If a follower doesn't hear from a leader within election timeout (randomized 150-300ms), it becomes a candidate and requests votes. Majority grants leadership.</li>
+        <li><strong>Log Replication:</strong> Leader receives client writes, appends to its log, sends AppendEntries RPCs to followers. Once majority acknowledges, entry is committed.</li>
+        <li><strong>Safety:</strong> A candidate can only win if its log is at least as up-to-date as the majority. This prevents stale nodes from becoming leader and losing committed entries.</li>
+    </ol>
+    <pre>
+// Raft State Machine (simplified)
+enum State { FOLLOWER, CANDIDATE, LEADER }
+
+// Election timeout: randomized to prevent split votes
+// Term: monotonically increasing logical clock
+// Each node votes for at most one candidate per term
+
+// Leader's heartbeat interval << election timeout
+// Ensures followers don't start unnecessary elections
+    </pre>
+
+    <h3>2.6 Circuit Breaker Pattern (Internal Mechanics)</h3>
+    <p>Prevents cascading failures by failing fast when a downstream service is unhealthy.</p>
+    <div class="diagram">
+    States:
+    ┌────────┐    failure threshold    ┌────────┐    timeout     ┌───────────┐
+    │ CLOSED │ ─────────────────────→ │  OPEN  │ ────────────→ │ HALF-OPEN │
+    │(normal)│                         │(reject)│               │  (probe)  │
+    └────────┘                         └────────┘               └───────────┘
+         ↑                                  ↑                        │
+         │          success                 │      failure           │
+         └──────────────────────────────────┼────────────────────────┘
+                                            │
+                                     (probe failed)
+    </div>
+    <ul>
+        <li><strong>CLOSED:</strong> Requests pass through. Track failure rate in sliding window (e.g., 50% failures in last 10 seconds).</li>
+        <li><strong>OPEN:</strong> All requests immediately fail with fallback response. No network calls to downstream. Timer starts.</li>
+        <li><strong>HALF-OPEN:</strong> After timeout, allow one probe request. If succeeds → CLOSED. If fails → OPEN again.</li>
+    </ul>
+    <pre>
+// Circuit Breaker implementation concept
+class CircuitBreaker {
+    constructor(options) {
+        this.failureThreshold = options.failureThreshold || 5;
+        this.resetTimeout = options.resetTimeout || 30000; // 30s
+        this.state = 'CLOSED';
+        this.failureCount = 0;
+        this.lastFailureTime = null;
+        this.slidingWindow = new SlidingWindowCounter(10000); // 10s window
+    }
+
+    async call(fn) {
+        if (this.state === 'OPEN') {
+            if (Date.now() - this.lastFailureTime > this.resetTimeout) {
+                this.state = 'HALF_OPEN';
+            } else {
+                throw new CircuitOpenError('Service unavailable');
+            }
+        }
+
+        try {
+            const result = await fn();
+            this.onSuccess();
+            return result;
+        } catch (error) {
+            this.onFailure();
+            throw error;
+        }
+    }
+
+    onSuccess() {
+        this.failureCount = 0;
+        this.state = 'CLOSED';
+    }
+
+    onFailure() {
+        this.failureCount++;
+        this.lastFailureTime = Date.now();
+        this.slidingWindow.record();
+        if (this.slidingWindow.count() >= this.failureThreshold) {
+            this.state = 'OPEN';
+        }
+    }
+}
+    </pre>
+
+    <h3>2.7 Graceful Degradation</h3>
+    <p>When parts of the system fail, serve reduced functionality rather than complete failure:</p>
+    <ul>
+        <li><strong>Netflix:</strong> If recommendation service is down, show generic popular content instead of personalized recommendations</li>
+        <li><strong>Twitter:</strong> If timeline generation is slow, serve cached (slightly stale) timeline</li>
+        <li><strong>E-commerce:</strong> If inventory service is slow, allow checkout but verify stock asynchronously (with possible backorder notification)</li>
+    </ul>
+
+    <h3>2.8 Health Checks - Deep Dive</h3>
+    <ul>
+        <li><strong>Shallow health check:</strong> <code>/health</code> returns 200 if process is running. Doesn't verify dependencies.</li>
+        <li><strong>Deep health check:</strong> <code>/health/ready</code> verifies database connectivity, cache connectivity, disk space, memory. Used by orchestrators (Kubernetes readiness probe) to remove unhealthy pods from service.</li>
+        <li><strong>Liveness vs Readiness (Kubernetes):</strong> Liveness failure → restart container. Readiness failure → stop sending traffic but don't restart.</li>
+    </ul>
+
+</div>
+
+<!-- ==================== LOAD BALANCING ==================== -->
+<h2 id="load-balancing">3. Load Balancing</h2>
+<div class="section">
+
+    <h3>3.1 Why Load Balancing Exists</h3>
+    <p>A single server has finite capacity. Load balancers distribute traffic across multiple servers, providing: horizontal scalability, high availability (routes around failed servers), and SSL termination offloading.</p>
+
+    <h3>3.2 OSI Layer Classification</h3>
+
+    <h4>3.2.1 Layer 4 (Transport Layer) Load Balancing</h4>
+    <p>Operates at TCP/UDP level. Makes routing decisions based on IP address and port number without inspecting packet content.</p>
+    <p><strong>Internal mechanics:</strong></p>
+    <ul>
+        <li><strong>NAT-based:</strong> LB rewrites destination IP/port in packet headers. Backend sees LB's IP as source (unless DSR is used).</li>
+        <li><strong>Direct Server Return (DSR):</strong> LB only handles inbound traffic. Responses go directly from backend to client, bypassing LB. Dramatically reduces LB bandwidth requirements (responses are typically 10-100x larger than requests).</li>
+        <li><strong>IP tunneling (IPIP):</strong> LB encapsulates original packet in a new IP packet destined for the backend. Backend decapsulates and responds directly to client.</li>
+    </ul>
+    <div class="diagram">
+    NAT Mode:
+    Client → [SYN dst=LB:80] → LB rewrites → [SYN dst=Backend1:80] → Backend1
+    Client ← [ACK src=LB:80] ← LB rewrites ← [ACK src=Backend1:80] ← Backend1
+
+    DSR Mode:
+    Client → [SYN dst=VIP:80] → LB (only touches inbound) → Backend1
+    Client ← [ACK src=VIP:80] ← Backend1 (responds directly, spoofs VIP as source)
+    </div>
+    <p><strong>Performance:</strong> L4 LBs can handle millions of connections/sec because they don't parse HTTP. Linux IPVS (IP Virtual Server) operates in kernel space, handling 1M+ connections with minimal overhead.</p>
+
+    <h4>3.2.2 Layer 7 (Application Layer) Load Balancing</h4>
+    <p>Terminates the TCP connection, parses HTTP, and makes routing decisions based on URL path, headers, cookies, request body.</p>
+    <p><strong>Internal mechanics:</strong></p>
+    <ul>
+        <li>Client establishes TCP + TLS connection with LB</li>
+        <li>LB terminates TLS (decrypts request)</li>
+        <li>LB parses HTTP request (headers, URL, method)</li>
+        <li>Routing decision made based on rules (e.g., <code>/api/*</code> → API cluster, <code>/static/*</code> → CDN origin)</li>
+        <li>LB establishes separate TCP connection to chosen backend (connection pooling/reuse)</li>
+        <li>LB forwards request, receives response, forwards to client</li>
+    </ul>
+    <pre>
+# NGINX L7 Load Balancing - content-based routing
+upstream api_servers {
+    server 10.0.1.1:8080 weight=3;
+    server 10.0.1.2:8080 weight=2;
+    server 10.0.1.3:8080 weight=1;
+    keepalive 64; # connection pool to backends
+}
+
+upstream static_servers {
+    server 10.0.2.1:80;
+    server 10.0.2.2:80;
+}
+
+server {
+    listen 443 ssl;
+
+    location /api/ {
+        proxy_pass http://api_servers;
+        proxy_http_version 1.1;
+        proxy_set_header Connection ""; # enable keepalive to backend
+    }
+
+    location /static/ {
+        proxy_pass http://static_servers;
+        proxy_cache_valid 200 1h;
+    }
+
+    # Route based on cookie (sticky sessions)
+    location /app/ {
+        set $backend "";
+        if ($cookie_server_id = "server1") {
+            set $backend "10.0.1.1:8080";
+        }
+        proxy_pass http://$backend;
+    }
+}
+    </pre>
+
+    <h3>3.3 Load Balancing Algorithms - Deep Internals</h3>
+
+    <h4>3.3.1 Round Robin</h4>
+    <p>Simplest algorithm. Rotates through servers sequentially. Maintains a counter; each new connection goes to <code>servers[counter % N]</code>.</p>
+    <p><strong>Problem:</strong> Assumes all servers have equal capacity and all requests have equal cost. A slow request on Server A ties up that connection while Server B sits idle.</p>
+
+    <h4>3.3.2 Weighted Round Robin</h4>
+    <p>Assigns weights based on server capacity. Server with weight 3 gets 3x the traffic of weight 1.</p>
+    <pre>
+// Smooth Weighted Round Robin (NGINX's implementation)
+// Prevents burst allocation to high-weight servers
+// Each round: current_weight += effective_weight
+// Select server with highest current_weight
+// Selected server: current_weight -= total_weight
+
+// Example: A(weight=5), B(weight=1), C(weight=1), total=7
+// Round 1: A=5, B=1, C=1 → select A → A=-2, B=1, C=1
+// Round 2: A=3, B=2, C=2 → select A → A=-4, B=2, C=2
+// Round 3: A=1, B=3, C=3 → select B → A=1, B=-4, C=3
+// Result: A,A,B,A,C,A,A (spread evenly, not AAAAA,B,C)
+    </pre>
+
+    <h4>3.3.3 Least Connections</h4>
+    <p>Routes to the server with fewest active connections. Better than round robin for long-lived connections or variable request processing times.</p>
+    <p><strong>Implementation:</strong> LB maintains a counter per backend. Increment on new connection, decrement on connection close. O(N) to find minimum, or use a min-heap for O(log N).</p>
+
+    <h4>3.3.4 Least Response Time</h4>
+    <p>Routes to the server with the lowest average response time AND fewest active connections. Requires the LB to track response times using exponential moving average (EMA).</p>
+    <pre>
+// Exponential Moving Average for response time tracking
+// new_avg = alpha * latest_response_time + (1 - alpha) * old_avg
+// alpha = 0.1 means recent measurements have 10% influence
+// Prevents a single outlier from drastically changing routing
+    </pre>
+
+    <h4>3.3.5 Consistent Hashing (for Load Balancing)</h4>
+    <p>Hash the request (by client IP, URL, or session ID) to determine the backend. Same request always goes to the same backend → useful for cache affinity.</p>
+
+    <h4>3.3.6 Power of Two Random Choices (P2C)</h4>
+    <p>Pick two random backends, route to the one with fewer connections. Surprisingly, this simple algorithm provides near-optimal load distribution and is used by Envoy proxy.</p>
+    <p><strong>Why it works:</strong> With pure random choice, the most loaded server has O(log N / log log N) connections above average. With two choices, this drops to O(log log N) — exponential improvement.</p>
+
+    <h3>3.4 Health Checking Internals</h3>
+    <ul>
+        <li><strong>Active health checks:</strong> LB periodically sends probe requests (TCP connect, HTTP GET /health). Configurable interval (e.g., every 5s), threshold (e.g., 3 consecutive failures = unhealthy).</li>
+        <li><strong>Passive health checks:</strong> LB monitors actual traffic responses. If backend returns 5xx errors or timeouts exceed threshold, mark unhealthy. No extra probe traffic.</li>
+        <li><strong>Hybrid:</strong> Use passive checks for quick detection, active checks for recovery detection (when to add server back).</li>
+    </ul>
+
+    <h3>3.5 Global Server Load Balancing (GSLB)</h3>
+    <p>Distributes traffic across geographically distributed data centers using DNS-based routing:</p>
+    <ul>
+        <li><strong>GeoDNS:</strong> Returns different IP addresses based on client's geographic location (determined by source IP of DNS resolver)</li>
+        <li><strong>Latency-based:</strong> Routes to the datacenter with lowest measured latency (AWS Route 53)</li>
+        <li><strong>Failover:</strong> Health-checks each datacenter. If primary fails, DNS returns secondary datacenter IPs</li>
+    </ul>
+
+    <h3>3.6 Modern Load Balancing: Service Mesh</h3>
+    <p>In Kubernetes environments, sidecar proxies (Envoy in Istio) handle load balancing at the pod level:</p>
+    <ul>
+        <li>Every pod gets a sidecar proxy that intercepts all network traffic</li>
+        <li>Proxy performs client-side load balancing with circuit breaking, retries, timeouts</li>
+        <li>Control plane (Istiod) pushes routing configuration to all sidecars</li>
+        <li>No dedicated LB hardware needed—load balancing is distributed</li>
+    </ul>
+
+    <h3>3.7 Connection Draining</h3>
+    <p>When removing a backend from rotation (for deployment or health failure):</p>
+    <ol>
+        <li>Stop sending NEW connections to the backend</li>
+        <li>Allow EXISTING connections to complete (with a timeout, e.g., 30s)</li>
+        <li>After timeout or all connections close, fully remove backend</li>
+        <li>This prevents in-flight requests from being dropped</li>
+    </ol>
+
+</div>
+
+<!-- ==================== RELIABILITY ==================== -->
+<h2 id="reliability">4. Reliability</h2>
+<div class="section">
+
+    <h3>4.1 Reliability vs Availability</h3>
+    <p><strong>Availability:</strong> Is the system up? (Can I reach it?)</p>
+    <p><strong>Reliability:</strong> Does the system produce correct results consistently? (Can I trust it?)</p>
+    <p>A system can be available but unreliable (returns wrong data). A reliable system is necessarily available (if it works correctly, it must be running).</p>
+
+    <h3>4.2 Types of Faults</h3>
+    <table>
+        <tr><th>Fault Type</th><th>Description</th><th>Example</th></tr>
+        <tr><td>Hardware Faults</td><td>Physical component failure</td><td>Disk failure (AFR ~2-4%), memory bit flips (1 per GB per year without ECC)</td></tr>
+        <tr><td>Software Faults</td><td>Bugs, resource leaks, cascading failures</td><td>Memory leak crashes after 3 days, leap second bug, kernel panic</td></tr>
+        <tr><td>Human Faults</td><td>Configuration errors, deployment mistakes</td><td>Wrong config pushed to production, database migration error</td></tr>
+        <tr><td>Byzantine Faults</td><td>Node behaves arbitrarily (sends contradictory messages)</td><td>Corrupted memory causes wrong computation, compromised node</td></tr>
+    </table>
+
+    <h3>4.3 Fault Tolerance Techniques</h3>
+
+    <h4>4.3.1 Replication (covered in Scalability)</h4>
+
+    <h4>4.3.2 Checksums and Data Integrity</h4>
+    <p>Data corruption can occur silently (bit rot on disk, network corruption not caught by TCP checksum).</p>
+    <ul>
+        <li><strong>ZFS:</strong> Checksums every block (256-bit). On read, verifies checksum. If corrupted, automatically repairs from redundant copy.</li>
+        <li><strong>HDFS:</strong> Stores CRC32 for every 512 bytes. DataNodes verify on read and periodic background scanning.</li>
+        <li><strong>Application level:</strong> Store hash of important data alongside it. Verify on retrieval.</li>
+    </ul>
+
+    <h4>4.3.3 Idempotency</h4>
+    <p>An operation is idempotent if performing it multiple times produces the same result as performing it once. Critical for reliability because retries are inevitable in distributed systems.</p>
+    <pre>
+// Non-idempotent: Retrying doubles the charge!
+POST /payment {amount: 100}
+
+// Idempotent: Client generates unique key. Server deduplicates.
+POST /payment {amount: 100, idempotency_key: "uuid-abc-123"}
+
+// Server implementation:
+async function processPayment(request) {
+    const existing = await db.query(
+        'SELECT * FROM payments WHERE idempotency_key = ?',
+        [request.idempotency_key]
+    );
+    if (existing) return existing.result; // Already processed
+
+    const result = await chargeCard(request.amount);
+    await db.insert('payments', {
+        idempotency_key: request.idempotency_key,
+        result: result,
+        created_at: now()
+    });
+    return result;
+}
+    </pre>
+
+    <h4>4.3.4 Saga Pattern (Distributed Transactions)</h4>
+    <p>In microservices, traditional ACID transactions across services are impractical. Sagas break a transaction into a sequence of local transactions with compensating actions.</p>
+    <div class="diagram">
+    Order Saga:
+    T1: Create Order (pending)
+    T2: Reserve Inventory
+    T3: Process Payment
+    T4: Confirm Order
+
+    If T3 fails:
+    C2: Release Inventory (compensate T2)
+    C1: Cancel Order (compensate T1)
+
+    Choreography: Each service emits events, next service reacts
+    Orchestration: Central coordinator directs the saga steps
+    </div>
+
+    <h4>4.3.5 Write-Ahead Logging (WAL)</h4>
+    <p>Before modifying data, write the intended change to a sequential log. If crash occurs mid-operation, replay the log on recovery.</p>
+    <p><strong>How PostgreSQL WAL works internally:</strong></p>
+    <ol>
+        <li>Transaction modifies pages in shared buffer cache (memory)</li>
+        <li>Before any dirty page is written to disk, WAL record is written first</li>
+        <li>WAL is flushed to disk on commit (<code>fsync</code>)</li>
+        <li>Background writer lazily writes dirty pages to data files (checkpointing)</li>
+        <li>On crash recovery: replay WAL from last checkpoint forward</li>
+    </ol>
+
+    <h3>4.4 Chaos Engineering</h3>
+    <p>Proactively inject failures to find weaknesses before they cause outages in production.</p>
+    <ul>
+        <li><strong>Netflix Chaos Monkey:</strong> Randomly kills production instances. Forces engineers to build services that tolerate instance failure.</li>
+        <li><strong>Chaos Kong:</strong> Simulates entire AWS region failure. Tests cross-region failover.</li>
+        <li><strong>Latency Monkey:</strong> Injects artificial latency into network calls. Tests timeout and retry logic.</li>
+        <li><strong>Gremlin:</strong> Platform for controlled fault injection (CPU stress, disk fill, network partition, DNS failure).</li>
+    </ul>
+
+    <h3>4.5 Retry Strategies</h3>
+    <pre>
+// Exponential Backoff with Jitter
+function retryWithBackoff(fn, maxRetries = 5) {
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+        try {
+            return await fn();
+        } catch (error) {
+            if (!isRetryable(error) || attempt === maxRetries - 1) throw error;
+
+            // Exponential backoff: 1s, 2s, 4s, 8s, 16s
+            const baseDelay = Math.pow(2, attempt) * 1000;
+
+            // Full jitter: randomize between 0 and baseDelay
+            // Prevents thundering herd (all clients retrying simultaneously)
+            const jitter = Math.random() * baseDelay;
+
+            await sleep(jitter);
+        }
+    }
+}
+
+// Decorrelated jitter (AWS recommendation - better spread)
+function decorrelatedJitter(baseMs, maxMs, attempt, prevDelay) {
+    return Math.min(maxMs, random(baseMs, prevDelay * 3));
+}
+    </pre>
+
+    <h3>4.6 Bulkhead Pattern</h3>
+    <p>Isolate components so that failure in one doesn't cascade to others. Named after ship bulkheads that prevent a single hull breach from sinking the ship.</p>
+    <ul>
+        <li><strong>Thread pool bulkhead:</strong> Each downstream service gets its own thread pool. If Service A is slow, only its thread pool saturates; Service B's threads remain available.</li>
+        <li><strong>Semaphore bulkhead:</strong> Limit concurrent calls to each dependency. Lighter than thread pools but doesn't protect against slow calls blocking threads.</li>
+        <li><strong>Process/container isolation:</strong> Run different services in separate containers with resource limits (cgroups). CPU/memory exhaustion in one container doesn't affect others.</li>
+    </ul>
+
+    <h3>4.7 Data Durability</h3>
+    <p><strong>RPO (Recovery Point Objective):</strong> Maximum acceptable data loss measured in time. RPO of 1 hour means you can lose up to 1 hour of data.</p>
+    <p><strong>RTO (Recovery Time Objective):</strong> Maximum acceptable downtime. RTO of 15 minutes means system must recover within 15 minutes.</p>
+    <table>
+        <tr><th>Strategy</th><th>RPO</th><th>RTO</th><th>Cost</th></tr>
+        <tr><td>Synchronous replication</td><td>0 (zero data loss)</td><td>Seconds-minutes</td><td>High (latency penalty)</td></tr>
+        <tr><td>Async replication</td><td>Seconds-minutes</td><td>Minutes</td><td>Medium</td></tr>
+        <tr><td>Periodic backups</td><td>Hours</td><td>Hours</td><td>Low</td></tr>
+        <tr><td>Multi-region active-active</td><td>0</td><td>~0 (automatic)</td><td>Very high</td></tr>
+    </table>
+
+</div>
+
+<!-- ==================== PROXY SERVERS ==================== -->
+<h2 id="proxy-servers">5. Proxy Servers</h2>
+<div class="section">
+
+    <h3>5.1 Forward Proxy</h3>
+    <p>Sits between clients and the internet. Client is aware of the proxy and configures its browser/OS to use it.</p>
+
+    <h4>How Forward Proxy Works Internally:</h4>
+    <div class="diagram">
+    HTTP Proxy (non-HTTPS):
+    1. Client sends full URL in request: GET http://example.com/page HTTP/1.1
+    2. Proxy resolves example.com, connects to origin
+    3. Proxy forwards request (may modify headers)
+    4. Origin responds to proxy
+    5. Proxy forwards response to client (may cache it)
+
+    HTTPS Proxy (CONNECT tunnel):
+    1. Client sends: CONNECT example.com:443 HTTP/1.1
+    2. Proxy establishes TCP connection to example.com:443
+    3. Proxy responds: HTTP/1.1 200 Connection Established
+    4. Client performs TLS handshake through the tunnel
+    5. Proxy blindly relays encrypted bytes (cannot inspect)
+    6. Proxy only sees the destination hostname, not URL paths or content
+    </div>
+
+    <p><strong>Use Cases:</strong></p>
+    <ul>
+        <li><strong>Corporate filtering:</strong> Block access to certain websites</li>
+        <li><strong>Caching:</strong> Cache frequently accessed content (Squid proxy)</li>
+        <li><strong>Anonymity:</strong> Hide client IP from origin server</li>
+        <li><strong>Access control:</strong> Authenticate users before allowing internet access</li>
+    </ul>
+
+    <h3>5.2 Reverse Proxy</h3>
+    <p>Sits between the internet and backend servers. Client is unaware of the proxy—thinks it's communicating directly with the origin server.</p>
+
+    <h4>How Reverse Proxy Works Internally:</h4>
+    <ol>
+        <li>Client resolves <code>www.example.com</code> → gets reverse proxy's IP</li>
+        <li>Client sends request to proxy (thinks it's the actual server)</li>
+        <li>Proxy terminates TLS connection (has the SSL certificate)</li>
+        <li>Proxy inspects request, applies rules (rate limiting, WAF, routing)</li>
+        <li>Proxy selects backend and forwards request (possibly over plain HTTP internally)</li>
+        <li>Backend responds. Proxy may modify response (add headers, compress, cache)</li>
+        <li>Proxy sends response to client</li>
+    </ol>
+
+    <p><strong>Key Capabilities:</strong></p>
+    <ul>
+        <li><strong>SSL/TLS Termination:</strong> Proxy handles expensive TLS handshakes (RSA/ECDHE key exchange). Backend communication is plain HTTP (within trusted network). Offloads CPU from application servers.</li>
+        <li><strong>Compression:</strong> gzip/brotli compression of responses. Single configuration point rather than per-backend.</li>
+        <li><strong>Caching:</strong> Cache static assets and API responses. Serves cached content without hitting backends.</li>
+        <li><strong>Request buffering:</strong> Proxy reads the full request from slow clients before forwarding to backend. Backend connection is brief, freeing worker threads quickly (slow-loris protection).</li>
+    </ul>
+
+    <h3>5.3 NGINX Internals as a Reverse Proxy</h3>
+    <p>NGINX uses an event-driven, non-blocking architecture:</p>
+    <ul>
+        <li><strong>Master process:</strong> Reads config, manages worker processes</li>
+        <li><strong>Worker processes:</strong> Handle connections. Each worker runs a single-threaded event loop (epoll on Linux, kqueue on BSD)</li>
+        <li><strong>One worker can handle thousands of connections</strong> because it never blocks on I/O. Uses kernel's event notification to know when sockets are readable/writable.</li>
+    </ul>
+    <pre>
+// NGINX event loop (conceptual)
+while (true) {
+    events = epoll_wait(epfd, timeout);  // Block until events or timeout
+    for (event in events) {
+        if (event.type == READ_READY) {
+            read_from_client(event.fd);      // Non-blocking read
+            if (request_complete) {
+                connect_to_backend();         // Non-blocking connect
+            }
+        }
+        if (event.type == WRITE_READY) {
+            write_to_client(event.fd);       // Non-blocking write
+        }
+        if (event.type == BACKEND_RESPONSE) {
+            buffer_response(event.fd);
+            schedule_write_to_client();
+        }
+    }
+}
+    </pre>
+
+    <h3>5.4 Transparent Proxy</h3>
+    <p>Intercepts traffic without client configuration. Network router redirects traffic (using iptables REDIRECT or TPROXY) to the proxy.</p>
+    <pre>
+# Linux iptables - redirect all outbound HTTP to transparent proxy on port 3128
+iptables -t nat -A PREROUTING -i eth0 -p tcp --dport 80 -j REDIRECT --to-port 3128
+
+# TPROXY (preserves original destination IP in socket)
+iptables -t mangle -A PREROUTING -p tcp --dport 80 -j TPROXY \
+    --tproxy-mark 0x1/0x1 --on-port 3128
+    </pre>
+
+    <h3>5.5 Sidecar Proxy (Service Mesh)</h3>
+    <p>In modern microservices (Istio/Envoy), each service gets a sidecar proxy:</p>
+    <ul>
+        <li>Deployed alongside the application container in the same pod</li>
+        <li>All inbound/outbound traffic is intercepted via iptables rules</li>
+        <li>Handles: mTLS encryption, load balancing, retries, circuit breaking, observability (metrics, tracing), rate limiting</li>
+        <li>Application code doesn't need to implement any of these concerns</li>
+    </ul>
+    <div class="diagram">
+    Pod A                              Pod B
+    ┌─────────────────────┐           ┌─────────────────────┐
+    │ ┌─────┐  ┌───────┐ │   mTLS    │ ┌───────┐  ┌─────┐ │
+    │ │ App │→→│ Envoy │─┼───────────┼→│ Envoy │→→│ App │ │
+    │ │     │  │Sidecar│ │           │ │Sidecar│  │     │ │
+    │ └─────┘  └───────┘ │           │ └───────┘  └─────┘ │
+    └─────────────────────┘           └─────────────────────┘
+         ↕ iptables redirect               ↕ iptables redirect
+    </div>
+
+    <h3>5.6 CDN as a Distributed Reverse Proxy</h3>
+    <p>CDNs (Cloudflare, CloudFront, Akamai) are globally distributed reverse proxy networks:</p>
+    <ul>
+        <li><strong>Anycast routing:</strong> Same IP address is announced from hundreds of PoPs (Points of Presence). BGP routing sends clients to nearest PoP.</li>
+        <li><strong>Edge caching:</strong> Each PoP caches content. Cache-Control headers determine TTL.</li>
+        <li><strong>Cache hierarchy:</strong> Edge → Regional tier → Origin shield → Origin server. Reduces origin load dramatically.</li>
+        <li><strong>Cache invalidation:</strong> Purge by URL, tag, or prefix. Propagates to all PoPs (typically <1 second for modern CDNs).</li>
+    </ul>
+
+    <h3>5.7 API Gateway as a Specialized Reverse Proxy</h3>
+    <p>API gateways (Kong, AWS API Gateway, Apigee) add application-aware functionality:</p>
+    <ul>
+        <li>Authentication/Authorization (JWT validation, OAuth token introspection)</li>
+        <li>Rate limiting (token bucket, sliding window per API key)</li>
+        <li>Request/response transformation (header injection, body mapping)</li>
+        <li>API versioning and routing</li>
+        <li>Request aggregation (fan-out to multiple services, aggregate responses)</li>
+    </ul>
+
+</div>
+
+<!-- ==================== DNS ==================== -->
+<h2 id="dns">6. DNS (Domain Name System)</h2>
+<div class="section">
+
+    <h3>6.1 DNS Architecture - The Full Resolution Path</h3>
+
+    <div class="diagram">
+    Client types "www.example.com" in browser:
+
+    1. Browser DNS Cache → check (TTL-based, typically 60s in Chrome)
+    2. OS DNS Cache (nscd/systemd-resolved on Linux) → check
+    3. /etc/hosts file → check
+    4. Recursive Resolver (ISP or 8.8.8.8) → check its cache
+       ↓ (cache miss)
+    5. Root Name Server (.) → "I don't know, but .com is handled by these servers"
+       Returns: NS records for .com TLD servers
+    6. TLD Name Server (.com) → "example.com is handled by these servers"
+       Returns: NS records for example.com authoritative servers
+    7. Authoritative Name Server (ns1.example.com) → "www.example.com = 93.184.216.34"
+       Returns: A record with IP address + TTL
+    8. Recursive resolver caches result, returns to client
+    9. OS caches, browser caches, connection initiated
+    </div>
+
+    <h3>6.2 DNS Record Types - Deep Technical Details</h3>
+
+    <table>
+        <tr><th>Record</th><th>Purpose</th><th>Format</th><th>Internal Details</th></tr>
+        <tr>
+            <td><strong>A</strong></td>
+            <td>Maps name → IPv4</td>
+            <td><code>www.example.com. 300 IN A 93.184.216.34</code></td>
+            <td>4 bytes in wire format. TTL of 300 means cache for 5 minutes.</td>
+        </tr>
+        <tr>
+            <td><strong>AAAA</strong></td>
+            <td>Maps name → IPv6</td>
+            <td><code>www.example.com. 300 IN AAAA 2606:2800:220:1:...</code></td>
+            <td>16 bytes. Clients prefer AAAA over A (Happy Eyeballs algorithm).</td>
+        </tr>
+        <tr>
+            <td><strong>CNAME</strong></td>
+            <td>Alias to another name</td>
+            <td><code>www.example.com. CNAME example.com.</code></td>
+            <td>Causes additional lookup. Cannot coexist with other records at same name. Cannot be at zone apex.</td>
+        </tr>
+        <tr>
+            <td><strong>NS</strong></td>
+            <td>Delegates zone to nameservers</td>
+            <td><code>example.com. NS ns1.example.com.</code></td>
+            <td>Glue records (A records for NS servers) included in parent zone to avoid circular dependency.</td>
+        </tr>
+        <tr>
+            <td><strong>MX</strong></td>
+            <td>Mail exchange server</td>
+            <td><code>example.com. MX 10 mail.example.com.</code></td>
+            <td>Priority value (lower = preferred). Multiple MX for failover.</td>
+        </tr>
+        <tr>
+            <td><strong>SRV</strong></td>
+            <td>Service discovery</td>
+            <td><code>_http._tcp.example.com. SRV 10 60 8080 server1.example.com.</code></td>
+            <td>Priority, weight, port, target. Used for service location (Kubernetes, SIP, XMPP).</td>
+        </tr>
+        <tr>
+            <td><strong>TXT</strong></td>
+            <td>Arbitrary text</td>
+            <td><code>example.com. TXT "v=spf1 include:_spf.google.com ~all"</code></td>
+            <td>Used for SPF, DKIM, DMARC (email auth), domain ownership verification, etc.</td>
+        </tr>
+        <tr>
+            <td><strong>SOA</strong></td>
+            <td>Zone authority info</td>
+            <td><code>example.com. SOA ns1.example.com. admin.example.com. (serial refresh retry expire minimum)</code></td>
+            <td>Serial number for zone transfer synchronization. MNAME = primary nameserver.</td>
+        </tr>
+    </table>
+
+    <h3>6.3 DNS Protocol Internals</h3>
+
+    <h4>6.3.1 Wire Format</h4>
+    <p>DNS uses UDP port 53 (falls back to TCP for responses >512 bytes, or with EDNS0 >4096 bytes).</p>
+    <pre>
+DNS Message Format:
++--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+|                      ID (16 bits)                | ← Matches request/response
++--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+|QR|   Opcode  |AA|TC|RD|RA|   Z    |   RCODE    | ← Flags
++--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+|                    QDCOUNT                        | ← Number of questions
+|                    ANCOUNT                        | ← Number of answers
+|                    NSCOUNT                        | ← Number of authority records
+|                    ARCOUNT                        | ← Number of additional records
++--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+|                   Questions                      |
+|                    Answers                        |
+|                   Authority                      |
+|                   Additional                     |
++--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+
+Name encoding: "www.example.com" → [3]www[7]example[3]com[0]
+(length-prefixed labels, terminated by zero-length label)
+    </pre>
+
+    <h4>6.3.2 DNS over HTTPS (DoH) and DNS over TLS (DoT)</h4>
+    <ul>
+        <li><strong>DoT:</strong> Wraps DNS in TLS on port 853. Simple but easy to block (distinct port).</li>
+        <li><strong>DoH:</strong> DNS queries sent as HTTPS POST/GET to a URL (e.g., <code>https://dns.google/dns-query</code>). Indistinguishable from normal HTTPS traffic. Uses wire format in body or JSON API.</li>
+    </ul>
+
+    <h3>6.4 DNS Caching and TTL Mechanics</h3>
+
+    <h4>TTL (Time To Live):</h4>
+    <ul>
+        <li>Set by the authoritative server on each record</li>
+        <li>Recursive resolvers decrement TTL as they cache</li>
+        <li>When TTL hits 0, record must be re-fetched from authoritative server</li>
+        <li><strong>Low TTL (60s):</strong> Enables fast failover (change IP, propagates in 60s). More DNS queries to authoritative servers.</li>
+        <li><strong>High TTL (86400s):</strong> Reduces DNS traffic. Slower failover. Good for stable records.</li>
+    </ul>
+
+    <div class="important">
+        <strong>TTL Gotcha:</strong> Many clients don't respect TTL. Java (by default) caches DNS forever. Some ISP resolvers enforce minimum TTL of 300s. Browser minimum TTL varies (Chrome enforces 60s minimum). Plan migrations assuming some clients will have stale records for hours.
+    </div>
+
+    <h3>6.5 DNS for System Design - Load Distribution</h3>
+
+    <h4>6.5.1 Round-Robin DNS</h4>
+    <p>Return multiple A records. Clients typically use the first one, but rotate the order:</p>
+    <pre>
+; Multiple A records - DNS server rotates order each query
+example.com.  300  IN  A  10.0.0.1
+example.com.  300  IN  A  10.0.0.2
+example.com.  300  IN  A  10.0.0.3
+
+; Query 1 response: 10.0.0.1, 10.0.0.2, 10.0.0.3
+; Query 2 response: 10.0.0.2, 10.0.0.3, 10.0.0.1
+; Query 3 response: 10.0.0.3, 10.0.0.1, 10.0.0.2
+    </pre>
+    <p><strong>Problems:</strong> No health checking (returns dead servers). No awareness of server load. Caching means uneven distribution. No session affinity.</p>
+
+    <h4>6.5.2 Weighted DNS</h4>
+    <p>Return records with different probabilities. AWS Route 53 example: weight 70 to US-East, weight 30 to US-West. The resolver returns one IP per query based on weight ratio.</p>
+
+    <h4>6.5.3 Latency-Based Routing</h4>
+    <p>DNS provider measures latency from resolver's location to each datacenter. Returns the IP of the lowest-latency datacenter. AWS Route 53 uses latency measurements between AWS regions and the resolver's IP.</p>
+
+    <h4>6.5.4 GeoDNS</h4>
+    <p>Determines client's approximate location from the resolver's IP (or EDNS Client Subnet extension which sends client's /24 prefix). Returns the geographically closest server IP.</p>
+
+    <h3>6.6 DNSSEC - Security Extension</h3>
+    <p>DNS responses are unsigned by default—vulnerable to spoofing (Kaminsky attack). DNSSEC adds cryptographic signatures:</p>
+    <ol>
+        <li><strong>Zone signing:</strong> Zone owner signs each record set with private key (RRSIG record)</li>
+        <li><strong>Chain of trust:</strong> Parent zone signs child's public key (DS record in parent). Root zone is the trust anchor.</li>
+        <li><strong>Validation:</strong> Recursive resolver verifies signature chain from root down to the queried record</li>
+    </ol>
+    <pre>
+; DNSSEC records
+example.com.  DNSKEY  256 3 13 (base64-public-key...)  ; Zone Signing Key
+example.com.  DNSKEY  257 3 13 (base64-public-key...)  ; Key Signing Key
+example.com.  RRSIG   A 13 2 300 (signature-over-A-records...)
+example.com.  DS      12345 13 2 (hash-of-child-DNSKEY...)  ; in .com zone
+    </pre>
+
+    <h3>6.7 DNS in Kubernetes (CoreDNS)</h3>
+    <p>Every pod in Kubernetes gets DNS resolution for services:</p>
+    <pre>
+# Service "my-service" in namespace "production"
+# Automatically gets DNS record:
+my-service.production.svc.cluster.local → ClusterIP (10.96.x.x)
+
+# Headless service (ClusterIP: None) returns pod IPs directly:
+# Used for stateful workloads (databases) that need direct pod addressing
+my-db.production.svc.cluster.local → 10.244.1.5, 10.244.2.3, 10.244.3.7
+
+# Pod DNS policy: /etc/resolv.conf in each pod points to CoreDNS
+nameserver 10.96.0.10  # CoreDNS ClusterIP
+search production.svc.cluster.local svc.cluster.local cluster.local
+ndots: 5  # Names with <5 dots get search suffixes appended first
+    </pre>
+
+    <h3>6.8 DNS Failover Timing</h3>
+    <div class="example">
+        <strong>Real-world DNS failover scenario:</strong><br><br>
+        1. Primary server at 10.0.0.1 goes down at T=0<br>
+        2. Health checker detects failure at T=30s (check interval)<br>
+        3. DNS updated to point to 10.0.0.2 at T=35s<br>
+        4. Clients with cached record (TTL=60s) still hit 10.0.0.1 until their cache expires<br>
+        5. Full propagation: T=35s + max(TTL remaining) ≈ T=95s worst case<br><br>
+        <strong>Lesson:</strong> Before planned migrations, reduce TTL days in advance. Go from 3600 → 60, wait 3600s for old TTL to expire from all caches, then perform the migration.
+    </div>
+
+    <h3>6.9 DNS Amplification Attack</h3>
+    <p>DNS is a common DDoS amplification vector because:</p>
+    <ul>
+        <li>Small query (60 bytes) can produce large response (3000+ bytes) → 50x amplification</li>
+        <li>UDP allows source IP spoofing (attacker sends query with victim's IP as source)</li>
+        <li>Open resolvers forward amplified response to victim</li>
+        <li><strong>Mitigation:</strong> Response Rate Limiting (RRL) on authoritative servers, BCP38 (ingress filtering), closing open resolvers</li>
+    </ul>
+
+</div>
+
+<!-- ==================== CONCLUSION ==================== -->
+<div class="section" style="margin-top: 40px; text-align: center;">
+    <h3>Summary & Interconnections</h3>
+    <p>These topics are deeply interconnected in real systems:</p>
+    <ul style="text-align: left;">
+        <li><strong>DNS</strong> provides the first layer of load distribution (GeoDNS routes to nearest datacenter)</li>
+        <li><strong>Load Balancers</strong> distribute traffic within a datacenter across server pools</li>
+        <li><strong>Proxy Servers</strong> (reverse proxies) handle TLS, caching, and routing at the edge</li>
+        <li><strong>Scalability</strong> patterns (sharding, replication, caching) enable each server to handle its share</li>
+        <li><strong>Availability</strong> techniques (redundancy, failover, consensus) ensure the system survives component failures</li>
+        <li><strong>Reliability</strong> mechanisms (idempotency, retries, sagas) ensure correct behavior despite partial failures</li>
+    </ul>
+    <p style="margin-top: 20px; color: #666;">
+        <em>Generated for experienced engineers seeking deep technical understanding of distributed systems fundamentals.</em>
+    </p>
+</div>
+
+</body>
+</html>

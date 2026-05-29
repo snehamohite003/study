@@ -1,0 +1,922 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>System Design Deep Dive - Part 2 (Topics 7, 9-13)</title>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; line-height: 1.8; max-width: 1100px; margin: 0 auto; padding: 40px; background: #f8f9fa; color: #2c3e50; }
+        h1 { text-align: center; color: #1a252f; border-bottom: 3px solid #3498db; padding-bottom: 15px; font-size: 2.2em; }
+        h2 { color: #2980b9; border-left: 5px solid #3498db; padding-left: 15px; margin-top: 50px; font-size: 1.8em; }
+        h3 { color: #34495e; margin-top: 30px; font-size: 1.4em; }
+        h4 { color: #555; margin-top: 20px; font-size: 1.1em; }
+        .section { background: #fff; padding: 30px; border-radius: 8px; margin: 20px 0; box-shadow: 0 2px 10px rgba(0,0,0,0.08); }
+        code { background: #ecf0f1; padding: 2px 8px; border-radius: 4px; font-family: 'Courier New', monospace; font-size: 0.9em; }
+        pre { background: #2c3e50; color: #ecf0f1; padding: 20px; border-radius: 6px; overflow-x: auto; font-size: 0.9em; line-height: 1.5; }
+        .example { background: #eaf6ff; border-left: 4px solid #3498db; padding: 15px 20px; margin: 15px 0; border-radius: 0 6px 6px 0; }
+        .important { background: #fef9e7; border-left: 4px solid #f39c12; padding: 15px 20px; margin: 15px 0; border-radius: 0 6px 6px 0; }
+        .diagram { background: #f4f6f9; border: 1px solid #ddd; padding: 20px; margin: 15px 0; border-radius: 6px; font-family: 'Courier New', monospace; white-space: pre; overflow-x: auto; font-size: 0.85em; }
+        table { width: 100%; border-collapse: collapse; margin: 15px 0; }
+        th, td { border: 1px solid #ddd; padding: 12px; text-align: left; }
+        th { background: #3498db; color: white; }
+        tr:nth-child(even) { background: #f2f2f2; }
+        .toc { background: #fff; padding: 25px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.08); }
+        .toc a { text-decoration: none; color: #2980b9; display: block; padding: 5px 0; }
+    </style>
+</head>
+<body>
+
+<h1>System Design Deep Dive – Part 2</h1>
+<p style="text-align:center; font-size:1.1em; color:#555;">Topics 7, 9–13: Protocols, Resilience, Caching &amp; Network Fundamentals</p>
+
+<div class="toc">
+    <h3>Table of Contents</h3>
+    <a href="#http-https">7. HTTP vs HTTPS</a>
+    <a href="#circuit-breaker">9. Circuit Breaker</a>
+    <a href="#bandwidth">10. Bandwidth</a>
+    <a href="#cdn">11. CDN &amp; CDN Caching</a>
+    <a href="#caching">12. Caching – Concepts, Warming, Invalidation</a>
+    <a href="#tcp-udp">13. TCP vs UDP</a>
+</div>
+
+<!-- ==================== 7. HTTP vs HTTPS ==================== -->
+<h2 id="http-https">7. HTTP vs HTTPS</h2>
+<div class="section">
+
+    <h3>7.1 HTTP Protocol Internals</h3>
+
+    <h4>7.1.1 HTTP/1.1 – Text-Based Request/Response</h4>
+    <div class="diagram">
+Client                                     Server (port 80)
+  │                                          │
+  │── TCP 3-way handshake (1 RTT) ─────────→│  SYN → SYN-ACK → ACK
+  │                                          │
+  │── REQUEST (plaintext on wire) ─────────→│
+  │   GET /api/users HTTP/1.1                │
+  │   Host: api.example.com                  │
+  │   Authorization: Bearer eyJhbG...        │  ← READABLE by any packet sniffer!
+  │   Cookie: session_id=abc123              │  ← READABLE!
+  │                                          │
+  │←── RESPONSE (plaintext) ───────────────│
+  │   HTTP/1.1 200 OK                        │
+  │   Content-Type: application/json         │
+  │   Content-Length: 245                    │
+  │   {"users":[{"ssn":"123-45-6789"...}]}   │  ← Sensitive data exposed!
+  │                                          │
+    </div>
+
+    <p><strong>How the kernel handles HTTP internally:</strong></p>
+    <ul>
+        <li>Application calls <code>write(socket_fd, request_bytes)</code></li>
+        <li>Kernel copies data into TCP send buffer</li>
+        <li>TCP segments the data (MSS ~1460 bytes), adds TCP header (src port, dst port, seq#, checksum)</li>
+        <li>IP layer adds IP header (src IP, dst IP)</li>
+        <li>Data link adds Ethernet frame (MAC addresses)</li>
+        <li><strong>At every hop (router, switch, WiFi AP), the HTTP payload is in plaintext</strong> — anyone with access to any intermediate network device can read the entire request/response</li>
+    </ul>
+
+    <h4>7.1.2 HTTP/1.1 Fundamental Problems</h4>
+    <ul>
+        <li><strong>Head-of-Line Blocking:</strong> One TCP connection = one request at a time. If response 1 takes 5s, requests 2-10 wait. Browsers open 6 parallel connections as workaround (wasting memory, repeating TCP slow start).</li>
+        <li><strong>Redundant Headers:</strong> Every request sends full headers (~800 bytes minimum). Cookies alone can be 4-8KB. Over 100 AJAX calls per page = 400-800KB wasted.</li>
+        <li><strong>No Server Push:</strong> Server can only respond to explicit requests, never proactively send data the client will need.</li>
+        <li><strong>Text Parsing Overhead:</strong> Finding end of headers requires scanning byte-by-byte for <code>\r\n\r\n</code>.</li>
+    </ul>
+
+    <h4>7.1.3 HTTP/2 – Binary Multiplexing</h4>
+    <div class="diagram">
+HTTP/2 Frame (binary):
++-----------------------------------------------+
+|                Length (24 bits)                |
++---------------+---------------+---------------+
+|  Type (8)     | Flags (8)     |               |
++-+-------------+---------------+               |
+|R|       Stream Identifier (31 bits)           |
++-----------------------------------------------+
+|              Frame Payload ...                 |
++-----------------------------------------------+
+
+Single TCP Connection with multiplexed streams:
+┌──────────────────────────────────────────────────────────┐
+│ [HEADERS stream=1 GET /page] [HEADERS stream=3 GET /js]  │
+│ [DATA stream=1 chunk1] [DATA stream=3 chunk1]            │
+│ [DATA stream=1 chunk2] [HEADERS stream=5 GET /css]       │
+│ [DATA stream=5 all] [DATA stream=3 chunk2]               │
+└──────────────────────────────────────────────────────────┘
+No HTTP-level HOL blocking! Streams interleaved freely.
+    </div>
+
+    <p><strong>HPACK Header Compression:</strong></p>
+    <ul>
+        <li>Static table: 61 pre-defined header entries (<code>:method: GET</code> = index 2, just 1 byte)</li>
+        <li>Dynamic table: Headers indexed during connection. Second request referencing same header sends 1 byte instead of 50+.</li>
+        <li>Huffman encoding on literal values (optimized for HTTP character frequencies)</li>
+        <li>Result: 85-95% header size reduction after first request</li>
+    </ul>
+
+    <h4>7.1.4 HTTP/3 – QUIC (UDP-Based Transport)</h4>
+    <p><strong>Why HTTP/2 still has a problem:</strong> TCP treats all bytes as one ordered stream. If TCP packet #3 is lost, packets #4-10 are buffered by the kernel until #3 is retransmitted. ALL HTTP/2 streams are blocked — worse than HTTP/1.1's 6 connections.</p>
+
+    <pre>
+// HTTP/3 over QUIC solves this:
+// - Each QUIC stream has independent ordering and flow control
+// - Lost packet on stream 1 does NOT block streams 3, 5, 7
+// - Built-in TLS 1.3 (encrypted from first byte)
+// - Connection identified by Connection ID, not IP:port tuple
+//   → Phone switching WiFi→4G doesn't break the connection
+
+// Connection establishment latency:
+// TCP + TLS 1.2:  3 RTT (SYN/ACK + ClientHello/ServerHello + Finished)
+// TCP + TLS 1.3:  2 RTT (SYN/ACK + 1-RTT TLS handshake)
+// QUIC (first):   1 RTT (handshake includes TLS in same flight)
+// QUIC (resume):  0 RTT (send application data in first packet!)
+//
+// On 100ms RTT transatlantic link:
+// TCP+TLS1.2 = 300ms before first byte. QUIC resume = 0ms.
+    </pre>
+
+    <h3>7.2 HTTPS – TLS Handshake Deep Dive</h3>
+
+    <h4>7.2.1 TLS 1.3 Full Handshake (Packet by Packet)</h4>
+    <div class="diagram">
+Client                                             Server (port 443)
+  │                                                  │
+  │── TCP Handshake (1 RTT) ───────────────────────→│
+  │                                                  │
+  │── ClientHello ─────────────────────────────────→│
+  │   • Supported cipher suites:                     │
+  │     [TLS_AES_256_GCM_SHA384, TLS_CHACHA20...]    │
+  │   • Key Shares (ECDHE public keys):              │
+  │     [x25519: 32-byte-pubkey]                     │
+  │   • SNI: "api.example.com" (unencrypted!)        │
+  │   • ALPN: ["h2", "http/1.1"]                     │
+  │                                                  │
+  │←── ServerHello ────────────────────────────────│
+  │   • Chosen cipher: TLS_AES_256_GCM_SHA384       │
+  │   • Key Share: x25519: server-32-byte-pubkey     │
+  │                                                  │
+  │   ═══ BOTH DERIVE SHARED SECRET ═══             │
+  │   shared = ECDHE(my_private, their_public)       │
+  │   keys = HKDF-Expand(shared, "traffic keys")    │
+  │                                                  │
+  │   ═══ EVERYTHING BELOW IS ENCRYPTED ═══         │
+  │                                                  │
+  │←── {EncryptedExtensions} ─────────────────────│
+  │←── {Certificate} (X.509 chain) ───────────────│
+  │←── {CertificateVerify} (signature proof) ─────│
+  │←── {Finished} (HMAC over transcript) ─────────│
+  │                                                  │
+  │   [Client verifies:]                             │
+  │   1. Certificate chains to trusted root CA       │
+  │   2. Certificate not expired                     │
+  │   3. Hostname matches cert SAN/CN                │
+  │   4. Signature in CertificateVerify is valid     │
+  │   5. Finished HMAC matches                       │
+  │                                                  │
+  │── {Finished} ─────────────────────────────────→│
+  │                                                  │
+  │←═══════ Encrypted HTTP Data ═══════════════════→│
+  │                                                  │
+    </div>
+
+    <h4>7.2.2 ECDHE Key Exchange – How Two Strangers Create a Shared Secret</h4>
+    <pre>
+// Elliptic Curve Diffie-Hellman Ephemeral (x25519):
+//
+// Both agree on curve: Curve25519, base point G
+//
+// Client:
+//   private_a = 32 random bytes
+//   public_A = private_a × G (elliptic curve point multiplication)
+//   → Sends public_A to server (32 bytes in ClientHello key_share)
+//
+// Server:
+//   private_b = 32 random bytes
+//   public_B = private_b × G
+//   → Sends public_B to client (32 bytes in ServerHello key_share)
+//
+// Shared secret (both independently compute):
+//   Client: S = private_a × public_B = private_a × private_b × G
+//   Server: S = private_b × public_A = private_b × private_a × G
+//   S is identical! Used as input to HKDF to derive encryption keys.
+//
+// Why "Ephemeral" (the E in ECDHE):
+//   private_a and private_b are DISCARDED after handshake.
+//   → Perfect Forward Secrecy: Even if server's long-term key leaks tomorrow,
+//     today's recorded traffic CANNOT be decrypted (attacker doesn't have
+//     the ephemeral private keys).
+//
+// Performance: x25519 = ~50 microseconds per operation (negligible)
+    </pre>
+
+    <h4>7.2.3 After Handshake – Symmetric Encryption</h4>
+    <div class="diagram">
+Every HTTP message is encrypted in TLS Records:
+┌──────────────────────────────────────────────────────┐
+│ TLS Record Header (5 bytes, plaintext):               │
+│   Type: 0x17 (application_data)                       │
+│   Legacy Version: 0x0303                              │
+│   Length: N                                           │
+├──────────────────────────────────────────────────────┤
+│ Encrypted payload (AES-256-GCM):                      │
+│                                                       │
+│   Inputs:                                             │
+│     Key: 32-byte derived session key                  │
+│     Nonce: 12 bytes = fixed_IV XOR sequence_number    │
+│     Plaintext: HTTP request/response bytes            │
+│     AAD: record header (authenticated, not encrypted) │
+│                                                       │
+│   Output:                                             │
+│     Ciphertext (same length as plaintext)             │
+│     + Authentication Tag (16 bytes)                   │
+│                                                       │
+│   Security:                                           │
+│     • Confidentiality: AES-CTR mode encryption        │
+│     • Integrity: GHASH polynomial → auth tag          │
+│     • If ANY bit modified → tag check fails → reject  │
+│     • Sequence number prevents replay                 │
+└──────────────────────────────────────────────────────┘
+    </div>
+
+    <h3>7.3 What Attackers See</h3>
+    <table>
+        <tr><th>Visible to Attacker</th><th>HTTP</th><th>HTTPS</th></tr>
+        <tr><td>Destination IP &amp; port</td><td>✅ Yes</td><td>✅ Yes</td></tr>
+        <tr><td>Domain name (SNI)</td><td>✅ Yes</td><td>✅ Yes (unless ECH)</td></tr>
+        <tr><td>URL path &amp; query params</td><td>✅ Yes</td><td>❌ No</td></tr>
+        <tr><td>Request headers (cookies, auth)</td><td>✅ Yes</td><td>❌ No</td></tr>
+        <tr><td>Request/response body</td><td>✅ Yes</td><td>❌ No</td></tr>
+        <tr><td>Approximate data size</td><td>✅ Yes</td><td>✅ Yes (length visible)</td></tr>
+        <tr><td>Timing of requests</td><td>✅ Yes</td><td>✅ Yes</td></tr>
+    </table>
+
+    <h3>7.4 HTTPS Performance (Modern Reality)</h3>
+    <div class="important">
+        <strong>Myth: "HTTPS is slow."</strong> Reality in 2024+:
+        <ul>
+            <li><strong>AES-NI hardware:</strong> ~1 CPU cycle per byte = 30+ Gbps encryption throughput on a single core</li>
+            <li><strong>TLS 1.3:</strong> Only +1 RTT latency (0 RTT on resumption)</li>
+            <li><strong>Session tickets:</strong> Client caches session state, resumes without full handshake</li>
+            <li><strong>OCSP stapling:</strong> Server pre-fetches revocation proof, saves client a round trip</li>
+            <li><strong>Net effect:</strong> HTTP/2 (requires HTTPS) multiplexing SAVES more latency than TLS adds. HTTPS is often FASTER.</li>
+        </ul>
+    </div>
+
+    <h3>7.5 HSTS – Preventing Downgrade</h3>
+    <pre>
+// Server header (sent over HTTPS):
+Strict-Transport-Security: max-age=31536000; includeSubDomains; preload
+
+// What happens in the browser:
+// 1. Stores: "example.com = HTTPS-only for 1 year"
+// 2. Any future http://example.com → internal 307 redirect to https://
+//    BEFORE any network request (no exposure window)
+// 3. With 'preload': hardcoded into browser binary
+//    → First visit is also protected (no chicken-and-egg problem)
+// 4. Certificate errors become HARD failures (no "proceed anyway" button)
+
+// Without HSTS, SSL-Stripping attack:
+//   User types "example.com" → browser tries HTTP → attacker intercepts →
+//   attacker proxies to real HTTPS site → user sees HTTP, thinks it's fine
+//   HSTS prevents this entirely.
+    </pre>
+
+</div>
+
+<!-- ==================== 9. CIRCUIT BREAKER ==================== -->
+<h2 id="circuit-breaker">9. Circuit Breaker</h2>
+<div class="section">
+
+    <h3>9.1 The Problem: Cascading Failures</h3>
+    <div class="diagram">
+Without Circuit Breaker:
+┌─────────┐     ┌─────────┐     ┌─────────────┐
+│ Service │────→│ Service │────→│  Database   │ ← DOWN (overloaded)
+│    A    │     │    B    │     │             │
+└─────────┘     └─────────┘     └─────────────┘
+
+1. Database becomes slow (10s response instead of 50ms)
+2. Service B threads all blocked waiting for DB (thread pool exhausted)
+3. Service B can't handle ANY requests (not just DB ones)
+4. Service A requests to B time out (30s × 100 connections = all threads stuck)
+5. Service A also becomes unresponsive
+6. Entire system is DOWN due to one slow dependency
+
+CASCADE: One failure → consumes all threads → propagates upstream → total outage
+    </div>
+
+    <h3>9.2 Circuit Breaker – State Machine</h3>
+    <div class="diagram">
+                    ┌─────────────────────────────────────────┐
+                    │                                          │
+                    ▼          failure_count >= threshold      │
+              ┌──────────┐ ──────────────────────────→ ┌──────────┐
+              │  CLOSED  │                              │   OPEN   │
+              │ (normal) │ ←─────────────────────────── │ (reject) │
+              └──────────┘    probe succeeds            └──────────┘
+                    ▲                                         │
+                    │                                         │
+                    │         timeout expires                 │
+                    │                                         ▼
+                    │                                   ┌───────────┐
+                    └────── probe succeeds ────────────│ HALF-OPEN │
+                                                       │  (probe)  │
+                           probe fails ───────────────→└───────────┘
+                           (back to OPEN)                     │
+                                                              │
+                                                       Allow limited
+                                                       requests through
+                                                       to test recovery
+    </div>
+
+    <h4>State Details:</h4>
+    <table>
+        <tr><th>State</th><th>Behavior</th><th>Transition Trigger</th></tr>
+        <tr>
+            <td><strong>CLOSED</strong></td>
+            <td>All requests pass through normally. Failures are counted in a sliding window.</td>
+            <td>→ OPEN: when failure rate exceeds threshold (e.g., 50% in last 10 seconds, minimum 20 calls)</td>
+        </tr>
+        <tr>
+            <td><strong>OPEN</strong></td>
+            <td>ALL requests immediately fail with fallback response. No network calls to downstream. Extremely fast (microseconds).</td>
+            <td>→ HALF-OPEN: after configured timeout (e.g., 30 seconds)</td>
+        </tr>
+        <tr>
+            <td><strong>HALF-OPEN</strong></td>
+            <td>Allow a limited number of probe requests (e.g., 3-5) through to test if downstream recovered.</td>
+            <td>→ CLOSED: if probes succeed<br>→ OPEN: if any probe fails</td>
+        </tr>
+    </table>
+
+    <h3>9.3 Implementation – Production-Grade</h3>
+    <pre>
+class CircuitBreaker {
+    constructor(options) {
+        this.name = options.name;
+        this.failureThreshold = options.failureThreshold || 0.5;  // 50% failure rate
+        this.minimumCalls = options.minimumCalls || 20;           // need at least 20 calls to evaluate
+        this.openDuration = options.openDuration || 30000;        // 30s in OPEN state
+        this.halfOpenPermits = options.halfOpenPermits || 5;      // 5 probe requests
+
+        this.state = 'CLOSED';
+        this.slidingWindow = new SlidingWindowMetrics(options.windowSize || 10000); // 10s window
+        this.openedAt = null;
+        this.halfOpenSuccesses = 0;
+        this.halfOpenFailures = 0;
+    }
+
+    async execute(fn, fallback) {
+        // OPEN state: fail fast
+        if (this.state === 'OPEN') {
+            if (Date.now() - this.openedAt >= this.openDuration) {
+                this.transitionTo('HALF_OPEN');
+            } else {
+                this.metrics.recordRejection();
+                return fallback ? fallback() : Promise.reject(new CircuitOpenError(this.name));
+            }
+        }
+
+        // HALF-OPEN state: allow limited probes
+        if (this.state === 'HALF_OPEN') {
+            if (this.halfOpenSuccesses + this.halfOpenFailures >= this.halfOpenPermits) {
+                // All probe slots used, reject remaining
+                return fallback ? fallback() : Promise.reject(new CircuitOpenError(this.name));
+            }
+        }
+
+        // Execute the actual call
+        const startTime = Date.now();
+        try {
+            const result = await fn();
+            this.onSuccess(Date.now() - startTime);
+            return result;
+        } catch (error) {
+            this.onFailure(error, Date.now() - startTime);
+            if (fallback) return fallback();
+            throw error;
+        }
+    }
+
+    onSuccess(duration) {
+        if (this.state === 'HALF_OPEN') {
+            this.halfOpenSuccesses++;
+            if (this.halfOpenSuccesses >= this.halfOpenPermits) {
+                this.transitionTo('CLOSED');  // Recovered!
+            }
+        } else {
+            this.slidingWindow.recordSuccess(duration);
+        }
+    }
+
+    onFailure(error, duration) {
+        if (this.state === 'HALF_OPEN') {
+            this.halfOpenFailures++;
+            this.transitionTo('OPEN');  // Still broken
+        } else {
+            this.slidingWindow.recordFailure(duration);
+            this.evaluateState();
+        }
+    }
+
+    evaluateState() {
+        const metrics = this.slidingWindow.getMetrics();
+        if (metrics.totalCalls >= this.minimumCalls) {
+            const failureRate = metrics.failures / metrics.totalCalls;
+            if (failureRate >= this.failureThreshold) {
+                this.transitionTo('OPEN');
+            }
+        }
+    }
+
+    transitionTo(newState) {
+        console.log(`CircuitBreaker[${this.name}]: ${this.state} → ${newState}`);
+        this.state = newState;
+        if (newState === 'OPEN') {
+            this.openedAt = Date.now();
+            this.emitEvent('circuit_opened');
+        } else if (newState === 'HALF_OPEN') {
+            this.halfOpenSuccesses = 0;
+            this.halfOpenFailures = 0;
+        } else if (newState === 'CLOSED') {
+            this.slidingWindow.reset();
+            this.emitEvent('circuit_closed');
+        }
+    }
+}
+    </pre>
+
+    <h3>9.4 Sliding Window Implementations</h3>
+    <h4>Count-Based Sliding Window:</h4>
+    <pre>
+// Fixed-size ring buffer of last N calls
+// Pro: Simple, predictable memory
+// Con: Time-insensitive (old calls have same weight as recent)
+
+class CountBasedWindow {
+    constructor(size = 100) {
+        this.buffer = new Array(size);
+        this.index = 0;
+        this.size = size;
+    }
+
+    record(outcome) {  // outcome: 'success' | 'failure' | 'slow'
+        this.buffer[this.index % this.size] = outcome;
+        this.index++;
+    }
+
+    getFailureRate() {
+        const filled = Math.min(this.index, this.size);
+        const failures = this.buffer.slice(0, filled).filter(o => o === 'failure').length;
+        return failures / filled;
+    }
+}
+    </pre>
+
+    <h4>Time-Based Sliding Window:</h4>
+    <pre>
+// Divide time into buckets (e.g., 10 buckets of 1 second each = 10s window)
+// Pro: Recent failures weighted appropriately
+// Con: Slightly more memory
+
+class TimeBasedWindow {
+    constructor(windowMs = 10000, buckets = 10) {
+        this.windowMs = windowMs;
+        this.bucketMs = windowMs / buckets;
+        this.buckets = new Array(buckets).fill(null).map(() => ({
+            successes: 0, failures: 0, slowCalls: 0, timestamp: 0
+        }));
+    }
+
+    record(outcome) {
+        const now = Date.now();
+        const bucketIndex = Math.floor((now / this.bucketMs) % this.buckets.length);
+        const bucket = this.buckets[bucketIndex];
+
+        // Reset bucket if it's from a previous rotation
+        if (now - bucket.timestamp > this.windowMs) {
+            bucket.successes = 0;
+            bucket.failures = 0;
+            bucket.slowCalls = 0;
+        }
+        bucket.timestamp = now;
+
+        if (outcome === 'failure') bucket.failures++;
+        else if (outcome === 'slow') bucket.slowCalls++;
+        else bucket.successes++;
+    }
+
+    getMetrics() {
+        const now = Date.now();
+        let total = 0, failures = 0;
+        for (const bucket of this.buckets) {
+            if (now - bucket.timestamp <= this.windowMs) {
+                total += bucket.successes + bucket.failures + bucket.slowCalls;
+                failures += bucket.failures + bucket.slowCalls;
+            }
+        }
+        return { totalCalls: total, failures, failureRate: total > 0 ? failures / total : 0 };
+    }
+}
+    </pre>
+
+    <h3>9.5 Fallback Strategies</h3>
+    <pre>
+// When circuit is OPEN, return degraded but useful responses:
+
+const breaker = new CircuitBreaker({ name: 'recommendation-service' });
+
+async function getRecommendations(userId) {
+    return breaker.execute(
+        // Primary: call recommendation service
+        () => recommendationService.getPersonalized(userId),
+
+        // Fallback hierarchy:
+        async () => {
+            // Fallback 1: Try cache (stale is better than nothing)
+            const cached = await redis.get(`reco:${userId}`);
+            if (cached) return { source: 'cache', items: JSON.parse(cached) };
+
+            // Fallback 2: Return popular items (pre-computed, always available)
+            return { source: 'popular', items: POPULAR_ITEMS_CACHE };
+
+            // Fallback 3: Return empty (graceful degradation)
+            // return { source: 'empty', items: [] };
+        }
+    );
+}
+
+// Real-world examples:
+// Netflix: If recommendation engine is down → show trending/popular content
+// Amazon: If review service is down → show product without reviews
+// Payment: If fraud-check is down → allow small transactions, queue large ones for later review
+    </pre>
+
+    <h3>9.6 Circuit Breaker vs Retry vs Timeout</h3>
+    <table>
+        <tr><th>Pattern</th><th>Purpose</th><th>When to Use</th></tr>
+        <tr><td><strong>Timeout</strong></td><td>Limit how long to wait for a single request</td><td>Always. Every network call needs a timeout.</td></tr>
+        <tr><td><strong>Retry</strong></td><td>Retry transient failures (network blip, temporary 503)</td><td>Idempotent operations + exponential backoff + jitter</td></tr>
+        <tr><td><strong>Circuit Breaker</strong></td><td>Stop calling a service that's clearly broken</td><td>When dependency is DOWN (not just occasional failures). Prevents wasting resources on doomed calls.</td></tr>
+    </table>
+
+    <div class="important">
+        <strong>Combined Pattern (production standard):</strong><br>
+        Request → Timeout (5s) → Retry (2 attempts, exponential backoff) → Circuit Breaker (tracks failure rate across all requests).<br><br>
+        If circuit is OPEN, skip both timeout and retry — fail immediately (microseconds instead of 10+ seconds).
+    </div>
+
+    <h3>9.7 Bulkhead Pattern (Companion to Circuit Breaker)</h3>
+    <div class="diagram">
+Without Bulkhead:
+┌──────────────────────────────────────┐
+│         Shared Thread Pool (200)      │
+│  Service A calls ████████████████     │ ← All 200 threads stuck on slow Service A
+│  Service B calls (waiting...)         │ ← Can't get a thread!
+│  Service C calls (waiting...)         │ ← Everything blocked!
+└──────────────────────────────────────┘
+
+With Bulkhead:
+┌────────────────┐ ┌────────────────┐ ┌────────────────┐
+│ Pool A (50)    │ │ Pool B (100)   │ │ Pool C (50)    │
+│ Service A ████ │ │ Service B ░░░  │ │ Service C ░░░  │
+│ (exhausted)    │ │ (healthy)      │ │ (healthy)      │
+└────────────────┘ └────────────────┘ └────────────────┘
+Service A is broken, but B and C are UNAFFECTED.
+    </div>
+
+</div>
+
+<!-- ==================== 10. BANDWIDTH ==================== -->
+<h2 id="bandwidth">10. Bandwidth</h2>
+<div class="section">
+
+    <h3>10.1 Definitions: Bandwidth vs Throughput vs Latency</h3>
+    <table>
+        <tr><th>Term</th><th>Definition</th><th>Analogy</th></tr>
+        <tr><td><strong>Bandwidth</strong></td><td>Maximum theoretical data transfer rate of a link (bits/second)</td><td>Width of a highway (how many lanes)</td></tr>
+        <tr><td><strong>Throughput</strong></td><td>Actual data transfer rate achieved (always ≤ bandwidth)</td><td>Actual cars passing per hour (affected by traffic, accidents)</td></tr>
+        <tr><td><strong>Latency</strong></td><td>Time for a single unit of data to travel from source to destination</td><td>Time for one car to drive the full highway length</td></tr>
+    </table>
+
+    <div class="example">
+        <strong>Key Insight:</strong> Bandwidth × Latency = "Bandwidth-Delay Product" (BDP) = how much data can be "in flight" in the network at any moment.<br><br>
+        Example: 1 Gbps link, 50ms RTT:<br>
+        BDP = 1,000,000,000 bits/s × 0.050 s = 50,000,000 bits = 6.25 MB<br>
+        TCP must have a window of at least 6.25 MB to fully utilize this link!<br>
+        Default TCP buffer (64KB) would only achieve 64KB/50ms = 10 Mbps on a 1Gbps link (1% utilization!).
+    </div>
+
+    <h3>10.2 Bandwidth at Different Layers</h3>
+    <div class="diagram">
+Layer                      Typical Bandwidth          Bottleneck
+─────────────────────────────────────────────────────────────────
+Physical NIC (modern):     10/25/40/100 Gbps          Hardware limit
+PCIe 4.0 x16:              256 Gbps (32 GB/s)         Bus bandwidth
+Memory (DDR5):             51.2 GB/s per channel      Memory bandwidth
+Disk SSD (NVMe):           7 GB/s read                Storage I/O
+Disk HDD:                  200 MB/s sequential        Mechanical seek
+LAN (Datacenter):          10-100 Gbps                Switch fabric
+WAN (Internet backbone):   100+ Gbps per fiber        Fiber capacity
+Last-mile (home):          100-1000 Mbps              ISP provisioning
+Mobile (5G):               100-1000 Mbps (peak)       Radio spectrum
+Mobile (4G):               10-100 Mbps                Radio spectrum
+
+Actual capacity depends on:
+- Protocol overhead (TCP/IP headers = ~40 bytes per packet)
+- Congestion (shared medium)
+- Distance (signal attenuation)
+- Error rates (retransmissions consume bandwidth)
+    </div>
+
+    <h3>10.3 How Bandwidth Affects System Design</h3>
+
+    <h4>10.3.1 Back-of-Envelope Bandwidth Calculations</h4>
+    <pre>
+// Scenario: Image hosting service (like Instagram)
+// 500 million daily active users
+// Each user uploads 2 photos/day, views 200 photos/day
+// Average photo size: 2MB
+
+// Upload bandwidth:
+//   500M × 2 photos × 2MB = 2,000 TB/day
+//   = 2,000 TB / 86,400 sec = 23.1 GB/s = 185 Gbps sustained upload
+
+// Download (view) bandwidth:
+//   500M × 200 views × 2MB = 200,000 TB/day
+//   = 200,000 TB / 86,400 sec = 2,314 GB/s = 18.5 Tbps download!
+//   (This is why CDNs exist — origin can't serve this directly)
+
+// Storage growth:
+//   2,000 TB/day × 365 = 730 PB/year (before replication)
+
+// Insight: Download bandwidth is 100x upload bandwidth
+// Design: Heavy CDN caching, image compression, progressive loading
+    </pre>
+
+    <h4>10.3.2 TCP Congestion Control – How Bandwidth is Shared</h4>
+    <p>TCP dynamically adjusts sending rate to avoid overwhelming the network. Understanding this is crucial for system performance.</p>
+    <div class="diagram">
+TCP Congestion Window (cwnd) over time:
+
+cwnd │
+     │                    ┌──── Congestion event (packet loss)
+     │                    │     cwnd cut in half
+     │                    ▼
+     │          ╱─────────╲
+     │        ╱             ╲────────╱──────
+     │      ╱ (linear increase)      (linear again)
+     │    ╱
+     │  ╱ ← Exponential growth (Slow Start)
+     │╱
+     └──────────────────────────────────────── time
+      │← Slow  →│←── Congestion Avoidance ──→│
+         Start
+
+Algorithms:
+- Slow Start: cwnd doubles every RTT (exponential) until threshold or loss
+- Congestion Avoidance: cwnd += 1 MSS per RTT (linear, AIMD)
+- On loss: cwnd halved (multiplicative decrease)
+- Modern: BBR (Google) measures actual bottleneck bandwidth + min RTT
+          instead of relying on packet loss signals
+    </div>
+
+    <h4>10.3.3 Bandwidth Optimization Techniques</h4>
+    <pre>
+// 1. COMPRESSION: Reduce data size on wire
+//    gzip: 60-80% reduction for text (HTML, JSON, CSS, JS)
+//    Brotli: 15-25% better than gzip (used by modern CDNs)
+//    Protocol Buffers: 3-10x smaller than JSON for structured data
+
+// 2. BATCHING: Amortize per-request overhead
+//    Instead of 100 individual API calls:
+//    POST /api/batch
+//    { "requests": [{"method":"GET","path":"/users/1"}, ...] }
+//    Saves: 100 × TCP headers + 100 × TLS records = significant overhead
+
+// 3. DELTA ENCODING: Send only changes
+//    Full sync: 10MB user data every time
+//    Delta sync: {"updated": [...], "deleted": [...]} = 50KB
+//    Used by: Dropbox, git, database replication
+
+// 4. CONNECTION POOLING: Reuse TCP connections
+//    TCP handshake: 1 RTT + TLS: 1-2 RTT = wasted bandwidth for short requests
+//    HTTP/2: Single connection, unlimited requests
+//    Database: Pool of 20 connections reused across thousands of queries
+
+// 5. EDGE COMPUTING: Reduce distance = reduce latency × bandwidth waste
+//    Process data at the edge (CDN, IoT gateway)
+//    Only send aggregated results to origin
+    </pre>
+
+    <h3>10.4 Bandwidth Bottleneck Identification</h3>
+    <pre>
+// Tools for diagnosing bandwidth issues:
+//
+// iperf3: Measure raw TCP/UDP throughput between two points
+//   $ iperf3 -c server.example.com -t 30 -P 4
+//   [  4] 0.00-30.00 sec  2.61 GBytes   748 Mbits/sec  sender
+//
+// nethogs: Per-process bandwidth usage (Linux)
+//   PID    USER     PROGRAM                DEV        SENT      RECEIVED
+//   14356  app      java                   eth0       45.2 MB/s  12.8 MB/s
+//
+// tcpdump + Wireshark: Packet-level analysis
+//   $ tcpdump -i eth0 -w capture.pcap port 443
+//   Analyze: retransmissions, window scaling, throughput per flow
+//
+// Common bottlenecks in production:
+// 1. Single DB connection handling all queries (solution: connection pool + read replicas)
+// 2. Uncompressed API responses (solution: gzip/brotli middleware)
+// 3. Large payloads without pagination (solution: cursor-based pagination)
+// 4. Chatty microservices (solution: batch endpoints, gRPC streaming)
+// 5. Missing TCP window scaling (solution: sysctl net.ipv4.tcp_window_scaling=1)
+    </pre>
+
+    <h3>10.5 Bandwidth Cost in Cloud</h3>
+    <div class="important">
+        <strong>Cloud bandwidth pricing (a major cost driver):</strong>
+        <ul>
+            <li><strong>Inbound (ingress):</strong> Usually FREE</li>
+            <li><strong>Outbound (egress):</strong> $0.01-0.09 per GB (AWS/GCP/Azure)</li>
+            <li><strong>Cross-region:</strong> $0.01-0.02 per GB</li>
+            <li><strong>Cross-AZ (same region):</strong> $0.01 per GB (often overlooked!)</li>
+            <li><strong>Same-AZ:</strong> FREE (keep communicating services in same AZ when possible)</li>
+        </ul>
+        At scale: 100TB/month egress = $5,000-$9,000/month just for bandwidth!<br>
+        Design implication: CDNs, compression, and caching directly reduce cloud bills.
+    </div>
+
+</div>
+
+<!-- ==================== 11. CDN ==================== -->
+<h2 id="cdn">11. CDN (Content Delivery Network) &amp; CDN Caching</h2>
+<div class="section">
+
+    <h3>11.1 CDN Architecture – How It Works Internally</h3>
+    <div class="diagram">
+Without CDN:
+User in Tokyo ──── 200ms RTT ────→ Origin in US-East
+  (every request travels 15,000 km round trip)
+
+With CDN:
+User in Tokyo ──── 5ms RTT ────→ CDN Edge (Tokyo PoP) ──cache hit──→ Response!
+                                        │
+                                   cache miss (rare)
+                                        │
+                                        ▼
+                               CDN Regional Tier (Singapore)
+                                        │
+                                   cache miss (very rare)
+                                        │
+                                        ▼
+                               CDN Origin Shield (US-West)
+                                        │
+                                   cache miss (extremely rare)
+                                        │
+                                        ▼
+                               Origin Server (US-East)
+
+CDN Network Topology:
+┌──────────────────────────────────────────────────────────────────┐
+│                        CDN Provider Network                       │
+│                                                                   │
+│  ┌─────┐  ┌─────┐  ┌─────┐  ┌─────┐  ┌─────┐  ┌─────┐        │
+│  │Tokyo│  │Seoul│  │Mumbai│ │London│  │NYC  │  │SaoPaulo│       │
+│  │ PoP │  │ PoP │  │ PoP │  │ PoP │  │ PoP │  │  PoP  │       │
+│  └──┬──┘  └──┬──┘  └──┬──┘  └──┬──┘  └──┬──┘  └──┬────┘       │
+│     └────┬────┘        │        └────┬────┘        │             │
+│          ▼             ▼             ▼             ▼             │
+│     ┌─────────┐   ┌─────────┐   ┌─────────┐  ┌─────────┐      │
+│     │Regional │   │Regional │   │Regional │  │Regional │       │
+│     │Singapore│   │ Mumbai  │   │Frankfurt│  │Virginia │       │
+│     └────┬────┘   └────┬────┘   └────┬────┘  └────┬────┘      │
+│          └──────────────┴─────────────┴────────────┘             │
+│                              │                                    │
+│                     ┌────────┴────────┐                          │
+│                     │  Origin Shield  │                          │
+│                     │   (US-West)     │                          │
+│                     └────────┬────────┘                          │
+└──────────────────────────────┼───────────────────────────────────┘
+                               ▼
+                     ┌──────────────────┐
+                     │  Origin Server   │
+                     │    (Customer)    │
+                     └──────────────────┘
+    </div>
+
+    <h3>11.2 Anycast Routing – How Users Reach the Nearest PoP</h3>
+    <p>CDN edge servers share the same IP address globally. BGP (Border Gateway Protocol) routing automatically sends packets to the geographically closest one.</p>
+    <pre>
+// How Anycast works:
+// 1. CDN announces the same IP prefix (e.g., 104.16.0.0/12) from ALL PoPs globally
+// 2. Each PoP advertises this to their upstream ISPs via BGP
+// 3. Internet routers choose the "shortest AS-path" to reach that IP
+// 4. Result: Tokyo user's packets route to Tokyo PoP, London user's to London PoP
+//    All using the SAME destination IP address!
+
+// DNS resolution for CDN-fronted site:
+// www.example.com → CNAME → www.example.com.cdn.cloudflare.net → A 104.16.123.45
+// That IP (104.16.123.45) exists in 300+ PoPs simultaneously
+// User connects to whichever is topologically closest
+
+// Failover: If a PoP goes down, BGP withdraws the route
+//   → traffic automatically flows to next-nearest PoP (seconds)
+//   → No DNS TTL propagation delay!
+    </pre>
+
+    <h3>11.3 CDN Caching – Deep Internals</h3>
+
+    <h4>11.3.1 Cache Key Construction</h4>
+    <pre>
+// What uniquely identifies a cached object?
+// Default cache key: scheme + host + path + query string
+// Example: https://example.com/images/logo.png?v=2
+
+// Cache key variations (configurable):
+cache_key = hash(
+    method,                    // GET vs POST (POST usually not cached)
+    scheme,                    // http vs https
+    host,                      // example.com
+    path,                      // /images/logo.png
+    sorted_query_params,       // ?v=2 (sorted to normalize order)
+    // Optional:
+    accept_encoding_header,    // gzip vs br (different cached variants)
+    cookie['country'],         // geo-specific content
+    device_type,               // mobile vs desktop (if Vary header used)
+);
+
+// Vary Header: Tells CDN to cache multiple variants
+// Response: Vary: Accept-Encoding, Accept-Language
+// CDN stores separate cached copies for:
+//   Accept-Encoding: gzip  → compressed version
+//   Accept-Encoding: br    → brotli version
+//   Accept-Language: en    → English version
+//   Accept-Language: fr    → French version
+    </pre>
+
+    <h4>11.3.2 Cache-Control Headers (Origin → CDN → Browser)</h4>
+    <pre>
+// Origin server tells CDN AND browser how to cache:
+
+// Cache publicly (CDN + browser) for 1 year (immutable assets):
+Cache-Control: public, max-age=31536000, immutable
+// Used for: versioned assets (app.a3f2b1.js, style.8c4d2e.css)
+// 'immutable' = don't even revalidate on browser refresh
+
+// Cache at CDN for 1 hour, browser for 5 minutes:
+Cache-Control: public, max-age=300, s-maxage=3600
+// s-maxage = shared cache (CDN) TTL, overrides max-age for CDN
+// max-age = browser TTL
+// Use case: API responses that change occasionally
+
+// Don't cache (sensitive data):
+Cache-Control: private, no-store, no-cache
+// private = only browser can cache (CDN must not)
+// no-store = don't cache anywhere
+// no-cache = cache it but revalidate with origin every time (confusing name!)
+
+// Stale-while-revalidate (modern, brilliant for performance):
+Cache-Control: public, max-age=60, stale-while-revalidate=300
+// First 60s: serve from cache (fresh)
+// 60-360s: serve STALE cache immediately, revalidate in background
+// After 360s: must revalidate before serving
+// Result: Users almost NEVER wait for origin response!
+    </pre>
+
+    <h4>11.3.3 Cache Revalidation (Conditional Requests)</h4>
+    <div class="diagram">
+ETag-based revalidation:
+
+First request:
+Client → CDN: GET /api/products
+CDN → Origin: GET /api/products
+Origin → CDN: 200 OK, ETag: "a1b2c3d4", body: [large JSON]
+CDN → Client: 200 OK, ETag: "a1b2c3d4", body: [large JSON]
+CDN stores: {key: /api/products, etag: "a1b2c3d4", body: [...]}
+
+After TTL expires, next request:
+Client → CDN: GET /api/products
+CDN → Origin: GET /api/products, If-None-Match: "a1b2c3d4"
+
+If content unchanged:
+Origin → CDN: 304 Not Modified (NO body! saves bandwidth)
+CDN refreshes TTL, serves cached body to client
+
+If content changed:
+Origin → CDN: 200 OK, ETag: "e5f6g7h8", body: [new JSON]
+CDN updates cache, serves new body
+    </div>
+
+    <h4>11.3.4 CDN Cache Purging / Invalidation</h4>
+    <pre>
+// When content changes, you need to remove stale cached copies from ALL PoPs:
+
+// Method 1: Purge by URL
+// POST /api/cdn/purge
+// {"urls": ["https://example.com/api/products/123"]}
+// CDN propagates purge to all 300+ PoPs (typically < 1 second globally)
+
+// Method 2: Purge by tag/surrogate key
+// Origin includes: Surrogate-Key: product-123 category-electronics
+// Purge: DELETE all objects tagged

@@ -1,0 +1,1440 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>System Design Deep Dive - Consensus, Fault Tolerance, REST & gRPC</title>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; line-height: 1.8; max-width: 1100px; margin: 0 auto; padding: 40px; background: #f8f9fa; color: #2c3e50; }
+        h1 { text-align: center; color: #1a252f; border-bottom: 3px solid #3498db; padding-bottom: 15px; font-size: 2.2em; }
+        h2 { color: #2980b9; border-left: 5px solid #3498db; padding-left: 15px; margin-top: 50px; font-size: 1.8em; }
+        h3 { color: #34495e; margin-top: 30px; font-size: 1.4em; }
+        h4 { color: #555; margin-top: 20px; font-size: 1.1em; }
+        .section { background: #fff; padding: 30px; border-radius: 8px; margin: 20px 0; box-shadow: 0 2px 10px rgba(0,0,0,0.08); }
+        code { background: #ecf0f1; padding: 2px 8px; border-radius: 4px; font-family: 'Courier New', monospace; font-size: 0.9em; }
+        pre { background: #2c3e50; color: #ecf0f1; padding: 20px; border-radius: 6px; overflow-x: auto; font-size: 0.9em; line-height: 1.5; }
+        .example { background: #eaf6ff; border-left: 4px solid #3498db; padding: 15px 20px; margin: 15px 0; border-radius: 0 6px 6px 0; }
+        .important { background: #fef9e7; border-left: 4px solid #f39c12; padding: 15px 20px; margin: 15px 0; border-radius: 0 6px 6px 0; }
+        .diagram { background: #f4f6f9; border: 1px solid #ddd; padding: 20px; margin: 15px 0; border-radius: 6px; font-family: 'Courier New', monospace; white-space: pre; overflow-x: auto; font-size: 0.85em; }
+        table { width: 100%; border-collapse: collapse; margin: 15px 0; }
+        th, td { border: 1px solid #ddd; padding: 12px; text-align: left; }
+        th { background: #3498db; color: white; }
+        tr:nth-child(even) { background: #f2f2f2; }
+        .toc { background: #fff; padding: 25px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.08); }
+        .toc a { text-decoration: none; color: #2980b9; display: block; padding: 5px 0; }
+    </style>
+</head>
+<body>
+
+<h1>System Design Deep Dive – Part 4</h1>
+<p style="text-align:center; font-size:1.1em; color:#555;">Topics 16, 18, 19: Consensus Algorithms, Fault Tolerance, REST &amp; gRPC</p>
+
+<div class="toc">
+    <h3>Table of Contents</h3>
+    <a href="#consensus">16. Consensus Algorithms</a>
+    <a href="#fault-tolerance">18. Fault Tolerance</a>
+    <a href="#rest-grpc">19. REST and gRPC</a>
+</div>
+
+<!-- ==================== 16. CONSENSUS ALGORITHMS ==================== -->
+<h2 id="consensus">16. Consensus Algorithms</h2>
+<div class="section">
+
+    <h3>16.1 The Fundamental Problem</h3>
+    <p>In a distributed system, multiple nodes must agree on a single value (or a sequence of values) despite: network partitions, message delays, message loss, node crashes, and restarts. This is the <strong>distributed consensus problem</strong>.</p>
+
+    <div class="diagram">
+Why is consensus hard?
+
+Scenario: 5 database nodes must agree on "Who is the leader?"
+
+  Node A: "I'm the leader!" (hasn't heard from others)
+  Node B: "I'm the leader!" (also hasn't heard)
+  Node C: (crashed)
+  Node D: "I think A is leader" (got A's message first)
+  Node E: "I think B is leader" (got B's message first)
+
+  → SPLIT BRAIN: Two nodes accept writes → data diverges → catastrophe!
+
+The FLP Impossibility Result (1985):
+  In an asynchronous system where even ONE process can crash,
+  NO deterministic algorithm can guarantee consensus.
+
+  Practical workaround: Use timeouts (partial synchrony assumption)
+  to make progress while maintaining safety.
+    </div>
+
+    <p><strong>Consensus requirements (formal properties):</strong></p>
+    <ul>
+        <li><strong>Agreement:</strong> All non-faulty nodes decide the same value</li>
+        <li><strong>Validity:</strong> The decided value was proposed by some node (not made up)</li>
+        <li><strong>Termination:</strong> All non-faulty nodes eventually reach a decision</li>
+        <li><strong>Integrity:</strong> A node decides at most once</li>
+    </ul>
+
+    <h3>16.2 Raft – The Understandable Consensus Algorithm</h3>
+    <p>Raft was designed in 2014 by Diego Ongaro as a more understandable alternative to Paxos. Used in: <strong>etcd</strong> (Kubernetes), <strong>CockroachDB</strong>, <strong>TiKV</strong>, <strong>Consul</strong>, <strong>HashiCorp Vault</strong>.</p>
+
+    <h4>16.2.1 Core Concepts</h4>
+    <table>
+        <tr><th>Concept</th><th>Description</th></tr>
+        <tr><td><strong>Term</strong></td><td>A monotonically increasing logical clock. Each term has at most one leader. Acts as an epoch/generation number. If a node sees a higher term, it immediately steps down.</td></tr>
+        <tr><td><strong>Leader</strong></td><td>Single node that handles ALL client requests. Replicates log entries to followers. Sends periodic heartbeats.</td></tr>
+        <tr><td><strong>Follower</strong></td><td>Passive node. Responds to RPCs from leader and candidates. If it doesn't hear from leader within election timeout → becomes candidate.</td></tr>
+        <tr><td><strong>Candidate</strong></td><td>Transitional state during election. Requests votes from all nodes. Becomes leader if it gets majority votes.</td></tr>
+        <tr><td><strong>Log</strong></td><td>Ordered sequence of commands (state machine inputs). Each entry has: index, term, command. Replicated to all nodes.</td></tr>
+        <tr><td><strong>Commit</strong></td><td>An entry is committed once a majority of nodes have durably stored it. Committed entries are guaranteed to never be lost.</td></tr>
+    </table>
+
+    <h4>16.2.2 Leader Election – Detailed Walkthrough</h4>
+    <div class="diagram">
+5-Node Cluster: A, B, C, D, E (all start as Followers, term=0)
+
+Election timeout fires on Node C (randomized: 150-300ms per node):
+
+╔═══════════════════════════════════════════════════════════════════════╗
+║ STEP 1: Node C becomes Candidate                                     ║
+║   • Increments term: 0 → 1                                          ║
+║   • Votes for itself (1 vote)                                        ║
+║   • Resets election timer                                            ║
+║   • Sends RequestVote RPC to all other nodes                         ║
+╚═══════════════════════════════════════════════════════════════════════╝
+
+C → A: RequestVote(term=1, candidateId=C, lastLogIndex=0, lastLogTerm=0)
+C → B: RequestVote(term=1, candidateId=C, lastLogIndex=0, lastLogTerm=0)
+C → D: RequestVote(term=1, candidateId=C, lastLogIndex=0, lastLogTerm=0)
+C → E: RequestVote(term=1, candidateId=C, lastLogIndex=0, lastLogTerm=0)
+
+╔═══════════════════════════════════════════════════════════════════════╗
+║ STEP 2: Followers evaluate vote request                              ║
+║   Conditions to grant vote:                                          ║
+║   1. Candidate's term >= my term                                     ║
+║   2. I haven't voted for anyone else in this term                    ║
+║   3. Candidate's log is AT LEAST as up-to-date as mine              ║
+║      (compared by: last entry's term first, then index)              ║
+╚═══════════════════════════════════════════════════════════════════════╝
+
+A: term=0 < 1, haven't voted in term 1, C's log is current → GRANT VOTE
+B: same → GRANT VOTE
+D: same → GRANT VOTE
+E: same → GRANT VOTE
+
+╔═══════════════════════════════════════════════════════════════════════╗
+║ STEP 3: C receives majority (self + A + B = 3 out of 5 needed)      ║
+║   → C becomes LEADER for term 1                                     ║
+║   → Immediately sends heartbeats (empty AppendEntries) to all       ║
+║   → All followers reset election timers upon receiving heartbeat     ║
+╚═══════════════════════════════════════════════════════════════════════╝
+
+C → all: AppendEntries(term=1, leaderId=C, entries=[], leaderCommit=0)
+All followers: "C is leader in term 1. Acknowledged."
+
+Election timeout randomization prevents split votes:
+  If A and C both timeout simultaneously → both become candidates →
+  votes split (A gets 2, C gets 2) → no majority → new term, retry
+  Randomization makes simultaneous timeout unlikely (< 5% probability)
+    </div>
+
+    <h4>16.2.3 Log Replication – Write Path</h4>
+    <pre>
+// Client sends: SET x = 42 to Leader (Node C)
+
+// ═══ STEP 1: Leader appends to local log ═══
+leader.log = [
+    { index: 1, term: 1, command: "SET a = 1" },   // previously committed
+    { index: 2, term: 1, command: "SET b = 2" },   // previously committed
+    { index: 3, term: 1, command: "SET x = 42" },  // NEW - uncommitted
+];
+
+// ═══ STEP 2: Leader sends AppendEntries to all followers ═══
+// RPC payload:
+{
+    term: 1,                 // Current term (follower rejects if its term is higher)
+    leaderId: "C",
+    prevLogIndex: 2,         // Index of entry just before the new ones
+    prevLogTerm: 1,          // Term of entry at prevLogIndex
+    entries: [               // New entries to append
+        { index: 3, term: 1, command: "SET x = 42" }
+    ],
+    leaderCommit: 2          // Highest committed index leader knows of
+}
+
+// ═══ STEP 3: Follower consistency check ═══
+// Follower checks: "Do I have entry at index 2 with term 1?"
+//   YES → Append new entries. Respond SUCCESS.
+//   NO  → Respond FAILURE. (Leader will decrement prevLogIndex and retry)
+//          This handles cases where follower missed entries or has diverged.
+
+// ═══ STEP 4: Leader counts successful responses ═══
+// Need: majority = floor(5/2) + 1 = 3 nodes (including self)
+// Leader has it (self) + A responds SUCCESS + D responds SUCCESS = 3 ✓
+// → Entry at index 3 is now COMMITTED
+
+// ═══ STEP 5: Leader applies to state machine ═══
+leader.commitIndex = 3;
+leader.stateMachine.apply("SET x = 42");  // x is now 42
+
+// ═══ STEP 6: Respond to client ═══
+client.respond({ success: true, value: 42 });
+
+// ═══ STEP 7: Followers learn about commit ═══
+// Next heartbeat includes leaderCommit=3
+// Followers: "Entries up to index 3 are committed" → apply to their state machines
+    </pre>
+
+    <h4>16.2.4 Log Repair (Handling Divergence)</h4>
+    <div class="diagram">
+Scenario: Node B was down during some entries, then rejoined.
+
+Leader (C) log: [1:1][2:1][3:1][4:2][5:2][6:2]   (term:index)
+Follower B log: [1:1][2:1][3:1]                    (missed entries 4,5,6)
+Follower D log: [1:1][2:1][3:1][4:2][5:2][6:2]   (fully caught up)
+
+Leader sends to B: AppendEntries(prevLogIndex=5, prevLogTerm=2, entries=[6:2])
+B: "I don't have index 5!" → responds FAILURE
+
+Leader decrements, retries: AppendEntries(prevLogIndex=4, prevLogTerm=2, entries=[5:2, 6:2])
+B: "I don't have index 4!" → responds FAILURE
+
+Leader decrements, retries: AppendEntries(prevLogIndex=3, prevLogTerm=1, entries=[4:2, 5:2, 6:2])
+B: "I DO have index 3 with term 1!" → SUCCESS
+B appends entries 4, 5, 6. Now fully caught up.
+
+Optimization: nextIndex[] per follower
+  Leader tracks where each follower's log diverges.
+  Avoids repeating the search on every AppendEntries.
+    </div>
+
+    <h4>16.2.5 Safety: Why Committed Entries Are Never Lost</h4>
+    <pre>
+// Key safety property: If an entry is committed, it will be in ALL future leaders' logs.
+//
+// Why? Because to win an election, a candidate must get votes from a MAJORITY.
+// A committed entry exists on a MAJORITY of nodes.
+// These two majorities MUST overlap (pigeonhole principle).
+// At least one voter has the committed entry.
+// Raft's vote condition: Candidate's log must be at least as up-to-date as voter's.
+// Therefore: Candidate with the committed entry won't vote for one without it.
+// Therefore: A candidate without the committed entry can't get a majority.
+// Therefore: Every future leader has all committed entries. QED.
+
+// Example:
+// 5 nodes. Entry committed on {A, B, C} (majority of 3).
+// New election: candidate needs 3 votes.
+// At least one of {A, B, C} must vote for the candidate.
+// That voter has the committed entry.
+// Voter won't vote for a candidate with a less up-to-date log.
+// → New leader MUST have the committed entry.
+    </pre>
+
+    <h3>16.3 Paxos – The Original (and Complex) Consensus</h3>
+    <p>Invented by Leslie Lamport in 1989. Provably correct but notoriously hard to understand and implement. Raft is essentially a more constrained, understandable variant of Multi-Paxos.</p>
+
+    <h4>16.3.1 Single-Decree Paxos (Agreeing on ONE value)</h4>
+    <div class="diagram">
+Roles:
+  Proposer: Proposes values (any node can be a proposer)
+  Acceptor: Votes on proposals (majority needed to decide)
+  Learner:  Learns the decided value
+
+Two phases:
+
+Phase 1: PREPARE (establish right to propose)
+──────────────────────────────────────────────
+Proposer → Acceptors: Prepare(n)    // n = unique proposal number
+Acceptor:
+  If n > highest_prepare_seen:
+    highest_prepare_seen = n
+    Promise: "I won't accept any proposal with number < n"
+    Respond: Promise(n, previously_accepted_value_if_any)
+  Else:
+    Reject (or ignore)
+
+Phase 2: ACCEPT (propose a value)
+──────────────────────────────────────────────
+If proposer received promises from MAJORITY:
+  Value to propose:
+    - If any acceptor replied with a previously accepted value:
+      USE the value with HIGHEST proposal number (can't change it!)
+    - Otherwise: USE proposer's own value (free to choose)
+
+  Proposer → Acceptors: Accept(n, value)
+  Acceptor:
+    If n >= highest_prepare_seen:
+      Accept! Store (n, value).
+      Respond: Accepted(n, value)
+    Else:
+      Reject (a higher-numbered prepare came in between)
+
+If MAJORITY accept → VALUE IS DECIDED!
+Learners are notified of the decided value.
+    </div>
+
+    <pre>
+// Paxos concrete example: Nodes A, B, C (3 acceptors, majority = 2)
+
+// Proposer P1 wants to propose value "X":
+//   P1 → A,B,C: Prepare(1)
+//   A,B,C respond: Promise(1, null) (nothing previously accepted)
+//   P1 → A,B,C: Accept(1, "X")
+//   A,B: Accepted(1, "X")  — MAJORITY! Value "X" is decided!
+
+// What if two proposers compete?
+// P1: Prepare(1) → gets promises from A,B
+// P2: Prepare(2) → gets promises from B,C (B now promises to P2, won't accept from P1)
+// P1: Accept(1, "X") → A accepts, B REJECTS (promised n≥2)
+//     P1 doesn't get majority. FAILS.
+// P2: Accept(2, "Y") → B,C accept → MAJORITY! Value "Y" decided.
+
+// If P2's Prepare got back an already-accepted value from B:
+//   B: Promise(2, accepted_value="X" at proposal 1)
+//   P2 MUST propose "X" (not "Y")! This preserves safety.
+//   → Ensures once a value is chosen, it stays chosen.
+
+// Problem: Competing proposers can livelock (P1 preempts P2, P2 preempts P1, forever)
+// Solution: Elect a single distinguished proposer (leader) — this is Multi-Paxos/Raft.
+    </pre>
+
+    <h4>16.3.2 Multi-Paxos (Practical Consensus)</h4>
+    <pre>
+// Single-Decree Paxos agrees on ONE value. Real systems need a SEQUENCE of values
+// (replicated log). Multi-Paxos:
+// 1. Elect a stable leader (distinguished proposer)
+// 2. Leader runs Phase 1 ONCE (establishes right to propose)
+// 3. For each new log entry, leader only runs Phase 2 (fast!)
+//
+// In steady state: Leader sends Accept(n, value) → majority accept → committed
+// This is essentially what Raft does with AppendEntries!
+//
+// Multi-Paxos ≈ Raft with less structure (Raft adds the strong leader constraint,
+// which simplifies understanding but both achieve the same result)
+    </pre>
+
+    <h3>16.4 ZAB (ZooKeeper Atomic Broadcast)</h3>
+    <pre>
+// Used by Apache ZooKeeper. Similar to Raft but designed earlier (2008).
+// Key differences from Raft:
+// 1. Leader MUST have the longest log (Raft: just most up-to-date)
+// 2. Epoch-based (like Raft's term)
+// 3. Two-phase commit for writes: Leader proposes → followers ACK → Leader commits
+// 4. FIFO ordering guarantee: All messages from a leader are delivered in order
+//
+// ZooKeeper writes:
+// Client → Leader: create("/services/api/node1", data)
+// Leader → Followers: PROPOSE(txn_id=epoch:counter, data)
+// Followers: Write to transaction log → ACK
+// Leader: Majority ACKs → COMMIT
+// Leader → Followers: COMMIT(txn_id)
+// Followers: Apply to in-memory data tree
+//
+// Used for: Service discovery, configuration management, distributed locks,
+//           leader election, cluster membership
+    </pre>
+
+    <h3>16.5 Practical Consensus: etcd and Its Guarantees</h3>
+    <pre>
+// etcd = distributed key-value store using Raft
+// Backbone of Kubernetes (stores ALL cluster state)
+
+// Write (linearizable):
+$ etcdctl put /services/api "10.0.1.5:8080"
+// Internally:
+// 1. Client connects to any etcd node
+// 2. If not leader, request is forwarded to leader
+// 3. Leader appends to Raft log
+// 4. Leader replicates to followers
+// 5. Majority acknowledge → committed
+// 6. Leader applies to state machine (boltdb)
+// 7. Response to client: "OK"
+
+// Read (linearizable - default):
+$ etcdctl get /services/api
+// Leader must confirm it's still leader (ReadIndex protocol):
+// 1. Leader records current commit index
+// 2. Leader sends heartbeat to majority (confirms it's still leader)
+// 3. Waits until state machine has applied up to that index
+// 4. Reads from state machine → returns to client
+// This ensures read reflects ALL committed writes (even very recent ones)
+
+// Read (serializable - faster but potentially stale):
+$ etcdctl get /services/api --consistency=s
+// Any node can serve (reads from local state machine)
+// May return stale data if node hasn't applied latest commits yet
+// ~10x faster because no leader confirmation needed
+
+// Lease-based locking (distributed lock):
+// 1. Create lease: etcdctl lease grant 10 (10 second TTL)
+// 2. Put with lease: etcdctl put /locks/resource "owner=me" --lease=abc123
+// 3. If lease holder dies (stops refreshing) → lease expires → key deleted
+// 4. Another node can acquire the lock
+// Used by: Kubernetes leader election, distributed coordination
+    </pre>
+
+    <h3>16.6 Byzantine Fault Tolerance (BFT)</h3>
+    <div class="important">
+        <strong>Raft/Paxos assume nodes are honest but may crash (crash-fault tolerance).</strong><br>
+        Byzantine Fault Tolerance handles nodes that may behave <em>arbitrarily</em> (lie, send contradictory messages, collude).
+    </div>
+
+    <pre>
+// Byzantine Generals Problem:
+// N generals must agree to attack or retreat.
+// Up to f generals are TRAITORS (send different messages to different generals).
+// Requirement: All loyal generals decide the same action.
+// Impossibility: Cannot tolerate f ≥ N/3 traitors.
+// Need: N ≥ 3f + 1 nodes to tolerate f Byzantine faults.
+//   (Crash fault tolerance: N ≥ 2f + 1)
+
+// PBFT (Practical Byzantine Fault Tolerance):
+// 3-phase protocol: Pre-Prepare → Prepare → Commit
+// Need 3f+1 nodes to tolerate f Byzantine nodes
+// Example: 4 nodes tolerates 1 Byzantine fault (3×1+1=4)
+//          7 nodes tolerates 2 Byzantine faults (3×2+1=7)
+//
+// Performance: O(N²) messages per consensus round (expensive!)
+// Used in: Blockchain systems, some financial systems
+// NOT used in: Regular distributed systems (too expensive, nodes are trusted)
+
+// In practice (trusted datacenter environments):
+// Crash faults only → Raft/Paxos with 2f+1 nodes
+// 3 nodes tolerates 1 crash
+// 5 nodes tolerates 2 crashes
+// 7 nodes tolerates 3 crashes (diminishing returns)
+    </pre>
+
+    <h3>16.7 Consensus Algorithms Comparison</h3>
+    <table>
+        <tr><th>Algorithm</th><th>Used By</th><th>Fault Model</th><th>Leader?</th><th>Complexity</th></tr>
+        <tr><td><strong>Raft</strong></td><td>etcd, CockroachDB, Consul, TiKV</td><td>Crash (2f+1)</td><td>Strong leader</td><td>Understandable, well-structured</td></tr>
+        <tr><td><strong>Multi-Paxos</strong></td><td>Google Chubby, Spanner</td><td>Crash (2f+1)</td><td>Distinguished proposer</td><td>Correct but hard to implement</td></tr>
+        <tr><td><strong>ZAB</strong></td><td>ZooKeeper</td><td>Crash (2f+1)</td><td>Leader + FIFO</td><td>Strong ordering guarantees</td></tr>
+        <tr><td><strong>Viewstamped Replication</strong></td><td>Academic, some DBs</td><td>Crash (2f+1)</td><td>Primary</td><td>Predates Raft, similar ideas</td></tr>
+        <tr><td><strong>PBFT</strong></td><td>Hyperledger Fabric</td><td>Byzantine (3f+1)</td><td>Rotating primary</td><td>O(N²) messages, expensive</td></tr>
+        <tr><td><strong>Tendermint</strong></td><td>Cosmos blockchain</td><td>Byzantine (3f+1)</td><td>Round-robin proposer</td><td>Optimized BFT for blockchain</td></tr>
+    </table>
+
+    <h3>16.8 When You Actually Need Consensus</h3>
+    <pre>
+// Consensus is EXPENSIVE (requires majority coordination on every write).
+// Only use it when you MUST have exactly-one semantics:
+
+// ✓ USE CONSENSUS FOR:
+//   - Leader election (who is the primary database?)
+//   - Distributed locks (prevent double-spending, double-booking)
+//   - Configuration management (all nodes MUST see same config)
+//   - Membership changes (who is in the cluster?)
+//   - Total order of events (replicated state machine)
+
+// ✗ DON'T USE CONSENSUS FOR:
+//   - Every database write (too slow for high throughput)
+//   - Caching (eventual consistency is fine)
+//   - Analytics/logging (out-of-order is acceptable)
+//   - Session storage (last-write-wins is fine)
+
+// Design pattern: Use consensus for METADATA, not DATA:
+//   Metadata (consensus): "Node B is the leader for shard 7"
+//   Data (simple replication): "User John's balance is $500"
+//   The metadata consensus ensures consistency of the replication topology,
+//   while actual data replication can use simpler/faster protocols.
+    </pre>
+
+</div>
+
+<!-- ==================== 18. FAULT TOLERANCE ==================== -->
+<h2 id="fault-tolerance">18. Fault Tolerance</h2>
+<div class="section">
+
+    <h3>18.1 Defining Fault Tolerance</h3>
+    <p>Fault tolerance is the ability of a system to continue operating correctly (possibly at reduced capacity) when one or more components fail. It's not about preventing faults—faults are inevitable. It's about building systems that tolerate them.</p>
+
+    <div class="diagram">
+Fault → Error → Failure (chain of events):
+
+Fault:   A defect in the system (hardware defect, software bug, config error)
+         (may be dormant — not yet activated)
+             │
+             ▼ (activation)
+Error:   An incorrect internal state (wrong value in memory, corrupted data)
+         (visible within the system but not necessarily to users)
+             │
+             ▼ (propagation)
+Failure: System deviates from specification (user-visible incorrect behavior)
+         (the error has propagated to the system boundary)
+
+Fault tolerance goal: BREAK this chain.
+Detect errors before they become failures.
+Contain faults so they don't propagate.
+Recover from errors to restore correct state.
+    </div>
+
+    <h3>18.2 Types of Faults</h3>
+    <table>
+        <tr><th>Category</th><th>Examples</th><th>Frequency</th><th>Detection Difficulty</th></tr>
+        <tr><td><strong>Hardware Faults</strong></td><td>Disk failure (2-4% AFR), RAM bit flips (1/GB/year without ECC), NIC failure, power supply</td><td>Common at scale (10K servers → ~300 disk failures/year)</td><td>Easy (hardware monitors, SMART, ECC)</td></tr>
+        <tr><td><strong>Software Faults</strong></td><td>Memory leaks, race conditions, null pointer, infinite loops, resource exhaustion</td><td>Very common</td><td>Medium (manifests under specific conditions)</td></tr>
+        <tr><td><strong>Network Faults</strong></td><td>Packet loss, partition, asymmetric partition, gray failures, latency spikes</td><td>Common in cloud (several per day in large clusters)</td><td>Hard (partial failures, intermittent)</td></tr>
+        <tr><td><strong>Human Faults</strong></td><td>Misconfigurations, bad deployments, wrong commands, accidental deletion</td><td>Most common cause of outages (60-80%)</td><td>Hard (looks like valid operation)</td></tr>
+        <tr><td><strong>Byzantine Faults</strong></td><td>Corrupted computation, compromised node, lying node</td><td>Rare in controlled environments</td><td>Very hard</td></tr>
+    </table>
+
+    <h3>18.3 Fault Tolerance Techniques – Comprehensive</h3>
+
+    <h4>18.3.1 Redundancy (Hardware &amp; Software)</h4>
+    <div class="diagram">
+Types of Redundancy:
+
+1. Active Redundancy (Hot Standby):
+   ┌─────────┐ ┌─────────┐ ┌─────────┐
+   │Active-1 │ │Active-2 │ │Active-3 │   All processing simultaneously
+   └────┬────┘ └────┬────┘ └────┬────┘   Results compared (voting)
+        └──────────┼────────────┘          Faulty node detected + excluded
+                   ▼
+            ┌────────────┐
+            │   Voter    │  Takes majority result
+            └────────────┘
+   Example: Triple Modular Redundancy (TMR) in aerospace, RAID controllers
+
+2. Standby Redundancy (Warm/Cold):
+   ┌──────────┐        ┌──────────┐
+   │  Primary │ ─sync─→│ Standby  │   Standby receives state updates
+   │ (active) │        │(passive) │   On primary failure → standby promotes
+   └──────────┘        └──────────┘
+   Example: Database primary-replica, VRRP/HSRP for network
+
+3. Diverse Redundancy:
+   Same function implemented by DIFFERENT teams/languages/algorithms
+   Both compute → compare results
+   A bug in implementation A unlikely to exist in implementation B
+   Example: Boeing flight control (different teams code same logic)
+   Example: N-version programming
+    </div>
+
+    <h4>18.3.2 Replication Strategies for Fault Tolerance</h4>
+    <pre>
+// Single-Leader Replication:
+// Pro: Simple, consistent reads from leader
+// Con: Leader is single point of failure (need failover)
+//
+// ┌──────────┐     sync WAL      ┌──────────┐
+// │  Leader  │ ──────────────→   │ Replica 1│  (synchronous = zero data loss)
+// │          │ ──────────────→   │ Replica 2│  (async = may lose recent writes)
+// └──────────┘                   └──────────┘
+
+// Multi-Leader Replication:
+// Pro: Tolerates datacenter failure without downtime
+// Con: Write conflicts (same key written in both DCs simultaneously)
+//
+// DC-East                  DC-West
+// ┌──────────┐    async   ┌──────────┐
+// │ Leader A │ ←────────→ │ Leader B │
+// └──────────┘            └──────────┘
+// Conflict resolution: LWW, merge, custom logic
+
+// Leaderless Replication (Dynamo-style):
+// Pro: No single point of failure. Any node handles writes.
+// Con: Complex consistency model (quorum-based)
+//
+// Write to W nodes, Read from R nodes
+// If W + R > N → guaranteed to read latest write
+// If W + R ≤ N → may read stale data (eventual consistency)
+//
+// Example: N=3, W=2, R=2
+// Write goes to 2 of 3 nodes. Read queries 2 of 3 nodes.
+// At least 1 node in read set has latest write (overlap guaranteed).
+
+// Anti-entropy / Read Repair:
+// On read: If nodes return different versions →
+//   Return newest to client + write newest to out-of-date nodes
+// Background: Merkle tree comparison between replicas →
+//   Detects and repairs divergence automatically
+    </pre>
+
+    <h4>18.3.3 Failover Mechanisms</h4>
+    <pre>
+// Automatic failover for a primary database:
+
+// Detection:
+// 1. Health check fails (TCP connection refused / HTTP 5xx)
+// 2. Consecutive failures exceed threshold (e.g., 3 checks, 5s apart)
+// 3. Or: Consensus-based (majority of cluster agrees node is dead)
+//    → Prevents false positives from network partition to ONE monitor
+
+// Promotion:
+// 1. Select best replica (least replication lag, most up-to-date)
+// 2. Stop replication from old primary
+// 3. Promote replica to primary (accepts writes)
+// 4. Reconfigure other replicas to follow new primary
+
+// Redirection:
+// 1. Update DNS (slow: TTL propagation)
+// 2. Float Virtual IP (fast: VRRP, < 3 seconds)
+// 3. Update service discovery (Consul, etcd)
+// 4. Update load balancer backend pool
+
+// Dangers of failover:
+// 1. Split-brain: Old primary comes back, thinks it's still primary
+//    Solution: STONITH (fencing), epoch numbers, lease-based leadership
+//
+// 2. Data loss: Async replica promoted → recent writes lost
+//    Solution: Semi-synchronous replication (at least 1 sync replica)
+//
+// 3. Cascading failure: Failover puts extra load on remaining nodes
+//    Solution: Capacity planning (N+2 redundancy), circuit breakers
+
+// Real-world: PostgreSQL + Patroni
+// Patroni uses etcd (Raft consensus) for leader election
+// Ensures only ONE node can be primary at any time
+// Automatic failover in < 10 seconds typically
+    </pre>
+
+    <h4>18.3.4 Isolation (Bulkhead Pattern)</h4>
+    <div class="diagram">
+Ship Bulkhead Analogy:
+┌─────┬─────┬─────┬─────┬─────┐
+│     │     │FLOOD│     │     │   Hull breach floods ONE compartment
+│     │     │█████│     │     │   Ship stays afloat (other compartments sealed)
+└─────┴─────┴─────┴─────┴─────┘
+
+Software Bulkheads:
+
+1. Thread Pool Isolation:
+   ┌──────────────────────────────────────────────┐
+   │  Payment Service Thread Pools                 │
+   │                                               │
+   │  ┌────────────────┐  ┌────────────────┐     │
+   │  │ Pool: Stripe    │  │ Pool: PayPal   │     │
+   │  │ (20 threads)    │  │ (10 threads)   │     │
+   │  │ If Stripe slow: │  │ PayPal works   │     │
+   │  │ only this pool  │  │ fine!          │     │
+   │  │ exhausted       │  │                │     │
+   │  └────────────────┘  └────────────────┘     │
+   └──────────────────────────────────────────────┘
+
+2. Process Isolation (Containers):
+   Each microservice in its own container with cgroup limits:
+   - CPU limit: 2 cores (can't steal CPU from others)
+   - Memory limit: 4GB (OOM-killed if exceeded, others unaffected)
+   - Network bandwidth limit: 1Gbps
+
+3. Datacenter Isolation (Blast Radius):
+   Failure in DC-East doesn't affect DC-West
+   Each DC independently operational (active-active)
+   DNS/LB routes traffic away from failed DC
+    </div>
+
+    <h4>18.3.5 Graceful Degradation</h4>
+    <pre>
+// System continues to function with reduced capability rather than total failure.
+
+// Example: E-commerce site during partial outage
+async function renderProductPage(productId) {
+    // Critical (MUST work): Product details from primary DB
+    const product = await productService.get(productId);  // No fallback - fail if down
+
+    // Important (degrade gracefully):
+    let reviews, recommendations, inventory;
+
+    try {
+        reviews = await reviewService.getForProduct(productId);
+    } catch (e) {
+        reviews = { status: 'unavailable', message: 'Reviews temporarily unavailable' };
+        // Page still renders without reviews
+    }
+
+    try {
+        recommendations = await recoService.getRelated(productId);
+    } catch (e) {
+        recommendations = CACHED_POPULAR_PRODUCTS;  // Fallback to generic popular items
+    }
+
+    try {
+        inventory = await inventoryService.check(productId);
+    } catch (e) {
+        inventory = { status: 'unknown', message: 'Check availability at checkout' };
+        // Allow purchase, verify inventory asynchronously
+    }
+
+    return renderPage({ product, reviews, recommendations, inventory });
+}
+
+// Netflix: If personalization is down → show trending content
+// Google: If spell-check is down → show results without "did you mean"
+// Amazon: If recommendation engine is down → show product without related items
+// Twitter: If timeline generation is slow → serve cached (slightly stale) timeline
+    </pre>
+
+    <h4>18.3.6 Idempotency (Safe Retries)</h4>
+    <pre>
+// In distributed systems, messages can be delivered more than once
+// (network ACK lost → sender retries → receiver gets duplicate)
+// Idempotency ensures: Performing an operation N times = performing it once.
+
+// Naturally idempotent operations:
+//   SET x = 5          (repeat 10 times: x is still 5)
+//   DELETE /users/123  (delete again: already gone, 404 is fine)
+//   PUT /users/123 {}  (full replacement: repeat = same state)
+
+// NOT naturally idempotent:
+//   POST /transfer {amount: $100}  (repeat = double charge!)
+//   INCREMENT counter             (repeat = counter too high!)
+//   INSERT INTO orders (...)      (repeat = duplicate orders!)
+
+// Making non-idempotent operations idempotent:
+// Idempotency Key Pattern:
+
+async function processPayment(request) {
+    const { idempotency_key, amount, recipient } = request;
+
+    // 1. Check if we've already processed this exact request
+    const existing = await db.query(
+        'SELECT result FROM idempotency_store WHERE key = $1',
+        [idempotency_key]
+    );
+
+    if (existing) {
+        // Already processed! Return the SAME result (don't process again)
+        return existing.result;
+    }
+
+    // 2. Process the payment (first time)
+    const result = await paymentGateway.charge(amount, recipient);
+
+    // 3. Store the result with the idempotency key
+    await db.query(
+        'INSERT INTO idempotency_store (key, result, created_at) VALUES ($1, $2, NOW())',
+        [idempotency_key, result]
+    );
+    // Use unique constraint on key to handle race conditions
+    // (two simultaneous retries: one INSERT succeeds, other gets conflict → uses stored result)
+
+    return result;
+}
+
+// Client generates idempotency key:
+// POST /api/payments
+// Idempotency-Key: "uuid-7a3f-4b2c-8d1e"  ← Client-generated UUID
+// Body: {amount: 100, currency: "USD"}
+//
+// If timeout/network error → client retries with SAME key
+// Server returns same result → no double charge
+    </pre>
+
+    <h4>18.3.7 Write-Ahead Logging (WAL) – Crash Recovery</h4>
+    <pre>
+// Problem: System crashes mid-operation. How to recover to consistent state?
+// Solution: Log the INTENT before performing the action.
+
+// PostgreSQL WAL (Write-Ahead Log) internals:
+//
+// Write operation flow:
+// 1. Transaction modifies data in shared buffer pool (RAM)
+// 2. BEFORE dirty buffers can be written to data files:
+//    WAL record describing the change is written to WAL file
+// 3. On COMMIT: WAL is fsync'd to disk (guarantees durability)
+// 4. Dirty data pages written to disk later (checkpoint, bgwriter)
+//
+// Crash recovery:
+// 1. On startup: Find last checkpoint in WAL
+// 2. Replay all WAL records after that checkpoint (redo)
+// 3. Any incomplete transactions are rolled back (undo)
+// 4. Database is now in a consistent state
+//
+// Why this works: WAL is sequential (fast writes, even to HDD)
+// Data files are random access (slow). WAL amortizes the random writes.
+
+// WAL structure:
+// LSN (Log Sequence Number): Monotonically increasing position in WAL
+// Each record: [LSN] [Transaction ID] [Type] [Table] [Old Tuple] [New Tuple]
+//
+// LSN 1001: BEGIN txn_42
+// LSN 1002: UPDATE users SET name='Bob' WHERE id=5 (old: 'Alice')
+// LSN 1003: INSERT orders (id=99, amount=100)
+// LSN 1004: COMMIT txn_42    ← Once this hits disk, transaction is durable
+    </pre>
+
+    <h3>18.4 Chaos Engineering – Proactive Fault Tolerance Testing</h3>
+    <pre>
+// "The best way to avoid failure is to fail constantly." — Netflix
+
+// Principles:
+// 1. Define steady state (what "normal" looks like in metrics)
+// 2. Hypothesize that steady state continues during fault injection
+// 3. Introduce real-world failures: kill nodes, inject latency, corrupt packets
+// 4. Try to DISPROVE the hypothesis (find weaknesses)
+
+// Netflix Simian Army:
+// Chaos Monkey:   Kill random production instances
+// Chaos Kong:     Simulate entire AWS region failure  
+// Latency Monkey: Inject artificial network delays
+// Conformity Monkey: Find instances not following best practices
+
+// AWS Fault Injection Simulator (FIS):
+// - Terminate EC2 instances
+// - Throttle API calls
+// - Inject CPU/memory stress
+// - Network disruption (blackhole, latency, packet loss)
+// - AZ power interruption simulation
+
+// Gremlin (commercial platform):
+// $ gremlin attack network latency --length 300 --delay 500 --target host-abc
+// Injects 500ms latency for 300 seconds to specific host
+
+// LitmusChaos (Kubernetes-native):
+// kind: ChaosExperiment
+// spec:
+//   definition:
+//     scope: Namespaced
+//     permissions: [kill-pod, network-partition]
+//     args:
+//       - name: TARGET_PODS
+//         value: "app=payment-service"
+//       - name: TOTAL_CHAOS_DURATION
+//         value: "60"
+
+// When to run chaos experiments:
+// 1. After building fault tolerance features (validate they work!)
+// 2. Before major events (Black Friday load preparation)
+// 3. Continuously in production (steady-state verification)
+// 4. After infrastructure changes (new region, new dependencies)
+    </pre>
+
+    <h3>18.5 Fault Tolerance Design Patterns Summary</h3>
+    <table>
+        <tr><th>Pattern</th><th>Protects Against</th><th>Mechanism</th></tr>
+        <tr><td><strong>Replication</strong></td><td>Node failure</td><td>Data exists on multiple nodes; survive N-1 failures</td></tr>
+        <tr><td><strong>Circuit Breaker</strong></td><td>Cascading failure</td><td>Fast-fail when downstream is broken</td></tr>
+        <tr><td><strong>Bulkhead</strong></td><td>Resource exhaustion propagation</td><td>Isolate failure domains (thread pools, containers)</td></tr>
+        <tr><td><strong>Retry + Backoff</strong></td><td>Transient failures</td><td>Retry with exponential delay + jitter</td></tr>
+        <tr><td><strong>Timeout</strong></td><td>Indefinite waits</td><td>Bound how long to wait for response</td></tr>
+        <tr><td><strong>Idempotency</strong></td><td>Duplicate processing</td><td>Same operation safe to repeat</td></tr>
+        <tr><td><strong>WAL</strong></td><td>Crash mid-operation</td><td>Log intent before action; replay on recovery</td></tr>
+        <tr><td><strong>Graceful Degradation</strong></td><td>Partial outage</td><td>Serve reduced functionality vs total failure</td></tr>
+        <tr><td><strong>Checksums</strong></td><td>Silent data corruption</td><td>Detect bit rot, network corruption</td></tr>
+        <tr><td><strong>Immutable Infrastructure</strong></td><td>Configuration drift</td><td>Replace, never patch. Known good state always.</td></tr>
+        <tr><td><strong>Blue-Green / Canary Deploy</strong></td><td>Bad deployments</td><td>Gradual rollout, instant rollback</td></tr>
+    </table>
+
+</div>
+
+<!-- ==================== 19. REST AND gRPC ==================== -->
+<h2 id="rest-grpc">19. REST and gRPC</h2>
+<div class="section">
+
+    <h3>19.1 REST – Architectural Style Deep Dive</h3>
+
+    <h4>19.1.1 REST Constraints (Roy Fielding's Dissertation, 2000)</h4>
+    <p>REST is not a protocol—it's an architectural style with six constraints:</p>
+    <table>
+        <tr><th>Constraint</th><th>Meaning</th><th>System Design Impact</th></tr>
+        <tr><td><strong>Client-Server</strong></td><td>Separate concerns: UI from data storage</td><td>Enables independent scaling and evolution of client/server</td></tr>
+        <tr><td><strong>Stateless</strong></td><td>Each request contains ALL information needed to process it. Server holds no session state.</td><td>Any server can handle any request → trivial horizontal scaling. No sticky sessions needed.</td></tr>
+        <tr><td><strong>Cacheable</strong></td><td>Responses must be labeled cacheable or non-cacheable</td><td>Reduces load on servers, improves latency (Cache-Control headers)</td></tr>
+        <tr><td><strong>Uniform Interface</strong></td><td>Standardized resource identification (URI) + manipulation (HTTP methods) + self-descriptive messages + HATEOAS</td><td>Loose coupling, independent evolution, discoverability</td></tr>
+        <tr><td><strong>Layered System</strong></td><td>Client doesn't know if it's connected to end server or intermediary (proxy, LB, CDN)</td><td>Enables CDNs, load balancers, API gateways transparently</td></tr>
+        <tr><td><strong>Code on Demand (optional)</strong></td><td>Server can send executable code to client (JavaScript)</td><td>Extends client functionality without client update</td></tr>
+    </table>
+
+    <h4>19.1.2 HTTP Methods – Semantic Meaning</h4>
+    <pre>
+// HTTP Method Properties:
+//          Safe?    Idempotent?   Cacheable?   Has Body?
+// GET      Yes      Yes           Yes          No (typically)
+// HEAD     Yes      Yes           Yes          No
+// POST     No       No            Rarely       Yes
+// PUT      No       Yes           No           Yes
+// PATCH    No       No            No           Yes
+// DELETE   No       Yes           No           Optional
+
+// Safe: Doesn't modify server state (read-only)
+// Idempotent: Multiple identical requests = same effect as single request
+// 
+// Critical distinction:
+// POST /orders       → Creates a NEW order each time (not idempotent)
+// PUT /orders/123    → Creates OR replaces order 123 (idempotent)
+// PATCH /orders/123  → Partially updates order 123 (not necessarily idempotent)
+// DELETE /orders/123 → Deletes order 123 (idempotent: deleting again = still gone)
+    </pre>
+
+    <h4>19.1.3 RESTful API Design – Best Practices</h4>
+    <pre>
+// Resource Naming (nouns, not verbs):
+GET    /api/v1/users              → List users
+GET    /api/v1/users/123          → Get user 123
+POST   /api/v1/users              → Create user
+PUT    /api/v1/users/123          → Replace user 123
+PATCH  /api/v1/users/123          → Partial update user 123
+DELETE /api/v1/users/123          → Delete user 123
+
+// Nested resources:
+GET    /api/v1/users/123/orders        → User 123's orders
+GET    /api/v1/users/123/orders/456    → User 123's order 456
+POST   /api/v1/users/123/orders        → Create order for user 123
+
+// Filtering, sorting, pagination:
+GET /api/v1/users?status=active&sort=-created_at&page=2&limit=20
+
+// Response format:
+// 200 OK (success)
+{
+    "data": [
+        {"id": 1, "name": "Alice", "email": "alice@example.com"},
+        {"id": 2, "name": "Bob", "email": "bob@example.com"}
+    ],
+    "pagination": {
+        "total": 150,
+        "page": 2,
+        "limit": 20,
+        "next_cursor": "eyJpZCI6NDB9"  // Cursor-based (better for large datasets)
+    },
+    "meta": {
+        "request_id": "req_abc123",
+        "response_time_ms": 45
+    }
+}
+
+// Error response:
+// 422 Unprocessable Entity
+{
+    "error": {
+        "code": "VALIDATION_ERROR",
+        "message": "Request validation failed",
+        "details": [
+            {"field": "email", "message": "must be a valid email address"},
+            {"field": "age", "message": "must be between 1 and 150"}
+        ]
+    }
+}
+
+// HTTP Status Codes (correct usage):
+// 200 OK          - Successful GET/PUT/PATCH
+// 201 Created     - Successful POST (include Location header)
+// 204 No Content  - Successful DELETE (no body)
+// 400 Bad Request - Malformed request syntax
+// 401 Unauthorized- Authentication required/failed
+// 403 Forbidden   - Authenticated but not authorized
+// 404 Not Found   - Resource doesn't exist
+// 409 Conflict    - State conflict (e.g., duplicate, version mismatch)
+// 422 Unprocessable- Syntactically valid but semantically wrong
+// 429 Too Many Requests - Rate limited (include Retry-After header)
+// 500 Internal Server Error - Unhandled exception
+// 502 Bad Gateway - Upstream service returned invalid response
+// 503 Service Unavailable - Temporarily overloaded (include Retry-After)
+    </pre>
+
+    <h4>19.1.4 REST Limitations</h4>
+    <ul>
+        <li><strong>Over-fetching:</strong> GET /users/123 returns 50 fields when client only needs 3. Wastes bandwidth (especially on mobile).</li>
+        <li><strong>Under-fetching / N+1 problem:</strong> Need user + orders + addresses = 3 API calls. Or complex nested endpoint that's hard to cache.</li>
+        <li><strong>No streaming:</strong> Request-response only. For real-time data → WebSocket/SSE needed (separate protocol).</li>
+        <li><strong>Text-based (JSON):</strong> Verbose serialization. <code>{"id": 123, "name": "Alice"}</code> = 30 bytes. Same in Protobuf: ~10 bytes.</li>
+        <li><strong>Weak typing:</strong> No schema contract enforcement. Client might send wrong types. Runtime errors.</li>
+        <li><strong>No built-in code generation:</strong> Must manually write clients, validate schemas, keep docs in sync.</li>
+    </ul>
+
+    <h3>19.2 gRPC – Remote Procedure Call Framework</h3>
+
+    <h4>19.2.1 What gRPC Is</h4>
+    <p>gRPC is a high-performance RPC framework developed by Google. It uses HTTP/2 for transport, Protocol Buffers for serialization, and provides strongly-typed service definitions with code generation.</p>
+
+    <div class="diagram">
+gRPC Architecture:
+
+┌────────────────────────────────────────────────────────────────────┐
+│                         gRPC Stack                                  │
+├────────────────────────────────────────────────────────────────────┤
+│  Application Code (generated stubs + business logic)               │
+├────────────────────────────────────────────────────────────────────┤
+│  gRPC Framework (serialization, deadline, interceptors, metadata)  │
+├────────────────────────────────────────────────────────────────────┤
+│  HTTP/2 Transport (multiplexing, flow control, header compression) │
+├────────────────────────────────────────────────────────────────────┤
+│  TLS (encryption, authentication)                                  │
+├────────────────────────────────────────────────────────────────────┤
+│  TCP                                                               │
+└────────────────────────────────────────────────────────────────────┘
+
+Service definition (.proto file) → Code Generation:
+┌───────────────┐
+│  .proto file  │───→ protoc compiler ───→ Generated Server Stub (Go/Java/Python/...)
+│  (contract)   │                     └──→ Generated Client Stub (any language)
+└───────────────┘
+    </div>
+
+    <h4>19.2.2 Protocol Buffers (Protobuf) – Serialization</h4>
+    <pre>
+// user.proto - Service and message definitions
+syntax = "proto3";
+
+package user.v1;
+
+// Service definition (the API contract)
+service UserService {
+    // Unary RPC: single request → single response
+    rpc GetUser(GetUserRequest) returns (GetUserResponse);
+    rpc CreateUser(CreateUserRequest) returns (CreateUserResponse);
+    rpc UpdateUser(UpdateUserRequest) returns (UpdateUserResponse);
+    rpc DeleteUser(DeleteUserRequest) returns (DeleteUserResponse);
+
+    // Server streaming: single request → stream of responses
+    rpc ListUsers(ListUsersRequest) returns (stream UserResponse);
+
+    // Client streaming: stream of requests → single response
+    rpc UploadUserPhotos(stream PhotoChunk) returns (UploadResult);
+
+    // Bidirectional streaming: stream ↔ stream
+    rpc Chat(stream ChatMessage) returns (stream ChatMessage);
+}
+
+// Message definitions (strongly typed, compact binary encoding)
+message GetUserRequest {
+    string user_id = 1;  // Field number 1 (used in binary encoding, NOT JSON key)
+    FieldMask field_mask = 2;  // Optional: request only specific fields
+}
+
+message GetUserResponse {
+    User user = 1;
+}
+
+message User {
+    string id = 1;
+    string name = 2;
+    string email = 3;
+    int32 age = 4;
+    repeated string roles = 5;           // Array
+    map&lt;string, string&gt; metadata = 6;    // Map
+    google.protobuf.Timestamp created_at = 7;
+    Address address = 8;                 // Nested message
+
+    enum Status {
+        STATUS_UNSPECIFIED = 0;
+        STATUS_ACTIVE = 1;
+        STATUS_SUSPENDED = 2;
+    }
+    Status status = 9;
+}
+
+message Address {
+    string street = 1;
+    string city = 2;
+    string country = 3;
+    string postal_code = 4;
+}
+    </pre>
+
+    <h4>19.2.3 Protobuf Binary Encoding – How It's Compact</h4>
+    <pre>
+// JSON encoding of a user:
+// {"id":"usr_123","name":"Alice","age":30,"status":"ACTIVE"}
+// = 57 bytes (text, with quotes, colons, braces)
+
+// Protobuf encoding of the same:
+// Field 1 (id, string):     0A 07 75 73 72 5F 31 32 33    (tag + length + "usr_123")
+// Field 2 (name, string):   12 05 41 6C 69 63 65          (tag + length + "Alice")
+// Field 4 (age, varint):    20 1E                          (tag + value 30)
+// Field 9 (status, varint): 48 01                          (tag + value 1=ACTIVE)
+// = 23 bytes total! (60% smaller than JSON)
+
+// Encoding details:
+// Tag = (field_number << 3) | wire_type
+// Wire types: 0=varint, 1=64-bit, 2=length-delimited, 5=32-bit
+//
+// Varint encoding (variable-length integer):
+// 300 = 0b100101100
+//   → Split into 7-bit groups: 0000010 0101100
+//   → Add continuation bits: 10101100 00000010
+//   → 2 bytes for 300! (vs "300" = 3 bytes in JSON)
+//   → Small numbers (0-127) = 1 byte always
+//
+// Why field NUMBERS matter:
+// Protobuf doesn't encode field NAMES (saves enormous space)
+// Field numbers are permanent (never reuse after deleting a field)
+// This enables backward/forward compatibility:
+//   Old client receives message with new field → ignores unknown field number
+//   New client receives message without new field → uses default value
+    </pre>
+
+    <h4>19.2.4 gRPC Communication Patterns</h4>
+    <div class="diagram">
+1. Unary RPC (most common, like REST):
+   Client ──── Request ────→ Server
+   Client ←─── Response ───── Server
+
+2. Server Streaming (server sends multiple responses):
+   Client ──── Request ────────→ Server
+   Client ←─── Response 1 ────── Server
+   Client ←─── Response 2 ────── Server
+   Client ←─── Response 3 ────── Server
+   Client ←─── END ─────────── Server
+   Use case: Stock price feed, log tailing, search results as found
+
+3. Client Streaming (client sends multiple requests):
+   Client ──── Request 1 ─────→ Server
+   Client ──── Request 2 ─────→ Server
+   Client ──── Request 3 ─────→ Server
+   Client ──── END ───────────→ Server
+   Client ←─── Response ──────── Server
+   Use case: File upload in chunks, batch processing, sensor data
+
+4. Bidirectional Streaming (full duplex):
+   Client ──── Request 1 ─────→ Server
+   Client ←─── Response 1 ────── Server
+   Client ──── Request 2 ─────→ Server
+   Client ──── Request 3 ─────→ Server
+   Client ←─── Response 2 ────── Server
+   Client ←─── Response 3 ────── Server
+   Use case: Chat, real-time collaboration, game state sync
+    </div>
+
+    <pre>
+// gRPC Server Implementation (Go):
+type userServer struct {
+    pb.UnimplementedUserServiceServer
+    db *sql.DB
+}
+
+func (s *userServer) GetUser(ctx context.Context, req *pb.GetUserRequest) (*pb.GetUserResponse, error) {
+    // Deadline propagation (automatic!):
+    // If client set a 5-second deadline, ctx.Deadline() = 5s from now
+    // If downstream calls take too long, ctx is cancelled automatically
+
+    user, err := s.db.QueryContext(ctx, "SELECT * FROM users WHERE id = $1", req.UserId)
+    if err != nil {
+        // gRPC status codes (not HTTP status codes):
+        return nil, status.Errorf(codes.Internal, "database error: %v", err)
+    }
+    if user == nil {
+        return nil, status.Errorf(codes.NotFound, "user %s not found", req.UserId)
+    }
+
+    return &pb.GetUserResponse{User: toProtoUser(user)}, nil
+}
+
+// Server Streaming example:
+func (s *userServer) ListUsers(req *pb.ListUsersRequest, stream pb.UserService_ListUsersServer) error {
+    rows, _ := s.db.Query("SELECT * FROM users WHERE status = $1", req.Status)
+    defer rows.Close()
+
+    for rows.Next() {
+        user := scanUser(rows)
+        // Send each user as it's read from DB (no buffering entire result set!)
+        if err := stream.Send(&pb.UserResponse{User: user}); err != nil {
+            return err
+        }
+    }
+    return nil // Stream ends when function returns
+}
+
+// gRPC Client (auto-generated, strongly typed):
+conn, _ := grpc.Dial("user-service:50051", grpc.WithTransportCredentials(creds))
+client := pb.NewUserServiceClient(conn)
+
+ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+defer cancel()
+
+resp, err := client.GetUser(ctx, &pb.GetUserRequest{UserId: "usr_123"})
+// resp is strongly typed: resp.User.Name, resp.User.Email (no JSON parsing!)
+    </pre>
+
+    <h4>19.2.5 gRPC Internal Mechanisms</h4>
+    <pre>
+// How gRPC uses HTTP/2 under the hood:
+
+// Request (over HTTP/2):
+// HEADERS frame:
+//   :method: POST
+//   :path: /user.v1.UserService/GetUser    ← service/method path
+//   :scheme: https
+//   content-type: application/grpc+proto
+//   grpc-timeout: 5S                       ← Deadline propagation!
+//   te: trailers                           ← Required for gRPC
+//   authorization: Bearer token123
+//
+// DATA frame:
+//   [1 byte: compressed flag] [4 bytes: message length] [N bytes: protobuf message]
+//   Example: 00 00000017 [23 bytes of protobuf-encoded GetUserRequest]
+
+// Response (over HTTP/2):
+// HEADERS frame:
+//   :status: 200
+//   content-type: application/grpc+proto
+//
+// DATA frame:
+//   00 00000089 [137 bytes of protobuf-encoded GetUserResponse]
+//
+// TRAILERS frame (gRPC-specific, sent after all data):
+//   grpc-status: 0                          ← 0 = OK
+//   grpc-message: (empty for success)
+
+// gRPC Status Codes (different from HTTP!):
+// 0  OK
+// 1  CANCELLED         (client cancelled)
+// 2  UNKNOWN           (server error, unclassified)
+// 3  INVALID_ARGUMENT  (client sent bad data)
+// 4  DEADLINE_EXCEEDED (timeout)
+// 5  NOT_FOUND         (resource doesn't exist)
+// 6  ALREADY_EXISTS    (conflict)
+// 7  PERMISSION_DENIED (authorization failure)
+// 8  RESOURCE_EXHAUSTED (rate limited)
+// 12 UNIMPLEMENTED     (method not supported)
+// 13 INTERNAL          (server bug)
+// 14 UNAVAILABLE       (service temporarily unavailable, retry)
+
+// Key insight: HTTP status is always 200 for gRPC!
+// Actual success/failure is in the grpc-status TRAILER.
+// This is why standard HTTP load balancers can't do gRPC error-based routing
+// without gRPC-aware configuration (reading trailers).
+    </pre>
+
+    <h4>19.2.6 gRPC Interceptors (Middleware)</h4>
+    <pre>
+// Interceptors = middleware for gRPC (like Express middleware for HTTP)
+
+// Unary Server Interceptor (logging + metrics):
+func loggingInterceptor(
+    ctx context.Context,
+    req interface{},
+    info *grpc.UnaryServerInfo,
+    handler grpc.UnaryHandler,
+) (interface{}, error) {
+    start := time.Now()
+    method := info.FullMethod  // e.g., "/user.v1.UserService/GetUser"
+
+    // Call the actual handler
+    resp, err := handler(ctx, req)
+
+    // Log after completion
+    duration := time.Since(start)
+    statusCode := status.Code(err)
+
+    log.Info("gRPC call",
+        "method", method,
+        "duration_ms", duration.Milliseconds(),
+        "status", statusCode,
+    )
+
+    // Emit metrics
+    grpcRequestDuration.WithLabelValues(method, statusCode.String()).Observe(duration.Seconds())
+    grpcRequestCount.WithLabelValues(method, statusCode.String()).Inc()
+
+    return resp, err
+}
+
+// Chain multiple interceptors:
+server := grpc.NewServer(
+    grpc.ChainUnaryInterceptor(
+        recoveryInterceptor,    // Catch panics
+        loggingInterceptor,     // Log all calls
+        authInterceptor,        // Validate tokens
+        rateLimitInterceptor,   // Rate limiting
+        tracingInterceptor,     // Distributed tracing
+    ),
+)
+    </pre>
+
+    <h3>19.3 REST vs gRPC – Deep Comparison</h3>
+    <table>
+        <tr><th>Aspect</th><th>REST</th><th>gRPC</th></tr>
+        <tr><td><strong>Protocol</strong></td><td>HTTP/1.1 or HTTP/2</td><td>HTTP/2 (required)</td></tr>
+        <tr><td><strong>Serialization</strong></td><td>JSON (text, human-readable)</td><td>Protobuf (binary, compact)</td></tr>
+        <tr><td><strong>Payload size</strong></td><td>Large (verbose JSON, field names repeated)</td><td>3-10x smaller (binary, field numbers)</td></tr>
+        <tr><td><strong>Speed</strong></td><td>Slower (JSON parse ~5-50ms for large payloads)</td><td>Faster (Protobuf deserialize ~0.1-1ms)</td></tr>
+        <tr><td><strong>Contract</strong></td><td>Weak (OpenAPI/Swagger, optional)</td><td>Strong (.proto file IS the contract)</td></tr>
+        <tr><td><strong>Code generation</strong></td><td>Optional (OpenAPI codegen exists but less mature)</td><td>Built-in (protoc generates client+server in 10+ languages)</td></tr>
+        <tr><td><strong>Streaming</strong></td><td>Not native (WebSocket/SSE are separate)</td><td>First-class (server/client/bidirectional streaming)</td></tr>
+        <tr><td><strong>Browser support</strong></td><td>Native (fetch, XHR)</td><td>Requires grpc-web proxy (no native browser HTTP/2 framing access)</td></tr>
+        <tr><td><strong>Caching</strong></td><td>Excellent (HTTP cache, CDN, ETag)</td><td>Difficult (HTTP/2 POST, no standard cache headers)</td></tr>
+        <tr><td><strong>Tooling</strong></td><td>Mature (curl, Postman, browsers)</td><td>Specialized (grpcurl, BloomRPC, Postman gRPC)</td></tr>
+        <tr><td><strong>Deadline propagation</strong></td><td>Manual (pass timeout in headers)</td><td>Built-in (grpc-timeout header, context cancellation)</td></tr>
+        <tr><td><strong>Error model</strong></td><td>HTTP status codes + body</td><td>gRPC status codes + rich error details (google.rpc.Status)</td></tr>
+        <tr><td><strong>Load balancing</strong></td><td>Standard L7 LB works</td><td>Needs gRPC-aware LB (long-lived HTTP/2 connections)</td></tr>
+        <tr><td><strong>Backward compatibility</strong></td><td>Versioned URLs (/v1, /v2) or content negotiation</td><td>Built-in (add fields, old clients ignore; never reuse field numbers)</td></tr>
+    </table>
+
+    <h3>19.4 Performance Comparison</h3>
+    <pre>
+// Benchmark: 1000-field message, 10,000 requests
+
+// Serialization speed:
+// JSON serialize:   ~5ms for 100KB payload
+// Protobuf serialize: ~0.3ms for same data (as 30KB binary)
+// Winner: Protobuf ~15x faster
+
+// Deserialization:
+// JSON parse:       ~8ms for 100KB
+// Protobuf decode:  ~0.5ms for 30KB
+// Winner: Protobuf ~16x faster
+
+// Network transfer (100Mbps link):
+// JSON 100KB:  8ms transfer time
+// Protobuf 30KB: 2.4ms transfer time
+// Winner: Protobuf ~3x faster (smaller payload)
+
+// Total (serialize + transfer + deserialize):
+// REST/JSON:   5 + 8 + 8 = 21ms per request
+// gRPC/Proto:  0.3 + 2.4 + 0.5 = 3.2ms per request
+// Winner: gRPC ~6.5x faster end-to-end
+
+// HTTP/2 multiplexing advantage:
+// REST over HTTP/1.1: 6 parallel connections, head-of-line blocking
+// gRPC over HTTP/2: Unlimited concurrent RPCs on single connection
+// At 100 concurrent requests: gRPC has significant advantage
+
+// Connection overhead:
+// REST: May open new connection per request (or connection pool)
+// gRPC: Single long-lived connection. Channel handles multiplexing.
+//        gRPC client-side load balancing picks backend once per RPC.
+    </pre>
+
+    <h3>19.5 When to Use Which</h3>
+    <pre>
+// USE REST WHEN:
+// ✓ Public-facing API (browsers, third-party developers)
+// ✓ Simple CRUD operations
+// ✓ Caching is important (CDN, HTTP cache)
+// ✓ Human debuggability matters (read JSON in browser/curl)
+// ✓ Wide ecosystem compatibility needed
+// ✓ API gateway / rate limiting with standard tools
+// ✓ Team is familiar with HTTP/REST patterns
+
+// USE gRPC WHEN:
+// ✓ Internal microservice-to-microservice communication
+// ✓ High-performance, low-latency requirements
+// ✓ Streaming data (real-time feeds, large datasets)
+// ✓ Polyglot environment (Go backend, Python ML, Java service)
+// ✓ Strong contract enforcement needed
+// ✓ Bandwidth-constrained environments (mobile, IoT)
+// ✓ Deadline propagation is critical (cascading timeouts)
+
+// COMMON ARCHITECTURE:
+//
+//  External Clients (Browser, Mobile)
+//         │
+//         │ REST/JSON (public API)
+//         ▼
+//  ┌──────────────────┐
+//  │   API Gateway    │ ← Translates REST → gRPC
+//  └────────┬─────────┘
+//           │ gRPC/Protobuf (internal, fast)
+//           ▼
+//  ┌────────────────────────────────────────┐
+//  │  Microservices (all communicate via gRPC) │
+//  │  User ↔ Order ↔ Payment ↔ Inventory   │
+//  └────────────────────────────────────────┘
+    </pre>
+
+    <h3>19.6 gRPC Load Balancing Challenge</h3>
+    <div class="important">
+        <strong>Problem:</strong> gRPC uses long-lived HTTP/2 connections. A traditional L4 load balancer assigns a connection to one backend and ALL RPCs on that connection go to the same backend. Result: severely unbalanced load.
+    </div>
+    <pre>
+// Solutions:
+
+// 1. L7 Load Balancer (gRPC-aware):
+//    Envoy, NGINX (with grpc_pass), Traefik
+//    LB terminates HTTP/2, routes each RPC independently
+//    Full visibility into gRPC status codes for health checking
+
+// 2. Client-side Load Balancing:
+//    gRPC client discovers all backends (via DNS or service registry)
+//    Client picks a backend for each RPC (round-robin, pick-first, etc.)
+//    Used heavily in Kubernetes (headless service + gRPC name resolver)
+
+// 3. Lookaside Load Balancer (gRPC-LB protocol):
+//    Client asks a separate LB service: "Which backend should I use?"
+//    LB service returns backend addresses with weights
+//    Client connects directly to backends
+//    Used by: Google internal, xDS protocol (Envoy/Istio control plane)
+
+// Kubernetes example:
+// Service type: ClusterIP with headless (clusterIP: None)
+// DNS returns ALL pod IPs (not just one VIP)
+// gRPC client resolves DNS → gets list of pods → round-robins across them
+// Re-resolves periodically to discover new pods
+    </pre>
+
+    <h3>19.7 Schema Evolution and Backward Compatibility</h3>
+    <pre>
+// REST/JSON: Backward compatibility is CONVENTION (no enforcement)
+// Adding a field: Old clients ignore it (usually OK)
+// Removing a field: Old clients may break (expect it to exist!)
+// Changing type: Breaking change!
+
+// Protobuf: Backward/Forward compatibility BUILT INTO the format
+// 
+// SAFE changes:
+// ✓ Add new field with new field number (old clients ignore unknown fields)
+// ✓ Remove field (old clients get default value; keep field number reserved)
+// ✓ Rename field (field NUMBER is what matters on wire, not name)
+//
+// UNSAFE changes:
+// ✗ Change field number (completely different field on wire)
+// ✗ Change field type incompatibly (int32 → string)
+// ✗ Change field from singular to repeated (different wire encoding)
+
+// Best practice: RESERVE deleted field numbers forever
+message User {
+    string id = 1;
+    string name = 2;
+    reserved 3;              // was 'email' - removed, number can never be reused
+    reserved "email";        // name also reserved for clarity
+    string email_address = 4; // new field with NEW number
+}
+
+// Version management:
+// Package: user.v1, user.v2 (different proto packages)
+// Service: UserService (same name in different packages)
+// Both versions can coexist in the same server
+// Clients explicitly import the version they support
+    </pre>
+
+    <h3>19.8 gRPC-Web (Browser Support)</h3>
+    <pre>
+// Browsers cannot directly make gRPC calls because:
+// 1. No access to HTTP/2 framing (browser's fetch API abstracts it away)
+// 2. Cannot read HTTP trailers (where grpc-status lives)
+// 3. Cannot send raw binary in the way gRPC requires
+
+// Solution: gRPC-Web protocol + proxy
+
+// Architecture:
+// Browser → gRPC-Web (HTTP/1.1 or HTTP/2, base64/binary) → Envoy Proxy → gRPC Backend
+//
+// Envoy translates:
+// - gRPC-Web framing → standard gRPC framing
+// - Trailers-in-body → real HTTP/2 trailers
+// - base64 encoding → raw binary (if using text mode)
+
+// Client code (TypeScript, auto-generated):
+const client = new UserServiceClient('https://api.example.com');
+const request = new GetUserRequest();
+request.setUserId('usr_123');
+
+client.getUser(request, metadata, (err, response) => {
+    if (err) { console.error(err.message); return; }
+    console.log(response.getUser().getName()); // Strongly typed!
+});
+
+// Limitations of gRPC-Web:
+// ✗ No client streaming (browser limitation)
+// ✗ No bidirectional streaming (unless using WebSocket transport)
+// ✓ Unary RPC works perfectly
+// ✓ Server streaming works
+    </pre>
+
+</div>
+
+<!-- ==================== SUMMARY ==================== -->
+<div class="section" style="margin-top: 40px; text-align: center;">
+    <h3>Summary &amp; Interconnections</h3>
+    <ul style="text-align: left;">
+        <li><strong>Consensus algorithms</strong> (Raft/Paxos) underpin <strong>fault tolerance</strong> by enabling reliable leader election, replicated state machines, and distributed coordination (etcd, ZooKeeper).</li>
+        <li><strong>Fault tolerance</strong> mechanisms (replication, idempotency, WAL, circuit breakers) ensure systems survive failures that consensus alone cannot prevent (application-level faults, data corruption, cascading failures).</li>
+        <li><strong>gRPC</strong> is the dominant protocol for internal microservice communication where <strong>fault tolerance</strong> matters: built-in deadline propagation prevents cascading timeouts, streaming enables real-time coordination, and strong typing catches errors at compile time.</li>
+        <li><strong>REST</strong> remains the standard for external APIs where cacheability (CDN), browser support, and developer ergonomics outweigh raw performance.</li>
+        <li>In production: <strong>REST at the edge</strong> (public API) → <strong>API Gateway translates to gRPC</strong> → internal services communicate via gRPC with <strong>consensus-backed service discovery</strong> (etcd/Consul) and <strong>fault tolerance patterns</strong> (circuit breakers, retries, bulkheads).</li>
+    </ul>
+    <p style="margin-top: 20px; color: #666;"><em>Generated for experienced engineers (9+ years) seeking deep technical mastery.</em></p>
+</div>
+
+</body>
+</html>

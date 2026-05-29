@@ -1,0 +1,870 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>System Design Deep Dive - Throughput, Observability, Consensus, CAP</title>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; line-height: 1.8; max-width: 1100px; margin: 0 auto; padding: 40px; background: #f8f9fa; color: #2c3e50; }
+        h1 { text-align: center; color: #1a252f; border-bottom: 3px solid #3498db; padding-bottom: 15px; font-size: 2.2em; }
+        h2 { color: #2980b9; border-left: 5px solid #3498db; padding-left: 15px; margin-top: 50px; font-size: 1.8em; }
+        h3 { color: #34495e; margin-top: 30px; font-size: 1.4em; }
+        h4 { color: #555; margin-top: 20px; font-size: 1.1em; }
+        .section { background: #fff; padding: 30px; border-radius: 8px; margin: 20px 0; box-shadow: 0 2px 10px rgba(0,0,0,0.08); }
+        code { background: #ecf0f1; padding: 2px 8px; border-radius: 4px; font-family: 'Courier New', monospace; font-size: 0.9em; }
+        pre { background: #2c3e50; color: #ecf0f1; padding: 20px; border-radius: 6px; overflow-x: auto; font-size: 0.9em; line-height: 1.5; }
+        .example { background: #eaf6ff; border-left: 4px solid #3498db; padding: 15px 20px; margin: 15px 0; border-radius: 0 6px 6px 0; }
+        .important { background: #fef9e7; border-left: 4px solid #f39c12; padding: 15px 20px; margin: 15px 0; border-radius: 0 6px 6px 0; }
+        .diagram { background: #f4f6f9; border: 1px solid #ddd; padding: 20px; margin: 15px 0; border-radius: 6px; font-family: 'Courier New', monospace; white-space: pre; overflow-x: auto; font-size: 0.85em; }
+        table { width: 100%; border-collapse: collapse; margin: 15px 0; }
+        th, td { border: 1px solid #ddd; padding: 12px; text-align: left; }
+        th { background: #3498db; color: white; }
+        tr:nth-child(even) { background: #f2f2f2; }
+        .toc { background: #fff; padding: 25px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.08); }
+        .toc a { text-decoration: none; color: #2980b9; display: block; padding: 5px 0; }
+    </style>
+</head>
+<body>
+
+<h1>System Design Deep Dive – Part 3</h1>
+<p style="text-align:center; font-size:1.1em; color:#555;">Topics 14–17: Throughput &amp; Latency, Observability, Consensus, CAP Theorem</p>
+
+<div class="toc">
+    <h3>Table of Contents</h3>
+    <a href="#throughput-latency">14. Throughput and Latency</a>
+    <a href="#observability">15. Observability</a>
+    <a href="#consensus">16. Consensus Algorithms</a>
+    <a href="#cap">17. CAP Theorem</a>
+</div>
+
+<!-- ==================== 14. THROUGHPUT AND LATENCY ==================== -->
+<h2 id="throughput-latency">14. Throughput and Latency</h2>
+<div class="section">
+
+    <h3>14.1 Definitions – Precise Technical Meaning</h3>
+    <table>
+        <tr><th>Term</th><th>Definition</th><th>Unit</th><th>Analogy</th></tr>
+        <tr><td><strong>Latency</strong></td><td>Time between initiating a request and receiving the complete response</td><td>Milliseconds (ms), microseconds (μs)</td><td>How long one car takes to travel from A to B</td></tr>
+        <tr><td><strong>Throughput</strong></td><td>Number of operations/requests completed per unit of time</td><td>Requests/sec, transactions/sec, bytes/sec</td><td>How many cars pass a checkpoint per hour</td></tr>
+        <tr><td><strong>Bandwidth</strong></td><td>Maximum theoretical throughput of a channel</td><td>bits/sec, bytes/sec</td><td>Number of lanes on the highway</td></tr>
+    </table>
+
+    <div class="important">
+        <strong>Key Insight:</strong> Latency and throughput are NOT inversely proportional by default. You can have:
+        <ul>
+            <li>Low latency + high throughput (ideal: fast responses, many of them)</li>
+            <li>Low latency + low throughput (single-threaded fast server with one connection)</li>
+            <li>High latency + high throughput (batch processing: slow per item but massive parallelism)</li>
+            <li>High latency + low throughput (overloaded system: slow AND few completions)</li>
+        </ul>
+        They become coupled under load: as throughput approaches system capacity, latency increases exponentially (queueing theory).
+    </div>
+
+    <h3>14.2 Latency – Where Time Goes</h3>
+
+    <h4>14.2.1 Anatomy of a Web Request Latency</h4>
+    <div class="diagram">
+Total latency = sum of all stages:
+
+Client                                                    Server
+  │                                                         │
+  │ DNS Resolution: 0-100ms (cached: 0ms, cold: 50-100ms) │
+  │ TCP Handshake: 1 RTT (1-200ms depending on distance)   │
+  │ TLS Handshake: 1 RTT for TLS 1.3 (0 for resumption)   │
+  │ Request serialization + transfer: ~1ms (small payload)  │
+  │                                                         │
+  │                    Network Transit                       │
+  │          (speed of light + routing hops)                │
+  │    Same datacenter: 0.5ms                               │
+  │    Same region: 1-5ms                                   │
+  │    Cross-continent: 50-150ms                            │
+  │    Satellite: 600ms                                     │
+  │                                                         │
+  │                                                    ┌────┴────────────────┐
+  │                                                    │ Server Processing:  │
+  │                                                    │ • Queue wait: 0-?ms │
+  │                                                    │ • Auth/middleware: 1ms│
+  │                                                    │ • Business logic: 5ms│
+  │                                                    │ • DB query: 5-50ms  │
+  │                                                    │ • Serialization: 1ms│
+  │                                                    └────┬────────────────┘
+  │                                                         │
+  │ Response transfer: varies by size (1KB=0.1ms, 1MB=8ms) │
+  │ Client rendering/parsing: 1-50ms                        │
+  │                                                         │
+
+Typical API call (same region):
+  DNS: 0ms (cached) + TCP: 1ms + TLS: 0ms (reused) + Transit: 2ms
+  + Server: 20ms + Response: 1ms = ~24ms total
+
+Same call cross-continent:
+  DNS: 0ms + TCP: 75ms + TLS: 75ms + Transit: 75ms
+  + Server: 20ms + Response: 75ms = ~320ms total!
+    </div>
+
+    <h4>14.2.2 Latency Numbers Every Engineer Should Know</h4>
+    <pre>
+// Reference latency numbers (2024, approximate):
+//
+// L1 cache reference:                    1 ns
+// L2 cache reference:                    4 ns
+// L3 cache reference:                   12 ns
+// Main memory (DRAM) reference:        100 ns
+// SSD random read (NVMe):              16 μs   (16,000 ns)
+// SSD sequential read (1MB):          100 μs
+// HDD random read (seek):           4,000 μs   (4 ms)
+// Round trip within same datacenter:   500 μs   (0.5 ms)
+// Redis GET (local network):           100 μs   (0.1 ms)
+// PostgreSQL simple query:           1,000 μs   (1 ms)
+// Network round trip (same city):    1,000 μs   (1 ms)
+// Network round trip (cross-US):    40,000 μs   (40 ms)
+// Network round trip (US → Europe): 80,000 μs   (80 ms)
+// Network round trip (US → Asia): 150,000 μs   (150 ms)
+//
+// Key ratios:
+// RAM is 1000x faster than SSD
+// SSD is 250x faster than HDD (random access)
+// Local Redis is 10x faster than local PostgreSQL
+// Same-datacenter is 80x faster than cross-continent
+    </pre>
+
+    <h4>14.2.3 Percentile Latency (P50, P95, P99, P99.9)</h4>
+    <pre>
+// Why averages lie about latency:
+//
+// 1000 requests: 990 take 10ms, 10 take 5000ms
+// Average: (990×10 + 10×5000) / 1000 = 59.9ms
+// But 99% of users saw 10ms! Average is misleading.
+//
+// Percentiles give the REAL picture:
+// P50 (median):  10ms   ← Half of requests are faster than this
+// P90:           10ms   ← 90% of requests are faster
+// P95:           10ms   ← 95% of requests are faster  
+// P99:         5000ms   ← 99% faster. 1% experience 5 SECONDS!
+// P99.9:       5000ms   ← The "tail" that ruins user experience
+
+// Why tail latency matters at scale:
+// If a page makes 50 parallel API calls:
+//   P(all 50 complete within P99) = (0.99)^50 = 60.5%
+//   40% of page loads will experience at least one slow call!
+//
+// If page makes 100 calls:
+//   P(all within P99) = (0.99)^100 = 36.6%
+//   63% of users hit a tail latency event!
+//
+// This is why Jeff Dean (Google) says: "at scale, the tail wags the dog"
+
+// Measuring percentiles (implementation):
+// Method 1: Keep all values in sorted array (memory-expensive)
+// Method 2: t-digest or HDR Histogram (approximate, memory-efficient)
+//   t-digest: Merges small clusters of values. Accurate at extremes.
+//   HDR Histogram: Fixed-size array with logarithmic bucketing.
+//   Both support: addValue(x), getPercentile(p) with < 1% error
+    </pre>
+
+    <h4>14.2.4 Latency Optimization Techniques</h4>
+    <pre>
+// 1. CACHING: Avoid slow operations entirely
+//    DB query (5ms) → Redis cache (0.1ms) = 50x improvement
+//    CDN edge (5ms) vs origin (100ms) = 20x improvement
+
+// 2. PARALLELIZATION: Do independent work concurrently
+//    Sequential: A(50ms) + B(30ms) + C(40ms) = 120ms
+//    Parallel:   max(A, B, C) = 50ms
+
+async function getPageData(userId) {
+    // BAD: Sequential (120ms)
+    const profile = await getProfile(userId);    // 50ms
+    const orders = await getOrders(userId);      // 30ms
+    const recs = await getRecommendations(userId); // 40ms
+
+    // GOOD: Parallel (50ms)
+    const [profile, orders, recs] = await Promise.all([
+        getProfile(userId),
+        getOrders(userId),
+        getRecommendations(userId)
+    ]);
+}
+
+// 3. PREFETCHING: Load data before it's needed
+//    User on page 1 → prefetch page 2 data in background
+//    DNS prefetch: &lt;link rel="dns-prefetch" href="//api.example.com"&gt;
+//    TCP preconnect: &lt;link rel="preconnect" href="//cdn.example.com"&gt;
+
+// 4. GEOGRAPHIC PROXIMITY: Move computation closer to user
+//    Edge computing, CDN, regional deployments
+
+// 5. CONNECTION POOLING: Eliminate per-request connection setup
+//    TCP+TLS handshake: 2 RTT saved per request
+//    Database connection: Avoid 5-20ms connection setup per query
+
+// 6. BATCHING: Amortize round-trip cost
+//    10 Redis GETs: 10 × 0.5ms = 5ms (pipelined: 0.5ms total!)
+//    Redis pipeline: send all commands at once, receive all responses at once
+
+// 7. ASYNC/NON-BLOCKING: Don't wait for non-critical work
+//    Send email: Queue it (1ms) vs send inline (500ms)
+//    Write audit log: Async fire-and-forget
+    </pre>
+
+    <h3>14.3 Throughput – Maximizing Work Done</h3>
+
+    <h4>14.3.1 Little's Law (Fundamental Relationship)</h4>
+    <div class="important">
+        <strong>Little's Law: L = λ × W</strong>
+        <ul>
+            <li><strong>L</strong> = Average number of items in system (concurrency)</li>
+            <li><strong>λ</strong> (lambda) = Average arrival rate (throughput)</li>
+            <li><strong>W</strong> = Average time in system (latency)</li>
+        </ul>
+        Rearranged: <strong>Throughput = Concurrency / Latency</strong><br><br>
+        Example: Server handles requests with 20ms average latency, using 100 concurrent threads:<br>
+        Throughput = 100 / 0.020s = 5,000 requests/second<br><br>
+        To increase throughput: Increase concurrency (more threads/connections) OR decrease latency.
+    </div>
+
+    <h4>14.3.2 Throughput Bottlenecks</h4>
+    <pre>
+// A system's throughput is limited by its SLOWEST bottleneck:
+
+// Example pipeline:
+// Load Balancer (50,000 rps) → App Server (2,000 rps) → Database (500 rps)
+// System throughput = 500 rps (limited by DB!)
+
+// Identifying bottlenecks:
+// 1. CPU-bound: All cores at 100%. Throughput limited by compute.
+//    Solution: Optimize algorithm, cache computation results, add cores/servers.
+//
+// 2. Memory-bound: GC pauses, swapping, cache thrashing.
+//    Solution: Reduce allocations, use object pools, increase RAM.
+//
+// 3. I/O-bound (disk): Waiting for disk reads/writes.
+//    Solution: SSD (NVMe), caching (keep hot data in RAM), async I/O.
+//
+// 4. I/O-bound (network): Waiting for network responses.
+//    Solution: Connection pooling, batching, async calls, reduce payload size.
+//
+// 5. Lock contention: Threads waiting for shared locks.
+//    Solution: Lock-free data structures, sharding, reduce critical sections.
+//
+// 6. External dependency: Downstream service is slow.
+//    Solution: Caching, circuit breaker, async processing, timeouts.
+
+// Back-of-envelope throughput calculation:
+// Single thread, synchronous processing, 20ms per request:
+//   Throughput = 1000ms / 20ms = 50 rps per thread
+//   With 20 threads: 50 × 20 = 1,000 rps
+//   With 10 servers × 20 threads: 10,000 rps
+//
+// Async event loop (Node.js/Go), 20ms per request (mostly I/O wait):
+//   Can handle thousands of concurrent requests on single thread
+//   Because while one request waits for DB, others are processing
+//   Throughput = limited by event loop CPU for non-I/O work
+    </pre>
+
+    <h4>14.3.3 Amdahl's Law (Limits of Parallelism)</h4>
+    <pre>
+// Speedup = 1 / (S + (1-S)/N)
+// S = fraction of work that is SERIAL (cannot be parallelized)
+// N = number of parallel processors
+//
+// If 5% of work is serial (S=0.05):
+//   N=2:    Speedup = 1 / (0.05 + 0.95/2) = 1.90x
+//   N=4:    Speedup = 1 / (0.05 + 0.95/4) = 3.48x
+//   N=10:   Speedup = 1 / (0.05 + 0.95/10) = 6.90x
+//   N=100:  Speedup = 1 / (0.05 + 0.95/100) = 16.8x
+//   N=1000: Speedup = 1 / (0.05 + 0.95/1000) = 19.6x
+//   N=∞:    Speedup = 1 / 0.05 = 20x  (MAXIMUM POSSIBLE!)
+//
+// Lesson: Even with infinite parallelism, 5% serial work limits you to 20x speedup.
+// In practice: shared locks, sequential I/O, coordination overhead = serial fraction.
+// System design implication: Eliminate serial bottlenecks before adding more servers.
+    </pre>
+
+    <h3>14.4 The Throughput-Latency Relationship Under Load</h3>
+    <div class="diagram">
+Latency vs Throughput (Queueing Theory):
+
+Latency │
+  (ms)  │
+        │                              ╱
+  500   │                            ╱   ← System saturated
+        │                          ╱      (requests queue up)
+  200   │                        ╱
+        │                      ╱
+  100   │                   ╱╱
+        │               ╱╱╱
+   50   │          ╱╱╱╱
+        │     ╱╱╱╱╱
+   20   │╱╱╱╱  ← Linear region (ample capacity)
+        │
+   10   │── Baseline latency (no queueing)
+        │
+        └───────────────────────────────────────── Throughput (rps)
+        0%    20%    40%    60%    80%   100%  ← % of max capacity
+
+Key insight: Latency stays flat until ~60-70% utilization,
+then increases EXPONENTIALLY as you approach 100% capacity.
+
+M/M/1 Queue Model:
+  Average latency = service_time / (1 - utilization)
+  At 50% util: latency = 2× baseline
+  At 80% util: latency = 5× baseline
+  At 90% util: latency = 10× baseline
+  At 99% util: latency = 100× baseline!
+
+Design implication: NEVER run systems above 70-80% capacity.
+Always have headroom for bursts. Auto-scale BEFORE saturation.
+    </div>
+
+    <h3>14.5 Measuring Throughput and Latency in Production</h3>
+    <pre>
+// Tools and techniques:
+
+// 1. Load testing: Determine maximum throughput and latency curve
+//    wrk: HTTP benchmarking tool
+//    $ wrk -t12 -c400 -d30s http://api.example.com/health
+//    Output: Requests/sec: 45,230  Latency: avg=8.8ms, p99=23ms
+
+//    k6: Scriptable load testing
+//    $ k6 run --vus 100 --duration 60s test.js
+//    Shows: rps, p95 latency, error rate as function of load
+
+// 2. Production metrics: Continuous measurement
+//    RED method (for services):
+//      Rate: requests per second
+//      Errors: error rate per second
+//      Duration: latency distribution (histogram)
+
+//    Prometheus histogram example:
+//    http_request_duration_seconds_bucket{le="0.01"} 450    // 450 requests < 10ms
+//    http_request_duration_seconds_bucket{le="0.05"} 890    // 890 requests < 50ms
+//    http_request_duration_seconds_bucket{le="0.1"}  950    // 950 requests < 100ms
+//    http_request_duration_seconds_bucket{le="0.5"}  998    // 998 requests < 500ms
+//    http_request_duration_seconds_bucket{le="+Inf"} 1000   // all 1000 requests
+//    → P95 ≈ 50ms, P99 ≈ 100ms (interpolated from buckets)
+
+// 3. Distributed tracing: Find WHERE latency is spent
+//    (Covered in Observability section)
+    </pre>
+
+</div>
+
+<!-- ==================== 15. OBSERVABILITY ==================== -->
+<h2 id="observability">15. Observability</h2>
+<div class="section">
+
+    <h3>15.1 What Observability Means</h3>
+    <p>Observability is the ability to understand the internal state of a system by examining its external outputs. It answers: <strong>"Why is the system behaving this way?"</strong> — not just "Is it up?"</p>
+
+    <div class="diagram">
+Monitoring vs Observability:
+
+Monitoring (known-unknowns):           Observability (unknown-unknowns):
+"Alert me when CPU > 90%"             "Why are 2% of users seeing 5s latency?"
+"Is the database up?"                  "Which specific queries are slow, for which users,
+"How many 500 errors?"                  triggered by which upstream event?"
+
+Monitoring tells you WHAT is broken.
+Observability tells you WHY it's broken (and helps you find things you didn't know to look for).
+    </div>
+
+    <h3>15.2 The Three Pillars of Observability</h3>
+
+    <h4>15.2.1 Pillar 1: Metrics (Aggregated Numerical Data)</h4>
+    <p>Metrics are numerical values measured over time. They tell you <strong>what</strong> is happening at an aggregate level.</p>
+
+    <pre>
+// Metric Types:
+
+// 1. Counter: Monotonically increasing value (resets on restart)
+//    Examples: total requests, total errors, bytes sent
+http_requests_total{method="GET", path="/api/users", status="200"} 1547823
+http_requests_total{method="GET", path="/api/users", status="500"} 142
+
+//    Rate calculation: rate(http_requests_total[5m]) = requests/second over last 5 min
+
+// 2. Gauge: Value that goes up and down (point-in-time measurement)
+//    Examples: current connections, memory usage, queue depth
+node_memory_available_bytes 8589934592
+active_connections{service="api"} 847
+job_queue_depth{queue="emails"} 2341
+
+// 3. Histogram: Distribution of values in configurable buckets
+//    Examples: request latency, response size, query duration
+http_request_duration_seconds_bucket{le="0.005"} 24054
+http_request_duration_seconds_bucket{le="0.01"}  33444
+http_request_duration_seconds_bucket{le="0.025"} 100392
+http_request_duration_seconds_bucket{le="0.05"}  129389
+http_request_duration_seconds_bucket{le="0.1"}   133988
+http_request_duration_seconds_bucket{le="0.25"}  134001
+http_request_duration_seconds_bucket{le="0.5"}   134003
+http_request_duration_seconds_bucket{le="1.0"}   134005
+http_request_duration_seconds_bucket{le="+Inf"}  134005
+http_request_duration_seconds_sum 1016.728        // total seconds spent
+http_request_duration_seconds_count 134005        // total requests
+
+// From histogram: compute P50, P90, P95, P99 at query time:
+// histogram_quantile(0.99, rate(http_request_duration_seconds_bucket[5m]))
+
+// 4. Summary: Pre-calculated quantiles (client-side computation)
+//    Calculated by client library, not aggregatable across instances
+http_request_duration_seconds{quantile="0.5"} 0.012
+http_request_duration_seconds{quantile="0.9"} 0.032
+http_request_duration_seconds{quantile="0.99"} 0.148
+    </pre>
+
+    <p><strong>Metric Collection Architecture (Prometheus Model):</strong></p>
+    <div class="diagram">
+Pull-Based (Prometheus):
+┌──────────────┐    scrape /metrics     ┌──────────────┐
+│  Prometheus  │ ────────────────────→  │  App Server  │
+│   Server     │    every 15 seconds    │  (exposes    │
+│              │                         │  /metrics    │
+│  ┌────────┐  │                         │  endpoint)   │
+│  │  TSDB  │  │                         └──────────────┘
+│  │(time-  │  │
+│  │series) │  │    scrape /metrics     ┌──────────────┐
+│  └────────┘  │ ────────────────────→  │  Database    │
+│              │                         │  Exporter    │
+│  ┌────────┐  │                         └──────────────┘
+│  │ Alert  │  │
+│  │Manager │  │    scrape /metrics     ┌──────────────┐
+│  └────────┘  │ ────────────────────→  │  Redis       │
+└──────┬───────┘                         │  Exporter    │
+       │                                 └──────────────┘
+       │ query
+       ▼
+┌──────────────┐
+│   Grafana    │  ← Dashboards + alerting visualization
+└──────────────┘
+
+TSDB (Time Series Database) internals:
+- Data model: metric_name{label1="val1", label2="val2"} value @timestamp
+- Storage: Compressed chunks, typically 1-2 bytes per sample (delta-of-delta encoding)
+- Retention: 15 days default (long-term: Thanos, Cortex, Mimir for multi-year)
+- Query: PromQL (powerful functional query language)
+    </div>
+
+    <p><strong>Key Metric Frameworks:</strong></p>
+    <table>
+        <tr><th>Framework</th><th>Metrics</th><th>Best For</th></tr>
+        <tr><td><strong>RED</strong> (Request-focused)</td><td>Rate, Errors, Duration</td><td>Request-driven services (APIs, microservices)</td></tr>
+        <tr><td><strong>USE</strong> (Resource-focused)</td><td>Utilization, Saturation, Errors</td><td>Infrastructure (CPU, memory, disk, network)</td></tr>
+        <tr><td><strong>Four Golden Signals</strong> (Google SRE)</td><td>Latency, Traffic, Errors, Saturation</td><td>Comprehensive service monitoring</td></tr>
+    </table>
+
+    <pre>
+// RED Method applied to an API service:
+// Rate:     rate(http_requests_total[5m])
+// Errors:   rate(http_requests_total{status=~"5.."}[5m]) / rate(http_requests_total[5m])
+// Duration: histogram_quantile(0.99, rate(http_request_duration_seconds_bucket[5m]))
+
+// USE Method applied to a server:
+// CPU Utilization:  1 - avg(rate(node_cpu_seconds_total{mode="idle"}[5m]))
+// CPU Saturation:   node_load1 / count(node_cpu_seconds_total{mode="idle"})
+// Memory Util:      1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)
+// Disk Saturation:  rate(node_disk_io_time_weighted_seconds_total[5m])
+// Network Errors:   rate(node_network_receive_errs_total[5m])
+    </pre>
+
+    <h4>15.2.2 Pillar 2: Logs (Discrete Event Records)</h4>
+    <p>Logs are immutable, timestamped records of discrete events. They provide the <strong>narrative detail</strong> that metrics cannot.</p>
+
+    <pre>
+// Structured logging (JSON) vs unstructured:
+
+// BAD (unstructured): Hard to parse, search, aggregate
+[2025-05-28 10:23:45] ERROR - Failed to process order 12345 for user john@example.com
+
+// GOOD (structured JSON): Machine-parseable, filterable, aggregatable
+{
+    "timestamp": "2025-05-28T10:23:45.123Z",
+    "level": "error",
+    "service": "order-service",
+    "instance": "order-svc-7b4f5-xk2j",
+    "trace_id": "abc123def456",           // ← Links to distributed trace!
+    "span_id": "span789",
+    "user_id": "usr_john_42",
+    "order_id": "ord_12345",
+    "error_type": "PaymentDeclined",
+    "error_message": "Card ending 4242 was declined",
+    "payment_amount": 99.99,
+    "payment_currency": "USD",
+    "retry_count": 2,
+    "duration_ms": 1523,
+    "metadata": {
+        "payment_provider": "stripe",
+        "decline_code": "insufficient_funds"
+    }
+}
+
+// With structured logs you can query:
+// "Show me all PaymentDeclined errors for amounts > $50 in the last hour"
+// "What's the retry_count distribution for failed payments?"
+// "Correlate this error with its full distributed trace (trace_id)"
+    </pre>
+
+    <p><strong>Log Aggregation Architecture:</strong></p>
+    <div class="diagram">
+ELK Stack / Loki Architecture:
+
+┌───────────┐  ┌───────────┐  ┌───────────┐
+│ Service A │  │ Service B │  │ Service C │
+│ (stdout)  │  │ (stdout)  │  │ (stdout)  │
+└─────┬─────┘  └─────┬─────┘  └─────┬─────┘
+      │               │               │
+      ▼               ▼               ▼
+┌─────────────────────────────────────────────┐
+│   Log Shipper (Fluentd / Filebeat / Promtail)│
+│   • Tails log files / reads from stdout      │
+│   • Parses, enriches (adds labels/metadata)  │
+│   • Buffers (handles backpressure)           │
+│   • Ships to central store                   │
+└─────────────────────┬───────────────────────┘
+                      │
+                      ▼
+┌────────────────────────────────────────────┐
+│   Log Storage + Indexing                    │
+│                                            │
+│   Option A: Elasticsearch (ELK)            │
+│   • Full-text inverted index               │
+│   • Fast free-text search                  │
+│   • Expensive storage (indexes everything) │
+│                                            │
+│   Option B: Grafana Loki                   │
+│   • Indexes ONLY labels (not log content)  │
+│   • Log content stored in object storage   │
+│   • 10-100x cheaper than Elasticsearch     │
+│   • Trade-off: Full-text search is slower  │
+└─────────────────────┬──────────────────────┘
+                      │
+                      ▼
+┌────────────────────────────────────────────┐
+│   Query Interface (Kibana / Grafana)        │
+│   • Search, filter, aggregate logs         │
+│   • Correlate with metrics and traces      │
+│   • Alerting on log patterns               │
+└────────────────────────────────────────────┘
+    </div>
+
+    <h4>15.2.3 Pillar 3: Distributed Tracing</h4>
+    <p>Tracing follows a single request as it flows through multiple services, showing exactly where time is spent and where failures occur.</p>
+
+    <div class="diagram">
+Distributed Trace - Visual Representation:
+
+Trace ID: abc123def456 | Total Duration: 245ms
+
+Service          0ms     50ms    100ms   150ms   200ms   250ms
+────────────────────────────────────────────────────────────────
+API Gateway     |██████|                                        (35ms)
+                      |
+User Service          |████████████|                            (60ms)
+                      |         |
+                      |    Redis |██|                            (2ms) CACHE MISS
+                      |         |
+                      |    PostgreSQL |████████████████|         (85ms) SLOW!
+                      |
+Order Service                        |██████████████|           (70ms)
+                                     |          |
+                                Kafka |████|                     (25ms)
+                                     |
+Recommendation                              |████████|          (45ms)
+                                            |    |
+                                       ML Model |██████|        (35ms)
+
+Span hierarchy:
+root_span (API Gateway, 245ms)
+├── child_span (User Service, 60ms)
+│   ├── child_span (Redis GET, 2ms) [cache:miss]
+│   └── child_span (PostgreSQL query, 85ms) [query: SELECT * FROM users...]
+├── child_span (Order Service, 70ms)
+│   └── child_span (Kafka produce, 25ms)
+└── child_span (Recommendation, 45ms)
+    └── child_span (ML Model inference, 35ms)
+    </div>
+
+    <pre>
+// How tracing works internally (OpenTelemetry):
+
+// 1. Context Propagation: Trace ID travels with the request
+//    HTTP headers carry trace context between services:
+//    traceparent: 00-abc123def456-span789-01
+//    Format: version-trace_id-parent_span_id-flags
+
+// 2. Each service creates a "span" for its work:
+const tracer = opentelemetry.trace.getTracer('user-service');
+
+async function getUser(userId) {
+    // Start a new span (child of incoming span from header)
+    return tracer.startActiveSpan('getUser', async (span) => {
+        span.setAttribute('user.id', userId);
+
+        // Child span for database query
+        return tracer.startActiveSpan('postgres.query', async (dbSpan) => {
+            dbSpan.setAttribute('db.system', 'postgresql');
+            dbSpan.setAttribute('db.statement', 'SELECT * FROM users WHERE id = $1');
+            
+            const result = await db.query('SELECT * FROM users WHERE id = $1', [userId]);
+            
+            dbSpan.setAttribute('db.rows_returned', result.rows.length);
+            dbSpan.end();  // Record duration
+            
+            span.end();
+            return result.rows[0];
+        });
+    });
+}
+
+// 3. Spans are exported to tracing backend:
+//    Service → OpenTelemetry Collector → Jaeger/Tempo/Zipkin/Datadog
+//    Each span: {trace_id, span_id, parent_span_id, operation, start, duration, tags}
+
+// 4. Backend assembles spans into complete trace tree for visualization
+    </pre>
+
+    <p><strong>Sampling Strategies (you can't trace everything at scale):</strong></p>
+    <pre>
+// At 100K requests/sec, tracing EVERY request generates enormous data volume.
+// Solution: Sampling
+
+// 1. Head-based sampling: Decide at entry point whether to trace
+//    Pros: Simple. Consistent (whole trace or nothing).
+//    Cons: May miss interesting (rare error) traces.
+sampler: probabilistic(0.01)  // Trace 1% of requests
+
+// 2. Tail-based sampling: Collect ALL spans, decide AFTER completion
+//    Pros: Keeps all interesting traces (errors, slow requests).
+//    Cons: Must buffer all spans temporarily. Higher infrastructure cost.
+rules:
+  - always_sample_if: status_code >= 500           // All errors
+  - always_sample_if: duration > 2000ms            // All slow requests  
+  - always_sample_if: http.path == "/api/payment"  // All payment flows
+  - probabilistic: 0.001                           // 0.1% of everything else
+
+// 3. Adaptive sampling: Dynamically adjust rate based on traffic
+//    High traffic → lower sample rate. Low traffic → higher rate.
+//    Target: ~100 traces/second per service (manageable volume).
+    </pre>
+
+    <h3>15.3 Correlating the Three Pillars</h3>
+    <div class="diagram">
+The power of observability is CORRELATION:
+
+1. Alert fires: "P99 latency > 500ms for payment-service" (METRIC)
+   │
+   ▼
+2. Query metrics: Which endpoints? → POST /api/payments spiked at 14:23 (METRIC)
+   │
+   ▼
+3. Find example traces with high latency around 14:23 (TRACE)
+   │
+   ▼
+4. Trace shows: 450ms spent in database span (db.query = "SELECT...FOR UPDATE")
+   │
+   ▼
+5. Query logs for that trace_id: "Lock wait timeout exceeded" (LOG)
+   │
+   ▼
+6. Root cause: A migration script was holding a long transaction on the payments table
+
+Metric → told us WHAT (latency spike)
+Trace  → told us WHERE (database query in payment flow)
+Log    → told us WHY (lock contention from migration script)
+    </div>
+
+    <h3>15.4 Alerting – Turning Observability into Action</h3>
+    <pre>
+// Good alerting principles:
+// 1. Alert on SYMPTOMS, not causes
+//    BAD:  Alert when CPU > 90% (cause — might be fine under heavy load)
+//    GOOD: Alert when P99 latency > 500ms (symptom — users are affected)
+
+// 2. Alert on SLO burn rate (modern best practice)
+//    SLO: 99.9% of requests complete in < 300ms over 30 days
+//    Error budget: 0.1% of requests can be slow = 43 minutes/month
+//
+//    If errors in last 5 minutes would exhaust monthly budget in 1 hour → PAGE
+//    If errors in last 30 minutes would exhaust budget in 6 hours → TICKET
+
+// Multi-window burn rate alert (Google SRE):
+// 
+// Long window (1h): burn_rate = error_rate_1h / (1 - slo_target)
+// Short window (5m): confirms it's ongoing (not a brief blip)
+//
+// Example PromQL:
+//   (1 - (rate(http_requests_success_total[1h]) / rate(http_requests_total[1h])))
+//   / (1 - 0.999) > 14.4
+//   AND
+//   (1 - (rate(http_requests_success_total[5m]) / rate(http_requests_total[5m])))
+//   / (1 - 0.999) > 14.4
+//
+// 14.4 burn rate = budget consumed in 1 hour. High severity → page immediately.
+
+// 3. Minimize alert fatigue
+//    Every alert should be: ACTIONABLE (human can do something)
+//    Route properly: Critical → PagerDuty. Warning → Slack. Info → Dashboard.
+    </pre>
+
+    <h3>15.5 OpenTelemetry – The Standard</h3>
+    <pre>
+// OpenTelemetry (OTel) is the converged standard for all three signals:
+// - Merged from OpenTracing + OpenCensus
+// - Vendor-neutral (export to any backend: Datadog, Jaeger, Prometheus, etc.)
+// - Auto-instrumentation for popular frameworks (Express, Spring, Django, gRPC)
+
+// Architecture:
+// App (with OTel SDK) → OTel Collector → Backend(s)
+
+// OTel Collector pipeline:
+// Receivers: Accept data (OTLP, Jaeger, Prometheus, StatsD)
+// Processors: Batch, filter, sample, enrich, transform
+// Exporters: Send to backends (Jaeger, Prometheus, Loki, Datadog, multiple!)
+
+// Example: Single collector sends traces to Jaeger AND Datadog simultaneously
+// No vendor lock-in. Switch backends without changing application code.
+
+// Auto-instrumentation (zero code changes!):
+// Java: -javaagent:opentelemetry-javaagent.jar
+// Python: opentelemetry-instrument python app.py
+// Node.js: node --require @opentelemetry/auto-instrumentations-node/register app.js
+// Automatically instruments: HTTP calls, database queries, Redis, gRPC, messaging
+    </pre>
+
+</div>
+
+<!-- ==================== 16. CONSENSUS ALGORITHMS ==================== -->
+<h2 id="consensus">16. Consensus Algorithms</h2>
+<div class="section">
+
+    <h3>16.1 The Problem: Agreement in Distributed Systems</h3>
+    <p>In a distributed system, multiple nodes must agree on a single value or sequence of operations despite network delays, partitions, and node crashes. This is the <strong>consensus problem</strong>.</p>
+
+    <div class="diagram">
+Why consensus is hard:
+
+Node A: "The leader is Node A"
+Node B: "The leader is Node B"  ← SPLIT BRAIN! Both accept writes → data divergence!
+Node C: (crashed, unreachable)
+
+Network partition:
+┌─────────┐         ┌─────────┐
+│ Node A  │    ╳    │ Node B  │    ← Network broken between them
+│ Node C  │         │ Node D  │
+└─────────┘         └─────────┘
+Both sides think the other is dead.
+Without consensus protocol → both sides elect a leader → catastrophe.
+
+Requirements for correct consensus:
+1. Agreement: All non-faulty nodes decide on the same value
+2. Validity: The decided value was proposed by some node
+3. Termination: All non-faulty nodes eventually decide
+4. Integrity: Each node decides at most once
+    </div>
+
+    <h3>16.2 Raft – The Understandable Consensus Algorithm</h3>
+    <p>Raft is designed to be understandable (unlike Paxos). Used in: etcd, CockroachDB, TiKV, Consul, RethinkDB.</p>
+
+    <h4>16.2.1 Raft Roles</h4>
+    <table>
+        <tr><th>Role</th><th>Responsibility</th><th>Behavior</th></tr>
+        <tr><td><strong>Leader</strong></td><td>Handles all client requests. Replicates log to followers.</td><td>Sends AppendEntries RPCs (heartbeats + log replication). Only one leader per term.</td></tr>
+        <tr><td><strong>Follower</strong></td><td>Passive. Responds to leader and candidates.</td><td>If no heartbeat received within election timeout → becomes Candidate.</td></tr>
+        <tr><td><strong>Candidate</strong></td><td>Requests votes to become leader.</td><td>Increments term, votes for self, sends RequestVote RPCs to all nodes.</td></tr>
+    </table>
+
+    <h4>16.2.2 Leader Election – Step by Step</h4>
+    <div class="diagram">
+Initial state: All nodes are Followers with no leader.
+
+Node A          Node B          Node C          Node D          Node E
+(Follower)     (Follower)     (Follower)     (Follower)     (Follower)
+
+Election timeout fires on Node C first (randomized: 150-300ms):
+Node C transitions to CANDIDATE, increments term to 1.
+
+Node C → all: RequestVote(term=1, candidateId=C, lastLogIndex=0, lastLogTerm=0)
+
+Node A: "My term is 0 < 1. I haven't voted in term 1. C's log is up-to-date."
+        → Grants vote to C. Updates own term to 1.
+
+Node B: → Grants vote to C.
+
+Node D: → Grants vote to C.
+
+Node E: → Grants vote to C.
+
+Node C receives 4 votes (majority of 5 = 3 needed) → BECOMES LEADER (term 1)!
+
+Node C → all: AppendEntries(term=1, entries=[], leaderCommit=0)  // Heartbeat
+All nodes: Acknowledge C as leader. Reset election timers.
+
+Key rules:
+• Each node votes for AT MOST ONE candidate per term (prevents split votes)
+• Candidate must have log at least as up-to-date as voter (safety guarantee)
+• Randomized election timeout prevents simultaneous candidates (usually)
+    </div>
+
+    <h4>16.2.3 Log Replication – How Writes Are Committed</h4>
+    <pre>
+// Client sends write request to Leader:
+
+// Step 1: Leader appends entry to its local log (uncommitted)
+leader.log.append({
+    term: 1,
+    index: 5,
+    command: "SET x = 42"
+});
+
+// Step 2: Leader sends AppendEntries to ALL followers
+// AppendEntries RPC:
+{
+    term: 1,                    // Leader's current term
+    leaderId: "C",
+    prevLogIndex: 4,            // Index of entry immediately before new entry
+    prevLogTerm: 1,             // Term of prevLogIndex entry
+    entries: [{term: 1, index: 5, command: "SET x = 42"}],
+    leaderCommit: 4             // Leader's commit index
+}
+
+// Step 3: Followers receive, validate, append to their log
+// Follower checks: Does my log entry at index 4 have term 1? (consistency check)
+// If yes → append new entry, respond success
+// If no → respond failure (leader will decrement prevLogIndex and retry)
+
+// Step 4: Leader counts successful responses
+// Once MAJORITY (3 of 5) have the entry → entry is COMMITTED
+leader.commitIndex = 5;
+
+// Step 5: Leader applies committed entry to state machine
+stateMachine.apply("SET x = 42");
+
+// Step 6: Leader responds to client: "Write successful"
+
+// Step 7: Next AppendEntries to followers includes updated leaderCommit=5
+// Followers learn entry 5 is committed → apply to their state machines
+
+// IMPORTANT: Entry is durable once committed (majority have it on disk).
+// Even if leader crashes, new leader will have this entry (election safety).
+    </pre>
+
+    <h4>16.2.4 Safety Guarantees</h4>
+    <pre>
+// Raft guarantees these properties:
+
+// 1. Election Safety: At most one leader per term.
+//    Proof: Each node votes once per term. Leader needs majority.
+//    Two leaders would need 2 × majority = more nodes than exist. Impossible.
+
+// 2. Leader Append-Only: Leader never overwrites or deletes log entries.
+//    It only appends new entries.
+
+// 3. Log Matching: If two logs contain an entry with same index and term,
+//    then all preceding entries are also identical.
+//    Proof: AppendEntries checks prevLogIndex/prevLogTerm.
+//    If they don't match, follower rejects and leader retries with earlier entry.
+
+// 4. Leader Completeness: If an entry is committed in a given term,
+//    it will be present in the logs of all leaders for all higher terms.
+//    Proof: To become

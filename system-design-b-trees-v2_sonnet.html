@@ -1,0 +1,1264 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>B-Trees — Technical Deep Dive | System Design _sonnet</title>
+  <style>
+    :root {
+      --primary: #0d1117;
+      --accent: #0f3460;
+      --highlight: #e94560;
+      --card-bg: #161b22;
+      --text: #e6edf3;
+      --subtext: #8b949e;
+      --code-bg: #010409;
+      --border: #30363d;
+      --tag-bg: #21262d;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+      background: var(--primary);
+      color: var(--text);
+      line-height: 1.9;
+    }
+
+    /* ── HEADER ── */
+    header {
+      background: linear-gradient(135deg, #0f3460 0%, #16213e 30%, #1a3a2a 60%, #e94560 100%);
+      padding: 72px 40px;
+      text-align: center;
+    }
+    header h1 { font-size: 3.2rem; font-weight: 800; letter-spacing: -1.5px; }
+    header .subtitle { font-size: 1.15rem; color: rgba(255,255,255,0.85); margin-top: 12px; }
+    .badge-row { display: flex; justify-content: center; gap: 10px; flex-wrap: wrap; margin-top: 18px; }
+    .badge {
+      display: inline-block;
+      background: rgba(255,255,255,0.15);
+      border: 1px solid rgba(255,255,255,0.3);
+      border-radius: 20px;
+      padding: 5px 16px;
+      font-size: 0.8rem;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+    }
+
+    /* ── TOC ── */
+    nav.toc {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      margin: 40px auto;
+      max-width: 960px;
+      padding: 34px 44px;
+    }
+    nav.toc h2 { color: var(--highlight); font-size: 1rem; margin-bottom: 18px;
+                 text-transform: uppercase; letter-spacing: 1.5px; }
+    nav.toc ol { padding-left: 22px; }
+    nav.toc li { margin: 10px 0; }
+    nav.toc a  { color: #58a6ff; text-decoration: none; font-size: 1rem; transition: color .2s; }
+    nav.toc a:hover { color: var(--highlight); }
+
+    /* ── MAIN ── */
+    main { max-width: 1060px; margin: 0 auto; padding: 20px 30px 100px; }
+
+    /* ── SECTION CARD ── */
+    .section-card {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      margin-bottom: 56px;
+      overflow: hidden;
+      box-shadow: 0 4px 40px rgba(0,0,0,.45);
+    }
+    .section-header {
+      background: linear-gradient(100deg, var(--accent) 0%, #1a1a3e 100%);
+      padding: 28px 44px;
+      border-bottom: 2px solid var(--highlight);
+      display: flex;
+      align-items: center;
+      gap: 20px;
+    }
+    .section-icon {
+      background: var(--highlight);
+      color: white;
+      font-size: 1.4rem;
+      width: 52px; height: 52px;
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0;
+    }
+    .section-header h2 { font-size: 1.8rem; font-weight: 700; }
+    .section-header p  { color: var(--subtext); font-size: 0.93rem; margin-top: 4px; }
+    .section-body { padding: 38px 44px; }
+
+    /* ── HEADINGS ── */
+    .section-body h3 {
+      color: #58a6ff; font-size: 1.22rem;
+      margin: 34px 0 13px;
+      padding-left: 14px;
+      border-left: 4px solid var(--highlight);
+    }
+    .section-body h4 { color: #e3b341; font-size: 1.05rem; margin: 22px 0 9px; }
+    .section-body h5 { color: #3fb950; font-size: 0.97rem; margin: 16px 0 7px; font-weight: 600; }
+    .section-body p  { color: var(--text); margin-bottom: 14px; font-size: 0.97rem; }
+    .section-body ul,
+    .section-body ol { padding-left: 26px; margin-bottom: 14px; }
+    .section-body li { margin: 8px 0; color: var(--text); font-size: 0.96rem; }
+    strong { color: #c9d1d9; }
+    em     { color: #79c0ff; font-style: normal; font-weight: 500; }
+
+    /* ── INLINE CODE (terms only) ── */
+    code {
+      font-family: 'Fira Code','Cascadia Code','Consolas',monospace;
+      background: #1c2128;
+      border: 1px solid #30363d;
+      border-radius: 4px;
+      padding: 1px 6px;
+      font-size: 0.84rem;
+      color: #79c0ff;
+    }
+
+    /* ── SQL / CONFIG BLOCK ── */
+    pre {
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      border-left: 4px solid var(--highlight);
+      border-radius: 10px;
+      padding: 20px 24px;
+      overflow-x: auto;
+      margin: 14px 0 24px;
+      font-size: 0.86rem;
+      line-height: 1.72;
+      font-family: 'Fira Code','Cascadia Code','Consolas',monospace;
+      color: #c9d1d9;
+    }
+    pre .cm  { color: #6272a4; font-style: italic; }
+    pre .kw  { color: #ff79c6; }
+    pre .val { color: #f1fa8c; }
+    pre .fn  { color: #50fa7b; }
+
+    /* ── CALLOUT ── */
+    .callout {
+      border-radius: 10px;
+      padding: 18px 22px;
+      margin: 18px 0;
+      border-left: 5px solid;
+      font-size: 0.95rem;
+    }
+    .callout.info    { background: #0c2d48; border-color: #58a6ff; }
+    .callout.warn    { background: #2d1f00; border-color: #e3b341; }
+    .callout.success { background: #0d2a0d; border-color: #3fb950; }
+    .callout.danger  { background: #2d0d0d; border-color: #f85149; }
+    .callout.purple  { background: #1a0d2e; border-color: #bc8cff; }
+    .callout.teal    { background: #0a2530; border-color: #39d0d8; }
+    .callout strong  { display: block; margin-bottom: 6px;
+                       font-size: 0.81rem; text-transform: uppercase; letter-spacing: .7px; }
+    .callout.info    strong { color: #58a6ff; }
+    .callout.warn    strong { color: #e3b341; }
+    .callout.success strong { color: #3fb950; }
+    .callout.danger  strong { color: #f85149; }
+    .callout.purple  strong { color: #bc8cff; }
+    .callout.teal    strong { color: #39d0d8; }
+
+    /* ── DIAGRAM ── */
+    .diagram {
+      background: #010409;
+      border: 1px dashed #444c56;
+      border-radius: 10px;
+      padding: 24px 30px;
+      margin: 16px 0 26px;
+      font-family: 'Fira Code','Consolas',monospace;
+      font-size: 0.81rem;
+      color: #8b949e;
+      white-space: pre;
+      overflow-x: auto;
+      line-height: 1.68;
+    }
+    .diagram .hl { color: #79c0ff; }
+    .diagram .ar { color: var(--highlight); }
+    .diagram .gr { color: #3fb950; }
+    .diagram .yw { color: #e3b341; }
+    .diagram .pk { color: #ff79c6; }
+    .diagram .wh { color: #e6edf3; }
+    .diagram .or { color: #f0883e; }
+
+    /* ── TABLE ── */
+    table { width: 100%; border-collapse: collapse; margin: 16px 0 28px; font-size: .9rem; }
+    th { background: #0f3460; color: #e6edf3; padding: 13px 16px;
+         text-align: left; font-size: .85rem; letter-spacing: .3px; }
+    td { padding: 11px 16px; border-bottom: 1px solid var(--border);
+         color: var(--text); vertical-align: top; }
+    tr:nth-child(even) td { background: rgba(255,255,255,.025); }
+    tr:hover td { background: rgba(88,166,255,.05); }
+
+    /* ── TAGS ── */
+    .tags { display: flex; flex-wrap: wrap; gap: 8px; margin: 13px 0 5px; }
+    .tag { background: var(--tag-bg); border: 1px solid var(--border);
+           border-radius: 20px; padding: 4px 14px; font-size: .77rem; color: #79c0ff; }
+
+    /* ── METRICS ── */
+    .metrics { display: grid; grid-template-columns: repeat(auto-fit,minmax(160px,1fr));
+               gap: 13px; margin: 18px 0 28px; }
+    .metric-card { background: var(--primary); border: 1px solid var(--border);
+                   border-radius: 10px; padding: 18px 14px; text-align: center; }
+    .metric-card .val { font-size: 1.5rem; font-weight: 700; color: var(--highlight); }
+    .metric-card .lbl { font-size: .73rem; color: var(--subtext); margin-top: 4px; line-height: 1.4; }
+
+    /* ── TWO-COL ── */
+    .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; margin: 16px 0 24px; }
+    .col-card { background: var(--primary); border: 1px solid var(--border);
+                border-radius: 10px; padding: 20px 22px; }
+    .col-card h5 { color: #58a6ff; margin-bottom: 10px; font-size: .95rem; }
+    .col-card ul { padding-left: 18px; }
+    .col-card li { font-size: .88rem; margin: 6px 0; color: var(--subtext); }
+
+    /* ── THREE-COL ── */
+    .three-col { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; margin: 16px 0 24px; }
+
+    /* ── DEFINITION BOX ── */
+    .def-box {
+      background: linear-gradient(135deg, #0f1f30 0%, #0d1117 100%);
+      border: 1px solid #1f6feb;
+      border-radius: 12px;
+      padding: 22px 28px;
+      margin: 16px 0 26px;
+    }
+    .def-box h5 {
+      color: #79c0ff;
+      font-size: 0.9rem;
+      text-transform: uppercase;
+      letter-spacing: 0.9px;
+      margin-bottom: 14px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid #1f6feb;
+    }
+    .def-box ul { padding-left: 20px; }
+    .def-box li { margin: 9px 0; font-size: 0.94rem; color: var(--text); }
+
+    /* ── INVARIANT CARD ── */
+    .invariant {
+      display: flex;
+      align-items: flex-start;
+      gap: 14px;
+      background: var(--primary);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 14px 18px;
+      margin: 8px 0;
+    }
+    .inv-num {
+      background: var(--highlight);
+      color: white;
+      border-radius: 50%;
+      width: 28px; height: 28px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 0.78rem; font-weight: 700;
+      flex-shrink: 0;
+      margin-top: 2px;
+    }
+    .inv-text { font-size: 0.93rem; color: var(--text); line-height: 1.7; }
+    .inv-text strong { color: #e3b341; }
+
+    /* ── COMPARISON ROW ── */
+    .compare-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      margin: 16px 0 24px;
+    }
+    .compare-card {
+      background: var(--primary);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 20px 22px;
+    }
+    .compare-card.green { border-color: #3fb950; }
+    .compare-card.red   { border-color: #f85149; }
+    .compare-card h5 { font-size: 0.95rem; margin-bottom: 10px; }
+    .compare-card.green h5 { color: #3fb950; }
+    .compare-card.red   h5 { color: #f85149; }
+    .compare-card ul { padding-left: 18px; }
+    .compare-card li { font-size: 0.88rem; margin: 6px 0; color: var(--subtext); }
+
+    /* ── FOOTER ── */
+    footer { text-align: center; padding: 34px; color: var(--subtext);
+             font-size: .83rem; border-top: 1px solid var(--border); }
+
+    @media print {
+      body { background: #fff; color: #111; }
+      pre, .diagram { background: #f6f8fa !important; color: #111 !important;
+                      border-color: #ccc !important; }
+      .section-card { border-color: #ccc !important; page-break-inside: avoid; }
+      .section-header { background: #1a1a2e !important; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ═══════════════════════════ HEADER ═══════════════════════════ -->
+<header>
+  <h1>🌳 B-Trees — Technical Deep Dive</h1>
+  <p class="subtitle">Storage mechanics, structural invariants, operational algorithms, and production internals</p>
+  <div class="badge-row">
+    <span class="badge">Senior Engineer Level</span>
+    <span class="badge">Database Internals</span>
+    <span class="badge">No LLD Code</span>
+    <span class="badge">_sonnet</span>
+  </div>
+</header>
+
+<!-- ═══════════════════════════ TOC ═══════════════════════════ -->
+<nav class="toc">
+  <h2>📚 Table of Contents</h2>
+  <ol>
+    <li><a href="#motivation">The Storage Hierarchy Problem — Why B-Trees Were Invented</a></li>
+    <li><a href="#structure">Structural Anatomy — Formal Invariants, Node Layout, Order Parameter</a></li>
+    <li><a href="#bplus">B+Tree — The Database Evolution, Leaf Chains, Clustered vs Secondary</a></li>
+    <li><a href="#search">Search Mechanics — Traversal Semantics, Binary Search Within Nodes, Range Scans</a></li>
+    <li><a href="#insertion">Insertion Mechanics — Proactive Splitting, Median Promotion, Height Growth</a></li>
+    <li><a href="#deletion">Deletion Mechanics — Underflow Resolution, Rotation, Merging, Lazy Strategy</a></li>
+    <li><a href="#disk">Disk I/O Architecture — Page Layout, Buffer Pool, WAL Interaction, Checkpointing</a></li>
+    <li><a href="#concurrency">Concurrency Architecture — Latches vs Locks, Lock Coupling, Blink-Tree Protocol</a></li>
+    <li><a href="#variants">Structural Variants — B*Tree, Fractal Tree, Copy-on-Write, LSM Comparison</a></li>
+    <li><a href="#realworld">Production Implementations — PostgreSQL nbtree, InnoDB, SQLite Specifics</a></li>
+    <li><a href="#complexity">Complexity Reference, Tuning Parameters &amp; Anti-Patterns</a></li>
+  </ol>
+</nav>
+
+<main>
+
+<!-- ═══════════════════════════════════════════════════
+     1. MOTIVATION
+═══════════════════════════════════════════════════ -->
+<section class="section-card" id="motivation">
+  <div class="section-header">
+    <div class="section-icon">💡</div>
+    <div>
+      <h2>The Storage Hierarchy Problem</h2>
+      <p>Why the gap between RAM and disk forces a fundamentally different index structure</p>
+    </div>
+  </div>
+  <div class="section-body">
+
+    <div class="tags">
+      <span class="tag">Disk I/O Model</span><span class="tag">Fan-out</span>
+      <span class="tag">Block Transfer</span><span class="tag">Random vs Sequential Access</span>
+      <span class="tag">BST Inadequacy</span>
+    </div>
+
+    <h3>The Latency Asymmetry Driving B-Tree Design</h3>
+    <p>The entire rationale for B-Trees stems from a single engineering reality: the latency gap between DRAM and persistent storage is not linear — it is <strong>four to six orders of magnitude</strong>. A main-memory access completes in ~80 nanoseconds. A random read from a 7200 RPM HDD incurs ~10 milliseconds of combined seek time and rotational latency. Even modern NVMe SSDs require ~100 microseconds per random access. This disparity fundamentally shapes every design decision in a B-Tree.</p>
+
+    <div class="diagram">
+<span class="hl">Storage Hierarchy — Access Latency Reference (2024)</span>
+
+L1 CPU Cache       ~1   ns   │▏
+L2 CPU Cache       ~4   ns   │▎
+L3 CPU Cache       ~12  ns   │█
+DRAM (RAM)         ~80  ns   │████████
+NVMe SSD           ~100 µs   │████████████████████████████  (100,000 ns)
+SATA SSD           ~500 µs   │████████████████████████████████████████ (500,000 ns)
+HDD (7200 RPM)     ~10  ms   │ 10,000,000 ns — seek (~5ms) + rotation (~4ms)
+
+<span class="yw">Critical implication:</span>
+One HDD random read ≡ 125,000 L3 cache accesses
+One NVMe read      ≡ 1,250 DRAM accesses
+
+<span class="gr">Key engineering insight:</span>
+The cost of reading 1 byte from disk ≈ cost of reading 4,096 bytes from disk.
+The OS and storage controller always read in <em>block/page units</em> (4KB–64KB).
+→ Any algorithm that reads one byte per disk operation wastes 4,095 bytes.
+→ B-Tree nodes are sized exactly to fill one storage page → zero waste.
+    </div>
+
+    <h3>Why Binary Search Trees Fail for Disk-Based Storage</h3>
+    <p>A Binary Search Tree (BST) has exactly <strong>one key per node</strong> and exactly <strong>two child pointers</strong>. When a BST is stored on disk, each node occupies a negligible fraction of a storage page (~24 bytes out of 4096 bytes). Every pointer traversal from parent to child is a separate random disk I/O, since the parent and child nodes reside on different, unrelated physical pages.</p>
+
+    <p>For a balanced BST over <em>n = 1 billion records</em>, the tree height is <code>⌈log₂(10⁹)⌉ = 30</code>. Each lookup therefore requires <strong>30 random disk I/Os</strong>. At 10ms per HDD seek, this is 300ms per query — completely unacceptable for any real-time system. Furthermore, each 4KB page read retrieves only 24 bytes of useful data; the remaining 4072 bytes are wasted.</p>
+
+    <p>The BST's fundamental inadequacy is its <strong>low fan-out</strong>: 2 children per node. Fan-out is the single most important property governing tree height and therefore I/O cost. B-Trees solve this by filling entire storage pages with keys and child pointers, achieving fan-out of hundreds to thousands.</p>
+
+    <div class="diagram">
+<span class="hl">Fan-out vs Tree Height — Impact on Disk I/Os for 1 Billion Records</span>
+
+Fan-out 2   (Binary Search Tree):  height = log₂(10⁹)    = <span class="ar">30 levels = 30 disk I/Os</span>
+Fan-out 10:                         height = log₁₀(10⁹)   = <span class="yw">9  levels =  9 disk I/Os</span>
+Fan-out 100:                        height = log₁₀₀(10⁹)  = <span class="yw">5  levels =  5 disk I/Os</span>
+Fan-out 500  (PostgreSQL 8KB page): height = log₅₀₀(10⁹)  = <span class="gr">3  levels =  3 disk I/Os</span>
+Fan-out 1000 (MySQL 16KB page):     height = log₁₀₀₀(10⁹) = <span class="gr">3  levels =  3 disk I/Os</span>
+
+<span class="hl">Fan-out calculation for a 16KB page (MySQL InnoDB internal node):</span>
+Page size:        16,384 bytes
+Page header:         ~100 bytes overhead
+Key size (bigint):      8 bytes
+Child pointer:          6 bytes (page number)
+Keys per page:  (16,384 - 100) / (8 + 6)  ≈  <span class="gr">1,163 keys per internal node</span>
+                → fan-out = 1,164 children per internal node
+
+Even 1 TRILLION records: log₁₁₆₄(10¹²) ≈ 4 levels → 4 disk I/Os max
+    </div>
+
+    <div class="callout info">
+      <strong>📐 The Fan-out Principle — Core of B-Tree Design</strong>
+      Every B-Tree design decision — page size, key compression, pointer encoding — exists to maximize fan-out. Higher fan-out reduces tree height by one level for every order-of-magnitude increase in table size. With fan-out ≈ 1000, a table can grow from 1 thousand to 1 billion rows while adding only two levels of height. This is why B-Trees exhibit near-constant lookup performance regardless of table size in practical workloads.
+    </div>
+
+  </div>
+</section>
+
+
+<!-- ═══════════════════════════════════════════════════
+     2. STRUCTURE
+═══════════════════════════════════════════════════ -->
+<section class="section-card" id="structure">
+  <div class="section-header">
+    <div class="section-icon">🏗️</div>
+    <div>
+      <h2>Structural Anatomy</h2>
+      <p>Formal invariants, node composition, the order parameter, and what guarantees perfect balance</p>
+    </div>
+  </div>
+  <div class="section-body">
+
+    <div class="tags">
+      <span class="tag">Minimum Degree t</span><span class="tag">Node Invariants</span>
+      <span class="tag">Perfect Balance</span><span class="tag">Key Ordering</span>
+      <span class="tag">Separator Keys</span><span class="tag">Fill Factor</span>
+    </div>
+
+    <h3>The Order Parameter — Minimum Degree t</h3>
+    <p>A B-Tree of <strong>minimum degree t</strong> (equivalently, order 2t) defines the permitted key count bounds for every node. The parameter t is chosen at tree creation time based on the storage page size, key size, and pointer size — it is a static property of a given index structure. All operational invariants derive directly from t:</p>
+
+    <div class="def-box">
+      <h5>🔒 B-Tree Invariants — Maintained at All Times by All Operations</h5>
+      <ul>
+        <li><strong>Key lower bound (non-root nodes):</strong> Every node except the root must hold at least <em>t − 1</em> keys. This prevents nodes from becoming too sparse, ensuring minimum fan-out and bounded tree height.</li>
+        <li><strong>Key upper bound (all nodes):</strong> Every node holds at most <em>2t − 1</em> keys. When a node reaches this maximum, it is considered <em>full</em> and must be split before any further insertion.</li>
+        <li><strong>Root exception:</strong> The root node may hold as few as 1 key (when the tree has at least 2 nodes) or 0 keys (empty tree). It still obeys the 2t−1 upper bound.</li>
+        <li><strong>Child count:</strong> An internal node holding <em>k</em> keys has exactly <em>k + 1</em> children. The relationship between key count and child count is always exact — no slack permitted.</li>
+        <li><strong>Separator key semantics:</strong> For an internal node with keys [k₁, k₂, ..., kₙ] and children [c₀, c₁, ..., cₙ], every key in subtree cᵢ is strictly greater than kᵢ and strictly less than kᵢ₊₁. The separator keys partition the key space into disjoint ranges, one per child pointer.</li>
+        <li><strong>Uniform leaf depth:</strong> Every leaf node resides at the <em>same depth</em>. This is the property that guarantees O(log n) worst-case performance for all operations — no path from root to leaf is shorter or longer than any other.</li>
+        <li><strong>Intra-node key ordering:</strong> Keys within every node are stored in strictly non-decreasing order, enabling binary search within each node during traversal.</li>
+      </ul>
+    </div>
+
+    <h3>Node Composition — Internal vs Leaf</h3>
+    <p>A B-Tree contains two structurally distinct node types. Their on-disk composition reflects their different roles in the tree:</p>
+
+    <div class="diagram">
+<span class="hl">B-Tree Internal Node (minimum degree t=3, holds 2–5 keys)</span>
+
+┌─────────────────────────────────────────────────────────────────────┐
+│ <span class="hl">Node Header</span>                                                         │
+│   is_leaf = false  │  num_keys = 4  │  page_id = 0x0042            │
+├────────┬──────────┬────────┬──────────┬────────┬──────────┬────────┤
+│<span class="yw">child[0]</span>│ <span class="gr">key = 15</span> │<span class="yw">child[1]</span>│ <span class="gr">key = 32</span> │<span class="yw">child[2]</span>│ <span class="gr">key = 58</span> │<span class="yw">child[3]</span>│ <span class="gr">71</span>│<span class="yw">c[4]</span>│
+│<span class="yw">page 16 </span>│          │<span class="yw">page 35 </span>│          │<span class="yw">page 49 </span>│          │<span class="yw">page 68 </span>│   │<span class="yw">p80 </span>│
+└────────┴──────────┴────────┴──────────┴────────┴──────────┴────────┘
+     │                    │                    │                   │
+ keys &lt; 15          15 ≤ k &lt; 32          32 ≤ k &lt; 58         58 ≤ k &lt; 71
+
+<span class="hl">B-Tree Leaf Node (stores actual data records or row pointers)</span>
+
+┌───────────────────────────────────────────────────────────────────┐
+│ <span class="hl">Node Header</span>                                                       │
+│   is_leaf = true  │  num_keys = 3  │  page_id = 0x0035            │
+├──────────┬──────────────┬──────────┬──────────────┬───────────────┤
+│ <span class="gr">key = 20</span> │ <span class="pk">→ row tuple</span>  │ <span class="gr">key = 25</span> │ <span class="pk">→ row tuple</span>  │ <span class="gr">key = 28</span> │ <span class="pk">→ row</span> │
+│          │ <span class="pk">(page, slot)</span> │          │ <span class="pk">(page, slot)</span> │          │       │
+└──────────┴──────────────┴──────────┴──────────────┴───────────────┘
+
+<span class="cm">Internal nodes contain ONLY separator keys + child page numbers (no data).</span>
+<span class="cm">All data records reside exclusively in leaf nodes.</span>
+<span class="cm">This is the B+Tree variant — the universal standard in relational databases.</span>
+    </div>
+
+    <h3>Why Uniform Leaf Depth Is Guaranteed</h3>
+    <p>The B-Tree is the only common tree structure where balance is a <strong>structural invariant maintained by the insertion and deletion algorithms themselves</strong>, not an after-the-fact rebalancing operation. Height increases only when the root is split — a single, infrequent event that adds exactly one level uniformly across the entire tree. Height decreases only when the root is merged away — equally uniform. At no point can any leaf be at a different depth than any other leaf. This is in stark contrast to AVL or Red-Black trees, which rebalance after insertion via rotations that can leave paths with different depths temporarily.</p>
+
+    <h3>Deriving the Order Parameter from Hardware</h3>
+    <p>The relationship between the order parameter and physical storage is direct and deterministic. Given a page size P bytes, a key of size K bytes, and a child pointer of size PTR bytes, the maximum number of keys per internal node is <code>⌊(P − header_overhead) / (K + PTR)⌋</code>. The minimum degree t is then set to <code>⌊(max_keys + 2) / 2⌋</code>. This calculation ensures that two half-full siblings can always be merged into a single full node — a property required for the deletion algorithm's merge case to be valid.</p>
+
+    <div class="metrics">
+      <div class="metric-card"><div class="val">t − 1</div><div class="lbl">Minimum Keys Per Non-Root Node</div></div>
+      <div class="metric-card"><div class="val">2t − 1</div><div class="lbl">Maximum Keys Per Node (Full Threshold)</div></div>
+      <div class="metric-card"><div class="val">k + 1</div><div class="lbl">Children for Node with k Keys</div></div>
+      <div class="metric-card"><div class="val">⌈log_t n⌉</div><div class="lbl">Tree Height Upper Bound</div></div>
+      <div class="metric-card"><div class="val">~69%</div><div class="lbl">Average Fill Factor (Long-Term)</div></div>
+    </div>
+
+  </div>
+</section>
+
+
+<!-- ═══════════════════════════════════════════════════
+     3. B+TREE
+═══════════════════════════════════════════════════ -->
+<section class="section-card" id="bplus">
+  <div class="section-header">
+    <div class="section-icon">🌲</div>
+    <div>
+      <h2>B+Tree — The Database Standard</h2>
+      <p>How B+Tree diverges from the original B-Tree, leaf-level sibling links, and index locality</p>
+    </div>
+  </div>
+  <div class="section-body">
+
+    <div class="tags">
+      <span class="tag">Leaf Sibling Links</span><span class="tag">Key Duplication</span>
+      <span class="tag">Internal-Only Keys</span><span class="tag">Clustered Index</span>
+      <span class="tag">Secondary Index</span><span class="tag">Index-Only Scan</span>
+      <span class="tag">Double-Dip Problem</span>
+    </div>
+
+    <h3>The Structural Modification that Defines B+Tree</h3>
+    <p>The original B-Tree (Bayer & McCreight, 1970) stores data records at every level — internal nodes carry both separator keys and associated data, while leaves carry only the lowest-level records. This has two drawbacks: internal nodes become larger (reducing fan-out), and range scans require back-and-forth traversal between levels as the scan crosses internal node boundaries.</p>
+
+    <p>The B+Tree modification enforces a strict rule: <strong>all data records reside exclusively in leaf nodes</strong>. Internal nodes carry only separator keys and child pointers — they are navigation-only structures with no associated data payload. Keys at the internal level are <em>copies</em> of leaf-level keys, promoting upward during splits. The result is maximally high fan-out at internal nodes (no data payload consuming space) and a contiguous, ordered dataset at the leaf level.</p>
+
+    <h3>The Leaf-Level Doubly Linked List</h3>
+    <p>Every leaf node in a B+Tree carries two additional pointer fields: a right-sibling pointer to the next leaf page (by key order) and a left-sibling pointer to the previous leaf page. Together, these form a <strong>doubly linked list across the entire leaf level</strong>. This structure is the enabling mechanism for efficient range scans: once the lower bound of a range query has been located via tree traversal, the scan continues horizontally through the leaf chain — entirely sequential reads — without any further interaction with internal nodes. The scan terminates when the upper bound key is exceeded or the right-sibling pointer is null.</p>
+
+    <div class="diagram">
+<span class="hl">B+Tree — Complete Structure with Leaf Chain (minimum degree t=2)</span>
+
+                           <span class="hl">Root (Internal Only)</span>
+                      ┌────────────────────┐
+                      │    30     │   60    │
+                      └───┬───────┴────┬────┘
+                ┌──────────┘            └────────────┐
+        <span class="hl">Internal Node</span>                        <span class="hl">Internal Node</span>
+     ┌───────────────┐                   ┌───────────────────┐
+     │  10  │   20   │                   │  40  │  50  │  60 │
+     └─┬────┴───┬────┘                   └─┬────┴─┬────┴──┬──┘
+       │        │                          │      │       │
+  ┌────┴──┐ ┌───┴───┐ ┌──────┐ ┌──────┐ ┌─┴────┐ ┌─────┐ ┌──────┐
+  │ <span class="hl">LEAF</span>  │ │ <span class="hl">LEAF</span>  │ │<span class="hl">LEAF</span>  │ │<span class="hl">LEAF</span>  │ │ <span class="hl">LEAF</span> │ │<span class="hl">LEAF</span> │ │<span class="hl">LEAF</span>  │
+  │ 1  5  │ │10  15 │ │20  25│ │30  35│ │40  45│ │50 55│ │60  70│
+  │ ↓  ↓  │ │ ↓   ↓ │ │ ↓  ↓│ │ ↓  ↓│ │ ↓  ↓ │ │ ↓  ↓│ │ ↓  ↓ │
+  └──────┘ └───────┘ └──────┘ └──────┘ └──────┘ └─────┘ └──────┘
+     │◄──────────────── Doubly-linked sibling chain ─────────────►│
+
+Observations:
+  <span class="yw">1.</span> Key 30 exists in BOTH internal node AND leaf → duplication is intentional.
+     Internal copies are guide keys only; the leaf copy carries the actual record.
+  <span class="yw">2.</span> Internal nodes contain ZERO data payloads → maximum possible fan-out.
+  <span class="yw">3.</span> Range scan for keys 20–50: locate leaf(20), scan right through leaf chain.
+     Zero tree re-traversal needed. Pure sequential page reads.
+  <span class="yw">4.</span> Every point lookup terminates at leaf level — O(log_t n) I/Os always.
+    </div>
+
+    <h3>Clustered vs Non-Clustered Index — Two B+Tree Variants</h3>
+
+    <h4>Clustered Index (InnoDB Primary Key, SQL Server)</h4>
+    <p>In a <strong>clustered index</strong>, the leaf nodes of the B+Tree <em>are</em> the table — they contain the full row data for every record. The table has no separate heap storage; the B+Tree is the physical storage structure. Rows are physically ordered on disk in primary key sequence. Range scans on the primary key are therefore sequential disk reads, which is the fastest possible I/O pattern. Each table may have exactly one clustered index.</p>
+    <p>The primary key selection is critical: monotonically increasing keys (BIGSERIAL, UUID v7, ULID) always append new rows to the rightmost leaf, generating minimal page splits. Randomly distributed keys (UUID v4) scatter insertions across the entire tree, causing frequent splits at arbitrary positions and chronic index fragmentation.</p>
+
+    <h4>Non-Clustered (Secondary) Index</h4>
+    <p>A <strong>secondary index</strong> leaf stores the indexed column value alongside a <em>pointer</em> back to the actual row. In InnoDB, this pointer is the primary key value (triggering a second clustered index traversal — the "double-dip" problem). In PostgreSQL, this pointer is a physical <em>ctid</em> (block number + tuple offset within the heap file).</p>
+    <p>The double-dip problem: a secondary index lookup on a range of keys requiring N rows from the heap performs N random heap page accesses after the index traversal. For large result sets, this random I/O pattern can be slower than a sequential full table scan. PostgreSQL's <em>Bitmap Index Scan</em> mitigates this by collecting all matching ctids from the index, sorting them by physical block number, then fetching heap pages in sequential order — trading latency for reduced random I/O amplification.</p>
+
+    <h4>Covering Index and Index-Only Scan</h4>
+    <p>When the projected columns of a query are entirely contained within the index — either as key columns or as <code>INCLUDE</code> payload columns stored in the leaf — the database engine can satisfy the query entirely from the index without accessing the heap. This <em>index-only scan</em> eliminates the second I/O hop entirely. In PostgreSQL, the visibility map must confirm that all referenced heap pages are "all-visible" before the planner will choose an index-only scan, since the index itself carries no transaction visibility (MVCC) information.</p>
+
+    <table>
+      <tr><th>Property</th><th>Classic B-Tree</th><th>B+Tree</th></tr>
+      <tr><td>Data location</td><td>Internal nodes AND leaves</td><td>Leaves exclusively</td></tr>
+      <tr><td>Internal key role</td><td>Data carrier + separator</td><td>Navigation separator only</td></tr>
+      <tr><td>Key duplication</td><td>Each key appears once</td><td>Boundary keys copied to internal nodes</td></tr>
+      <tr><td>Leaf connectivity</td><td>None — isolated pages</td><td>Doubly-linked sibling chain</td></tr>
+      <tr><td>Fan-out per level</td><td>Lower (data consumes node space)</td><td>Higher (keys + pointers only)</td></tr>
+      <tr><td>Range scan mechanism</td><td>Requires repeated tree descent</td><td>Linear scan along leaf chain</td></tr>
+      <tr><td>Point lookup cost</td><td>Variable (may stop at any level)</td><td>Always O(log_t n) to leaf</td></tr>
+      <tr><td>Used in production</td><td>Some filesystems</td><td>All major RDBMS engines</td></tr>
+    </table>
+
+  </div>
+</section>
+
+
+<!-- ═══════════════════════════════════════════════════
+     4. SEARCH
+═══════════════════════════════════════════════════ -->
+<section class="section-card" id="search">
+  <div class="section-header">
+    <div class="section-icon">🔍</div>
+    <div>
+      <h2>Search Mechanics</h2>
+      <p>Traversal semantics, intra-node binary search, range scan behaviour, and prefix query handling</p>
+    </div>
+  </div>
+  <div class="section-body">
+
+    <div class="tags">
+      <span class="tag">Traversal Semantics</span><span class="tag">Binary Search Within Pages</span>
+      <span class="tag">Separator Key Routing</span><span class="tag">Range Scan</span>
+      <span class="tag">Prefix Queries</span><span class="tag">Leftmost Prefix Rule</span>
+    </div>
+
+    <h3>Point Lookup — Traversal Semantics</h3>
+    <p>A point lookup initiates at the root page, which is always maintained in the buffer pool for hot indexes. At each internal node, the algorithm performs a <strong>binary search over the node's sorted key array</strong> to identify the correct child pointer. Specifically, it seeks the smallest separator key strictly greater than the search key; the associated child pointer (to the left of that separator) is the subtree guaranteed to contain the search key. This property — called the <em>separator key semantics</em> — is preserved by all split and merge operations.</p>
+
+    <p>The traversal descends level by level, issuing exactly one page read per level. Since upper-level pages (root and first one or two internal levels) are accessed by every query, they are effectively always resident in the database buffer pool. For a height-3 tree, only the leaf page typically requires an actual disk I/O. The effective I/O cost in production is therefore often just one disk read, regardless of tree height, for tables where upper levels fit in <code>shared_buffers</code>.</p>
+
+    <p>At the leaf level, a second binary search over the leaf's key array locates the exact key position. If found, the associated row pointer (ctid in PostgreSQL, primary key in InnoDB secondary indexes) is returned. If the key falls between two adjacent entries, the lookup reports no match.</p>
+
+    <div class="diagram">
+<span class="hl">Point Lookup — Search for key = 35</span>
+
+                     [20 | 50]               ← Level 0: Root (internal)
+                    /    |    \
+                   /     |     \
+           [10|15|20]  [30|35|40]  [55|70]   ← Level 1: Internal
+              /               \
+        [35 record]                           ← Level 2: Leaf
+
+Step 1: Root. Binary search over [20, 50].
+        35 > 20 AND 35 < 50 → child pointer between 20 and 50 → page [30|35|40]
+Step 2: Internal [30|35|40]. Binary search: 35 > 30, 35 = 35 (or ≤ 40).
+        In B+Tree: internal keys are guides only → descend to child right of 30.
+Step 3: Leaf. Binary search locates key 35. Return associated row pointer.
+
+Disk I/Os: Level 0 (cached) + Level 1 (cached) + Level 2 (one physical read)
+Effective I/Os in production: <span class="gr">1</span> (only leaf page fetched from disk)
+    </div>
+
+    <h3>Intra-Node Binary Search — Why It Matters</h3>
+    <p>Within each page, the key array is sorted. Binary search over this array costs O(log k) comparisons where k is the number of keys per node. With k ≈ 500 (typical for 8KB pages with 8-byte integer keys), binary search requires at most <code>⌈log₂(500)⌉ = 9</code> comparisons per level. Across a height-3 tree, total comparisons ≈ 27. This is dramatically fewer than what a linear scan would require.</p>
+
+    <p>For variable-length keys (e.g., VARCHAR), comparisons are more expensive. Some implementations use a <strong>prefix comparison optimisation</strong>: once a key's leading bytes differ from the search key, the comparison terminates early without reading the full key string. PostgreSQL's <em>abbreviated key</em> mechanism computes a fixed-size sort key (a hash or truncation) that fits in a machine register; full key comparisons are only performed when abbreviated keys collide.</p>
+
+    <h3>Range Scan — Leaf Chain Traversal</h3>
+    <p>A range scan decomposes into two phases. The first phase is a standard point lookup to locate the leaf page containing the lower bound key — cost O(log_t n) I/Os. The second phase is a sequential horizontal scan along the leaf sibling chain until the upper bound is exceeded. The second phase issues one page read per leaf page traversed — sequential reads that benefit maximally from OS read-ahead prefetching and the storage controller's sequential access optimisation.</p>
+
+    <p>The total I/O cost for a range scan returning k records stored across p leaf pages is <code>O(log_t n + p)</code> disk I/Os, where <code>p = ⌈k / fill_factor / keys_per_page⌉</code>. Because adjacent leaf pages in key order tend to be physically adjacent on disk (especially for clustered indexes populated in key order), the sequential read pattern often achieves near-peak storage bandwidth.</p>
+
+    <h3>Prefix Queries and the Leftmost Prefix Rule</h3>
+    <p>A leading-prefix LIKE query — for example <code>WHERE name LIKE 'Alice%'</code> — is equivalent to a range scan with lower bound <em>Alice</em> and upper bound <em>Alicf</em> (the lower bound with its last character incremented by one Unicode code point). This maps directly to the range scan mechanism above, and can fully exploit any B+Tree index on the <code>name</code> column.</p>
+
+    <p>A trailing or interior wildcard — <code>LIKE '%Alice'</code> or <code>LIKE '%Alice%'</code> — cannot be expressed as a contiguous key range. The B+Tree's sorted order provides no benefit; the engine must examine every entry. A GIN index with trigram decomposition (PostgreSQL's <code>pg_trgm</code> extension) is the correct structure for substring searches.</p>
+
+    <p>For composite indexes, the <strong>leftmost prefix rule</strong> governs which query predicates can exploit the index. The index is sorted first by the leading column, then by the second column within equal leading-column values, and so on. A predicate referencing only the second column (without constraining the first) cannot leverage the sorted order at the first level — the search key spans arbitrary positions across all leaf pages. Only predicates that fully constrain all leading columns (with equality) and optionally the last referenced column (with a range condition) can reduce the scan to a contiguous leaf-chain segment.</p>
+
+  </div>
+</section>
+
+
+<!-- ═══════════════════════════════════════════════════
+     5. INSERTION
+═══════════════════════════════════════════════════ -->
+<section class="section-card" id="insertion">
+  <div class="section-header">
+    <div class="section-icon">➕</div>
+    <div>
+      <h2>Insertion Mechanics</h2>
+      <p>Proactive splitting strategy, median key promotion, cascading splits, height growth, and I/O cost</p>
+    </div>
+  </div>
+  <div class="section-body">
+
+    <div class="tags">
+      <span class="tag">Proactive Split</span><span class="tag">Median Promotion</span>
+      <span class="tag">Cascading Splits</span><span class="tag">Root Split</span>
+      <span class="tag">Height Increase</span><span class="tag">Sibling Pointer Wiring</span>
+    </div>
+
+    <h3>The Two-Pass vs One-Pass Strategy</h3>
+    <p>There are two classical approaches to insertion. The <em>two-pass strategy</em> (Knuth's original formulation) descends to the leaf, inserts the key, and then propagates splits upward as needed — requiring two traversals of the tree. The <em>proactive split strategy</em> (CLRS) splits any <strong>full</strong> node encountered during the downward traversal, before descending further. This ensures that when the leaf is reached, the immediate parent is guaranteed to be non-full and can absorb a promoted median key without further upward propagation. The proactive strategy requires only a single top-down pass and is universally preferred in production implementations.</p>
+
+    <h3>Split Mechanics — What Happens When a Node Is Full</h3>
+    <p>When a node reaches its maximum capacity of <em>2t − 1</em> keys, it is <em>full</em> and must be split before any further key can be accepted. The split procedure divides the node at its <strong>median key</strong> (index position <em>t − 1</em> in 0-indexed terms):</p>
+
+    <ul>
+      <li>The left child retains keys at positions 0 through <em>t − 2</em> (exactly <em>t − 1</em> keys — the minimum permitted).</li>
+      <li>The right child receives keys at positions <em>t</em> through <em>2t − 2</em> (also exactly <em>t − 1</em> keys).</li>
+      <li>The median key at position <em>t − 1</em> is <strong>promoted upward</strong> to the parent node, where it becomes the new separator between the left and right child pointers.</li>
+    </ul>
+
+    <p>In the B+Tree variant, the behaviour at the leaf level differs slightly from internal node splits: the median key is <em>copied</em> to the parent (not moved), because it must remain in the right leaf to preserve all original data records at the leaf level. At internal node splits, the median key is genuinely moved to the parent, as internal nodes carry no data payload.</p>
+
+    <p>After a leaf split, the sibling pointer chain must be updated: the new right leaf's right-sibling pointer is set to the original leaf's former right sibling; the original leaf's right-sibling pointer is updated to point to the new right leaf; and if the new right leaf has a right neighbour, that neighbour's left-sibling pointer must also be updated. This is a chain of three page writes for sibling pointer maintenance alone, independent of the parent pointer update.</p>
+
+    <div class="diagram">
+<span class="hl">Leaf Split Walkthrough — INSERT key=38 into full leaf [30|35|40|45|50] (t=3, max=5)</span>
+
+<span class="yw">Before split:</span>
+Parent:  [20 | 60]
+          │        │
+       [30|35|40|45|50] ← FULL (5 keys = 2t−1), must split before insert
+               ↑
+         median index = t−1 = 2 → median key = 40
+
+<span class="yw">Split operation:</span>
+  Left child  (original page):  [30 | 35]          ← keys 0..t−2 = 0..1
+  Right child (new page):        [40 | 45 | 50]    ← keys t..2t−2 = 2..4
+  Promote to parent:  key 40 (COPY for leaf, since data must stay in leaf)
+
+<span class="yw">After split — parent absorbs promoted key:</span>
+Parent: [20 | 40 | 60]
+         │       │       │
+      [30|35] [40|45|50] [...]
+
+<span class="yw">Insert key=38:</span>
+  38 > 20 AND 38 < 40 → route to left child [30|35]
+  38 > 35 → insert after 35 → [30 | 35 | 38] ← fits, no further split
+
+<span class="gr">Final state:</span>
+Parent: [20 | 40 | 60]
+         │        │       │
+      [30|35|38] [40|45|50] [...]
+      ←────────────────────→
+             leaf chain maintained (sibling pointers updated)
+
+Pages written: left child, right child, parent = <span class="yw">3 page writes minimum</span>
+    </div>
+
+    <h3>Root Split — The Only Mechanism for Height Increase</h3>
+    <p>When the root node is full, it cannot accept a promoted median key from a child split because it has no parent to receive the overflow. The only resolution is a <strong>root split</strong>: a new empty root page is allocated, the old full root becomes a child of the new root, and then the old root is split using the standard split procedure with the new root as parent. The new root begins with exactly one key (the promoted median) and exactly two children. Tree height increases by exactly one, uniformly across all paths.</p>
+
+    <p>This is the <em>only</em> event that increases tree height. Because the height increase is always uniform (root splits affect all paths simultaneously), the leaf-depth invariant is preserved automatically. Root splits are rare events — they occur at most once every <em>O(t^(h-1))</em> insertions for a tree of height h.</p>
+
+    <h3>I/O Cost Analysis for Insertion</h3>
+    <p>In the <strong>best case</strong> (leaf node not full, no splits required): the traversal reads h pages (one per level), then writes 1 modified leaf page. Total I/Os: h reads + 1 write.</p>
+    <p>In the <strong>worst case</strong> (every node on the path from root to leaf is full — cascading splits): h reads during traversal, plus h+1 writes (one per split level including a potential root split). Total I/Os: h reads + (h+1) writes = 2h+1 I/Os.</p>
+    <p>In practice, splits are amortised: each split creates two half-full nodes, and those nodes will not need splitting until approximately t−1 more keys have been inserted into them. The amortised insertion cost across all operations is O(1) splits per insertion, making the average insertion cost O(h) I/Os.</p>
+
+    <div class="callout warn">
+      <strong>⚠️ Sequential vs Random Insertion Patterns</strong>
+      Sequential primary key insertion (auto-increment integers) always targets the rightmost leaf, producing a rightmost-path split pattern where internal nodes fill up from left to right in a predictable, amortised fashion. Random key insertion (e.g., UUID v4 as primary key) scatters insertions across the entire tree uniformly, causing splits at arbitrary positions throughout the structure. The statistical outcome of random insertion is that the average fill factor stabilises at approximately 69% (ln 2 ≈ 0.693) — every node averages about two-thirds full rather than the theoretical maximum. For write-heavy workloads with random keys, this represents 31% wasted storage and proportionally more pages per lookup.
+    </div>
+
+  </div>
+</section>
+
+
+<!-- ═══════════════════════════════════════════════════
+     6. DELETION
+═══════════════════════════════════════════════════ -->
+<section class="section-card" id="deletion">
+  <div class="section-header">
+    <div class="section-icon">🗑️</div>
+    <div>
+      <h2>Deletion Mechanics</h2>
+      <p>Underflow detection, sibling borrowing (rotation), node merging, height shrinkage, and lazy deletion</p>
+    </div>
+  </div>
+  <div class="section-body">
+
+    <div class="tags">
+      <span class="tag">Underflow Threshold</span><span class="tag">Left Rotation</span>
+      <span class="tag">Right Rotation</span><span class="tag">Node Merge</span>
+      <span class="tag">Separator Update</span><span class="tag">Height Reduction</span>
+      <span class="tag">Lazy Deletion</span><span class="tag">VACUUM</span>
+    </div>
+
+    <h3>Underflow — The Core Challenge in Deletion</h3>
+    <p>Deletion is structurally more complex than insertion because removing a key from a node may reduce its key count below the minimum threshold of <em>t − 1</em>. This condition is called <strong>underflow</strong>. An underflowing node violates the B-Tree invariants and must be resolved before the operation completes. The resolution strategy depends on the occupancy of the underflowing node's immediate siblings.</p>
+
+    <h3>Three Deletion Cases</h3>
+
+    <h4>Case 1 — Key Resides in a Leaf and No Underflow Occurs</h4>
+    <p>If the target leaf holds more than <em>t − 1</em> keys (i.e., removing one key still leaves it at or above minimum), the key is deleted in-place by shifting subsequent keys left within the page. No structural change to the tree is necessary. The modified leaf page is written back to disk. This is the common case for well-distributed deletions.</p>
+
+    <h4>Case 2 — Key Resides in an Internal Node</h4>
+    <p>Internal nodes in B+Trees contain only separator (guide) keys — they do not hold data records. When the separator key being deleted is found in an internal node, the algorithm must replace it with either its <em>in-order predecessor</em> (the rightmost key of the left child's rightmost subtree) or its <em>in-order successor</em> (the leftmost key of the right child's leftmost subtree). The replacement key is then deleted from the appropriate leaf. If the chosen child has strictly more than <em>t − 1</em> keys, this deletion from the child is safe and does not cause underflow. If both children are at minimum occupancy, they are merged (Case 3) before proceeding.</p>
+
+    <h4>Case 3 — Deletion Causes Underflow (the Structural Cases)</h4>
+    <p>When a leaf deletion reduces the leaf's key count below <em>t − 1</em>, one of three structural resolutions must be applied, evaluated in order of preference:</p>
+
+    <h5>Resolution A — Borrow from Left Sibling (Right Rotation)</h5>
+    <p>If the left sibling holds strictly more than <em>t − 1</em> keys (i.e., it has a spare key), the rightmost key of the left sibling is rotated into the underflowing node via the parent. Specifically: the separator key in the parent that divides the left sibling from the underflowing node descends into the underflowing node's first position; the left sibling's rightmost key ascends to replace that separator in the parent. The parent's separator is updated accordingly. Net result: the left sibling loses one key, the underflowing node gains one key (from the parent, which in turn absorbed one from the left sibling), and no pages are created or destroyed.</p>
+
+    <h5>Resolution B — Borrow from Right Sibling (Left Rotation)</h5>
+    <p>Symmetric to Resolution A. If the right sibling holds more than <em>t − 1</em> keys, its leftmost key rotates into the underflowing node via the parent. The parent's separator between the underflowing node and the right sibling is updated to the former second key of the right sibling (which is now the rightmost key of the underflowing node's portion of the key space).</p>
+
+    <h5>Resolution C — Merge with a Sibling</h5>
+    <p>If both adjacent siblings are at exactly minimum occupancy (exactly <em>t − 1</em> keys), borrowing is not possible without causing the sibling to underflow. Instead, the underflowing node is <strong>merged</strong> with one sibling (preferably the left). The merge concatenates the two nodes' key sets and brings down the parent's separator key between them. The result is a single node containing at most <em>(t − 1) + 1 + (t − 1) = 2t − 1</em> keys — exactly at capacity, a valid full node. The merged node is placed in the left sibling's page slot; the right node's page is freed. One entry is removed from the parent (the separator that came down), which may itself cause underflow at the parent level — propagating the resolution upward.</p>
+
+    <div class="diagram">
+<span class="hl">Merge Walkthrough — DELETE key=15 causing underflow (t=2, min=1 key)</span>
+
+<span class="yw">Before deletion:</span>
+Parent: [20 | 40]
+         /        \
+     [15|17]    [25|30]    [42|50]
+       ↑
+   Target leaf — delete 15 → [17] has 1 key = t−1 = minimum → NO underflow
+
+<span class="yw">Now delete key=17 from [17]:</span>
+   [17] → [] → 0 keys < t−1 = 1 → UNDERFLOW
+
+<span class="yw">Check siblings:</span>
+   Left sibling:  none (leftmost child)
+   Right sibling: [25|30] → 2 keys > t−1=1 → can BORROW
+
+<span class="yw">Resolution A — Borrow from right sibling (left rotation):</span>
+   Step 1: Parent separator 20 descends into underflowing node: [] → [20]
+   Step 2: Right sibling's leftmost key (25) ascends to parent: parent separator → 25
+   Step 3: Right sibling loses 25: [25|30] → [30]
+
+<span class="gr">After borrow:</span>
+Parent: [25 | 40]          ← separator updated from 20 to 25
+         /        \
+     [20]       [30]       [42|50]
+
+<span class="yw">If both siblings were at minimum — MERGE would occur:</span>
+   Merge [underflowing] + parent separator + [left sibling] → one combined node
+   Parent loses separator → may itself underflow → resolution propagates upward
+   If root loses its last key → root removed → height decreases by 1
+    </div>
+
+    <h3>Cascade to Root — Height Reduction</h3>
+    <p>Merge operations at one level remove a key from the parent. If the parent was at minimum occupancy (<em>t − 1</em> keys), it now underflows, triggering the same resolution procedure one level up. This cascade can propagate from a leaf all the way to the root. If the root loses its last key due to a merge, the root is removed and its sole remaining child becomes the new root, reducing the tree height by one. This is the only event that reduces tree height, and like root splits, it is exceedingly rare in practice.</p>
+
+    <h3>Lazy Deletion — The Production Reality</h3>
+    <p>Full deletion with immediate merging is structurally correct but operationally expensive — a cascade merge can require O(h) page writes. In practice, all major production databases implement <strong>lazy deletion</strong>: the index entry is marked as dead (via a tombstone or by marking the heap tuple's xmax field in PostgreSQL), and the index page is not immediately restructured.</p>
+
+    <p>PostgreSQL's <em>VACUUM</em> process periodically traverses index pages and physically removes dead index entries without triggering merges. Pages that fall below minimum occupancy are simply left sparse — the invariant is not enforced during lazy cleanup. <em>REINDEX</em> or <em>REINDEX CONCURRENTLY</em> rebuilds the entire index from scratch with optimal packing. PostgreSQL also implements <em>Heap Only Tuple (HOT)</em> updates: when an UPDATE modifies only non-indexed columns, the new tuple version is placed on the same heap page and chained via a <em>t_ctid</em> pointer, avoiding any index modification entirely. The index entry continues to point to the old tuple's ctid, which the engine follows to find the current version.</p>
+
+  </div>
+</section>
+
+
+<!-- ═══════════════════════════════════════════════════
+     7. DISK I/O & PAGE LAYOUT
+═══════════════════════════════════════════════════ -->
+<section class="section-card" id="disk">
+  <div class="section-header">
+    <div class="section-icon">💾</div>
+    <div>
+      <h2>Disk I/O Architecture &amp; Page Layout</h2>
+      <p>How B-Tree pages are physically structured on disk, buffer pool mechanics, WAL interaction, and checkpointing</p>
+    </div>
+  </div>
+  <div class="section-body">
+
+    <div class="tags">
+      <span class="tag">Page Header</span><span class="tag">Item ID Array</span>
+      <span class="tag">Opaque Footer</span><span class="tag">Buffer Pool Clock-Sweep</span>
+      <span class="tag">WAL / Redo Log</span><span class="tag">Full-Page Images</span>
+      <span class="tag">Checkpointing</span>
+    </div>
+
+    <h3>PostgreSQL Page Physical Layout</h3>
+    <p>PostgreSQL allocates every B-Tree index in fixed-size pages (default 8192 bytes, configurable at compile time). The page layout is shared across all PostgreSQL page types, with a B-Tree-specific <em>opaque area</em> at the tail:</p>
+
+    <div class="diagram">
+<span class="hl">PostgreSQL B-Tree Page Layout (8192 bytes)</span>
+
+┌────────────────────────────────────────────────────────────────────┐
+│ <span class="hl">PageHeader</span> (24 bytes)                                              │
+│   pd_lsn:        8 bytes — LSN of last WAL record that modified    │
+│                            this page. Used during crash recovery   │
+│                            to determine if page needs WAL replay.  │
+│   pd_checksum:   2 bytes — CRC of page contents (if enabled)       │
+│   pd_flags:      2 bytes — all-visible, all-frozen, has-free-lines │
+│   pd_lower:      2 bytes — byte offset to start of free space      │
+│   pd_upper:      2 bytes — byte offset to end of free space        │
+│   pd_special:    2 bytes — byte offset to start of special area    │
+│   pd_pagesize_version: 2 bytes — page size + format version        │
+│   pd_prune_xid:  4 bytes — hint for VACUUM: oldest dead xmin       │
+├────────────────────────────────────────────────────────────────────┤
+│ <span class="hl">ItemId Array</span> (grows downward from offset 24)                       │
+│   Each ItemId = 4 bytes: lp_off(15 bits) | lp_flags(2) | lp_len(15)│
+│   Points to the physical location of each index tuple on this page  │
+│   Array enables O(1) binary search over the sorted tuple sequence   │
+├────────────────────────────────────────────────────────────────────┤
+│ <span class="gr">Free Space</span>                                                         │
+│   Region between pd_lower (bottom of ItemId array)                 │
+│   and pd_upper (top of tuple data area).                           │
+│   New tuples allocated from top of free space (pd_upper decreases) │
+│   New ItemIds added at bottom of array (pd_lower increases)         │
+├────────────────────────────────────────────────────────────────────┤
+│ <span class="hl">Index Tuple Data</span> (grows upward from page end toward middle)        │
+│   Each tuple: index key value(s) + ItemPointer (block + offset)    │
+│   to the corresponding heap tuple. Stored in reverse allocation     │
+│   order (newest at highest offset within data area).               │
+├────────────────────────────────────────────────────────────────────┤
+│ <span class="pk">BTPageOpaqueData</span> (40 bytes — B-Tree specific, at pd_special offset)│
+│   btpo_prev:    4 bytes — left sibling page number                 │
+│   btpo_next:    4 bytes — right sibling page number (Blink pointer)│
+│   btpo_level:   4 bytes — 0 = leaf, 1 = first internal, etc.      │
+│   btpo_flags:   2 bytes — BTP_LEAF, BTP_ROOT, BTP_META, BTP_HALF  │
+│   btpo_cycleid: 2 bytes — detects concurrent index builds          │
+└────────────────────────────────────────────────────────────────────┘
+    </div>
+
+    <h3>Buffer Pool — Caching and Eviction Policy</h3>
+    <p>The database buffer pool (<code>shared_buffers</code> in PostgreSQL, <code>innodb_buffer_pool_size</code> in MySQL) is the primary RAM cache for B-Tree pages. Every page access — read or write — goes through the buffer pool. A modified page becomes <em>dirty</em> and remains in the buffer pool until the background writer or checkpointer flushes it to disk.</p>
+
+    <p>PostgreSQL uses a <strong>clock-sweep eviction algorithm</strong>: each buffer frame carries a <em>usage_count</em> field (0–5). On each buffer access, <code>usage_count</code> is incremented (capped at 5). When a free frame is needed, the clock hand sweeps through all frames; frames with non-zero <code>usage_count</code> are decremented and skipped; the first frame reaching <code>usage_count = 0</code> is evicted. Frequently accessed pages (root, upper internal levels) are touched by every query and accumulate high <code>usage_count</code>, making them nearly eviction-proof under any realistic workload. Leaf pages, accessed infrequently relative to their count, are evicted on a frequency proportional to their access rate.</p>
+
+    <p>The practical consequence: for a height-3 B+Tree on a properly sized buffer pool, the root page and all first-level internal pages are always resident in memory. Effective disk I/O cost per lookup collapses to a single leaf page read, making the theoretical O(log n) cost irrelevant in practice — the dominant cost is one random I/O to the correct leaf page.</p>
+
+    <pre><code><span class="cm">-- Monitor B-Tree page hit rate (PostgreSQL):</span>
+<span class="kw">SELECT</span>
+  relname,
+  idx_blks_hit                                             AS index_hits,
+  idx_blks_read                                            AS index_reads,
+  <span class="fn">round</span>(idx_blks_hit::numeric /
+    <span class="fn">NULLIF</span>(idx_blks_hit + idx_blks_read, 0) * 100, 2)   AS hit_pct
+<span class="kw">FROM</span> pg_statio_user_tables
+<span class="kw">ORDER BY</span> idx_blks_read <span class="kw">DESC</span>;
+<span class="cm">-- Target: >99% for OLTP. Below 95%: shared_buffers too small or index bloat.</span>
+
+<span class="cm">-- Inspect which indexes are most actively used:</span>
+<span class="kw">SELECT</span> indexrelname, idx_scan, idx_tup_read, idx_tup_fetch
+<span class="kw">FROM</span> pg_stat_user_indexes
+<span class="kw">ORDER BY</span> idx_scan <span class="kw">DESC</span>;
+<span class="cm">-- idx_scan = total number of times this index was used for a scan</span>
+<span class="cm">-- Low idx_scan with high table size = candidate for removal</span></code></pre>
+
+    <h3>Write-Ahead Log (WAL) — Guaranteeing Crash Safety</h3>
+    <p>The WAL protocol mandates that every modification to a B-Tree page is first recorded in the WAL (also called the Redo Log in InnoDB) before the modified page may be written to its permanent location in the data file. This ordering guarantee — <em>WAL before data</em> — ensures that upon crash recovery, the database can replay WAL records to reconstruct any modifications that were in the buffer pool but not yet flushed to disk at crash time.</p>
+
+    <p>For B-Tree operations, WAL records are compact delta records: they describe the key inserted, its position in the target page, and any structural changes (split page numbers, promoted median keys, sibling pointer updates). The WAL record for a leaf insert is typically 50–200 bytes — far smaller than the 8KB page itself.</p>
+
+    <p>The exception is the <strong>Full-Page Image (FPI)</strong>: the first modification to any page after a checkpoint must include the entire page contents in the WAL record, not just the delta. This guards against <em>partial page writes</em> — a scenario where a crash occurs midway through writing an 8KB page to a storage device that has 512-byte atomic write units, leaving the page in a half-written, unrecoverable state. FPI records are significantly larger (8KB each) and constitute the dominant WAL volume during and immediately following checkpoint cycles. WAL compression (<code>wal_compression = on</code>) applies LZ4 or zstd compression to FPI records, typically achieving 50–80% size reduction.</p>
+
+    <h3>Checkpointing and Its Interaction with B-Tree I/O</h3>
+    <p>A <em>checkpoint</em> is the process of writing all dirty buffer pool pages to their permanent locations in the data files, then recording a checkpoint record in WAL. After a checkpoint, WAL replay during crash recovery need only start from the checkpoint position rather than the beginning of the WAL. PostgreSQL distributes checkpoint I/O over time using <code>checkpoint_completion_target</code> (default 0.9 = spread writes over 90% of the checkpoint interval) to avoid I/O spikes. The first modification to any page after a checkpoint triggers a full-page image in WAL, increasing WAL write amplification temporarily until all frequently-modified B-Tree pages have been "first-modified" in the new checkpoint cycle.</p>
+
+  </div>
+</section>
+
+
+<!-- ═══════════════════════════════════════════════════
+     8. CONCURRENCY
+═══════════════════════════════════════════════════ -->
+<section class="section-card" id="concurrency">
+  <div class="section-header">
+    <div class="section-icon">🔒</div>
+    <div>
+      <h2>Concurrency Architecture</h2>
+      <p>Latches vs locks, lock-coupling protocol, the Blink-Tree right-link extension, and optimistic reads</p>
+    </div>
+  </div>
+  <div class="section-body">
+
+    <div class="tags">
+      <span class="tag">Latch vs Lock</span><span class="tag">Lock Coupling / Crabbing</span>
+      <span class="tag">Safe Node Condition</span><span class="tag">Blink-Tree</span>
+      <span class="tag">Right-Link Pointer</span><span class="tag">High Key</span>
+      <span class="tag">Non-Blocking Reads</span>
+    </div>
+
+    <h3>Latches vs Transaction Locks — A Critical Distinction</h3>
+
+    <div class="two-col">
+      <div class="col-card">
+        <h5>🔐 Latches (Physical Concurrency Control)</h5>
+        <ul>
+          <li>Protect the <em>physical structure</em> of individual B-Tree pages against concurrent access during structural modification</li>
+          <li>Duration: microseconds to low milliseconds — held only while the page is actively read or modified</li>
+          <li>No deadlock detection infrastructure — deadlock prevention enforced by strict top-down latch acquisition ordering</li>
+          <li>Modes: shared (read latch, multiple holders) and exclusive (write latch, single holder)</li>
+          <li>Entirely internal to the storage engine — invisible to transaction managers and MVCC subsystems</li>
+          <li>Implemented as OS mutexes or spinlocks on the buffer descriptor</li>
+        </ul>
+      </div>
+      <div class="col-card">
+        <h5>🔑 Transaction Locks (Logical Concurrency Control)</h5>
+        <ul>
+          <li>Protect <em>logical data</em> — rows, key ranges, table-level access — against conflicting concurrent transactions</li>
+          <li>Duration: entire transaction lifetime (seconds to minutes)</li>
+          <li>Full deadlock detection via wait-for graph cycle detection</li>
+          <li>Modes: S (shared), X (exclusive), IS, IX, SIX — plus predicate locks for serializable isolation</li>
+          <li>Managed by the lock manager — visible to MVCC, isolation level enforcement, deadlock detector</li>
+          <li>Interact with MVCC snapshot visibility to determine row-level conflict</li>
+        </ul>
+      </div>
+    </div>
+
+    <h3>Lock Coupling (Latch Crabbing) — Safe Concurrent Traversal</h3>
+    <p>The naive approach to concurrent B-Tree access — acquiring an exclusive latch on the root and holding it for the entire traversal — serialises all operations through the root, creating an extreme bottleneck. The <strong>lock coupling protocol</strong> (also called latch crabbing) solves this by releasing the parent's latch as soon as it is determined that the parent cannot be affected by a structural change in its subtree.</p>
+
+    <p>For <strong>read operations</strong>: shared latches are acquired top-down. The moment a child page's shared latch is acquired, the parent's shared latch is released. At any point in the traversal, only one shared latch is held — on the current node. Multiple concurrent readers can traverse the tree simultaneously without contention.</p>
+
+    <p>For <strong>write operations</strong> (proactive splitting): write latches are acquired top-down and held on all ancestor pages until a <em>safe node</em> is encountered. A safe node is one that will not require splitting (not full, for insertion) or merging (above minimum, for deletion) as a result of the operation in its subtree. Once a safe node is identified, all latches on its ancestors are released. The write latch is held only from the safe node downward. In practice, for uniformly distributed insertions, the first or second level below the root is almost always safe, releasing the root latch within two levels of descent — essentially eliminating root contention in steady-state operation.</p>
+
+    <div class="diagram">
+<span class="hl">Lock Coupling — Write Traversal for INSERT (proactive split strategy)</span>
+
+                    [Root]  ← acquire WRITE latch
+                      │
+              Is root FULL?
+              YES → split root first, release root latch, continue
+              NO  → root is SAFE → release root latch immediately
+                      │
+              [Level-1 Node] ← acquire WRITE latch
+                      │
+              Is L1 node FULL?
+              YES → hold write latch (may need to accept promoted key from below)
+              NO  → L1 node is SAFE → release root AND L1 latches
+                      │
+              [Leaf Page]    ← acquire WRITE latch
+                      │
+              Insert key. If split: promote median to L1 (L1 latch already held).
+              Release all remaining latches.
+
+Steady-state: root latch released after ~2 levels.
+Contention: only when full nodes cascade to near the root — statistically rare.
+    </div>
+
+    <h3>Blink-Tree — Enabling Non-Blocking Concurrent Access</h3>
+    <p>Lehman and Yao's 1981 Blink-Tree extends the standard B+Tree with two additions that enable a critical safety property: concurrent reads can tolerate concurrent splits without holding parent latches.</p>
+
+    <p><strong>Right-link pointer</strong>: every node (not just leaf nodes, as in standard B+Tree) carries a pointer to its right sibling. In the standard B+Tree, only leaf nodes have sibling pointers; internal nodes do not.</p>
+
+    <p><strong>High key</strong>: every non-rightmost node stores its maximum permissible key — the upper bound of its key range. The high key is the separator key in the parent that routes traffic away from this node toward its right sibling.</p>
+
+    <p>These additions solve the following race condition: a reader descends to an internal node and selects a child pointer for key K. Before the reader latches that child, a concurrent split moves K's portion of the key space into a newly created right sibling. Without the right-link, the reader would descend into the wrong subtree. With the right-link, upon reaching the child page, the reader checks whether K exceeds the child's high key. If so, the reader follows the right-link to the correct sibling — traversing laterally along the current level without returning to the parent. This lateral movement requires no parent latch and does not block concurrent writers. PostgreSQL's nbtree implementation is a Blink-Tree variant, and this protocol is the reason PostgreSQL index reads never block index writes.</p>
+
+  </div>
+</section>
+
+
+<!-- ═══════════════════════════════════════════════════
+     9. VARIANTS
+═══════════════════════════════════════════════════ -->
+<section class="section-card" id="variants">
+  <div class="section-header">
+    <div class="section-icon">🔀</div>
+    <div>
+      <h2>Structural Variants</h2>
+      <p>B*Tree, Fractal Tree Index, Copy-on-Write B-Tree, and the LSM-Tree trade-off spectrum</p>
+    </div>
+  </div>
+  <div class="section-body">
+
+    <div class="tags">
+      <span class="tag">B*Tree Fill Factor</span><span class="tag">Three-Way Split</span>
+      <span class="tag">Fractal Tree Message Buffer</span><span class="tag">Write Amplification</span>
+      <span class="tag">Copy-on-Write</span><span class="tag">Append-Only</span>
+      <span class="tag">LSM-Tree Comparison</span>
+    </div>
+
+    <h3>B*Tree — Maximising Fill Factor via Deferred Splits</h3>
+    <p>The B*Tree (Knuth) modifies the split trigger and split strategy to achieve a higher guaranteed minimum fill factor of <em>2/3</em> compared to the standard B-Tree's <em>1/2</em>.</p>
+
+    <p>When a node overflows in a B*Tree, the algorithm first attempts to redistribute keys with an immediate sibling rather than splitting immediately. If the sibling has capacity, keys are redistributed so that both nodes are more uniformly full. A split is deferred until both the overflowing node <em>and</em> its adjacent sibling are simultaneously full. At that point, the two full nodes are split into <em>three</em> nodes rather than two, distributing 4t − 2 keys across three new nodes (approximately 4t/3 keys each ≈ 2/3 capacity). This produces a guaranteed minimum fill of 2/3 versus 1/2 for standard B-Trees — smaller trees, fewer pages, and fewer I/Os per operation on average. The implementation complexity is higher due to the need to coordinate two adjacent siblings during both insertion and split.</p>
+
+    <h3>Fractal Tree Index — Write-Optimised Buffering</h3>
+    <p>The Fractal Tree Index (Bender et al., implemented in TokuDB/Percona FT) is a B-Tree variant that dramatically reduces write amplification by introducing a <em>message buffer</em> at each internal node. Rather than propagating each write immediately down to the leaf, writes are deposited as <em>messages</em> into the root's buffer. Buffers are flushed downward lazily — in large batches — when they reach capacity. This batching converts what would be O(log n) individual random writes per insertion into infrequent, large sequential batch flushes down the tree levels.</p>
+
+    <p>Write amplification for a Fractal Tree of height h with buffer capacity B is O(log² n / B), compared to O(log n) for a standard B-Tree. The tradeoff: reads must inspect all buffers along the traversal path in addition to the leaf, increasing read amplification. Bloom filters maintained per buffer reduce unnecessary buffer scans for negative lookups. The Fractal Tree is optimal for write-dominated workloads (time-series ingestion, audit logs) where read performance can be slightly degraded in exchange for drastically reduced write I/O.</p>
+
+    <h3>Copy-on-Write B-Tree — Immutable Page Semantics</h3>
+    <p>A Copy-on-Write (COW) B-Tree never modifies existing pages in-place. Any modification to a page — whether a key insertion, deletion, or structural split — produces a <em>new copy</em> of that page at a new physical location. Because the parent node's child pointer now references an outdated page number, the parent must also be copied with the updated pointer. This cascades from the modified leaf all the way to the root: every ancestor on the modification path receives a new copy, culminating in a new root page. The final step is an atomic update of the <em>root pointer</em> (a single pointer-width write) to point to the new root, making the entire new tree version visible instantaneously.</p>
+
+    <p>This approach provides crash safety without any WAL: the old tree remains entirely intact until the atomic root pointer update, so a crash at any point during a modification leaves the database in the previous consistent state. Snapshots are trivially free — preserving the old root pointer preserves the entire historical tree. Readers accessing the old snapshot are never blocked by writers working on new copies. The primary drawback is write amplification: O(h) new pages are written per modification, compared to O(1) for in-place B+Tree modification. Used in: LMDB, ZFS DMU, Btrfs extent trees, Apple APFS.</p>
+
+    <h3>B+Tree vs LSM-Tree — The Fundamental Design Trade-off</h3>
+    <table>
+      <tr><th>Dimension</th><th>B+Tree</th><th>LSM-Tree</th></tr>
+      <tr><td><strong>Write path mechanism</strong></td><td>Random in-place write to leaf page on disk</td><td>Sequential append to MemTable (RAM) → immutable SSTable flush</td></tr>
+      <tr><td><strong>Read path mechanism</strong></td><td>O(log_t n) tree traversal, one I/O per level (upper levels cached)</td><td>MemTable check → Bloom filter per SSTable → multi-level merge</td></tr>
+      <tr><td><strong>Write amplification</strong></td><td>Low: 1–3 page writes per insertion in steady state</td><td>High: 10–30× during compaction (data written multiple times per level)</td></tr>
+      <tr><td><strong>Read amplification</strong></td><td>Low: tree height (typically 3–4 I/Os, effectively 1 with hot cache)</td><td>Higher: must check multiple SSTables per level despite Bloom filters</td></tr>
+      <tr><td><strong>Space amplification</strong></td><td>~30–50% overhead for internal nodes and partial fill</td><td>Higher: duplicate data during compaction, tombstone accumulation</td></tr>
+      <tr><td><strong>Range scan</strong></td><td>Excellent: leaf-chain sequential reads, OS read-ahead effective</td><td>Good: within one SSTable, but cross-SSTable merge adds overhead</td></tr>
+      <tr><td><strong>Update semantics</strong></td><td>True in-place modification of existing leaf entry</td><td>Append new version; old version becomes garbage until compaction</td></tr>
+      <tr><td><strong>Delete semantics</strong></td><td>In-place removal (or lazy tombstone)</td><td>Tombstone append; reclamation deferred to compaction</td></tr>
+      <tr><td><strong>Optimal workload</strong></td><td>Read-heavy, mixed OLTP, updates, range queries</td><td>Write-heavy, time-series ingestion, append-only, high cardinality</td></tr>
+      <tr><td><strong>Production users</strong></td><td>PostgreSQL, MySQL InnoDB, Oracle, SQL Server, SQLite</td><td>Cassandra, RocksDB, LevelDB, ClickHouse, HBase, TiKV</td></tr>
+    </table>
+
+  </div>
+</section>
+
+
+<!-- ═══════════════════════════════════════════════════
+     10. REAL-WORLD
+═══════════════════════════════════════════════════ -->
+<section class="section-card" id="realworld">
+  <div class="section-header">
+    <div class="section-icon">🏭</div>
+    <div>
+      <h2>Production Implementations</h2>
+      <p>PostgreSQL nbtree, InnoDB clustered index, and SQLite B-Tree — specific structural and operational details</p>
+    </div>
+  </div>
+  <div class="section-body">
+
+    <div class="tags">
+      <span class="tag">PostgreSQL nbtree</span><span class="tag">Deduplication</span>
+      <span class="tag">Suffix Truncation</span><span class="tag">Metapage</span>
+      <span class="tag">InnoDB Clustered</span><span class="tag">Adaptive Hash Index</span>
+      <span class="tag">Change Buffer</span><span class="tag">SQLite</span>
+    </div>
+
+    <h3>PostgreSQL — nbtree Implementation</h3>
+    <p>PostgreSQL's B-Tree access method is named <em>nbtree</em> and is a Blink-Tree variant. Its implementation includes several optimisations beyond the standard B+Tree specification:</p>
+
+    <h4>Index Entry Deduplication (PostgreSQL 13+)</h4>
+    <p>For non-unique indexes on columns with repeated values, storing one index entry per heap tuple produces significant space waste. PostgreSQL 13 introduced <strong>index entry deduplication</strong>: multiple heap tuple pointers (ItemPointers) that share an identical index key are combined into a single <em>posting list</em> — a compact array of ctid values stored alongside one key copy. A non-unique index on a <code>status</code> column with 5 distinct values and 1 million rows previously required 1 million index entries; with deduplication, it requires 5 posting list entries. Posting lists are maintained in ctid-sorted order to allow binary search within the list. The space saving for low-cardinality indexes frequently exceeds 70%.</p>
+
+    <h4>Suffix Truncation in Internal Nodes</h4>
+    <p>Internal separator keys only need to be large enough to correctly partition the key space between their adjacent children — they do not need to match any actual leaf key exactly. PostgreSQL's nbtree applies <strong>suffix truncation</strong>: separator keys in internal nodes are truncated to the shortest prefix that still distinguishes the left and right child subtrees. For variable-length character keys, this can dramatically reduce internal node key sizes, increasing the fan-out and reducing tree height. For example, the separator between a subtree ending at <em>2024-01-15</em> and one beginning at <em>2024-01-16</em> can be stored as <em>2024-01-1</em> (truncated) rather than the full timestamp string.</p>
+
+    <h4>Metapage and Tree Introspection</h4>
+    <p>Page 0 of every PostgreSQL B-Tree index is a <em>metapage</em> — a dedicated metadata page storing the current root page number, the <em>fast root</em> page number (a shortcut pointer that bypasses deletion-pending pages above a certain level), the tree level, and the last cleanup operation's statistics. The metapage is consulted once per index scan to locate the root.</p>
+
+    <pre><code><span class="cm">-- Inspect B-Tree structural metadata (requires pg_am + pageinspect):</span>
+<span class="kw">CREATE EXTENSION IF NOT EXISTS</span> pageinspect;
+
+<span class="kw">SELECT</span> * <span class="kw">FROM</span> <span class="fn">bt_metap</span>(<span class="val">'idx_orders_customer_id'</span>);
+<span class="cm">-- magic | version | root | level | fastroot | fastlevel | last_cleanup_num_delpages</span>
+<span class="cm">-- 340322|    4    |  412 |   3   |   412    |     3     |  28</span>
+<span class="cm">-- level=3: four physical levels (meta + root + 2 internal = level 3 = 4 levels total)</span>
+
+<span class="kw">SELECT</span> * <span class="kw">FROM</span> <span class="fn">bt_page_stats</span>(<span class="val">'idx_orders_customer_id'</span>, 412);
+<span class="cm">-- Reports: live_items, dead_items, avg_item_size, page_size, free_size</span>
+<span class="cm">-- free_size shows how much space is available before next split</span>
+
+<span class="kw">SELECT</span> * <span class="kw">FROM</span> <span class="fn">bt_page_items</span>(<span class="val">'idx_orders_customer_id'</span>, 412);
+<span class="cm">-- Lists individual index entries on the specified page</span>
+<span class="cm">-- itemoffset | ctid | itemlen | nulls | vars | data (hex-encoded key value)</span>
+
+<span class="cm">-- Measure actual index bloat:</span>
+<span class="kw">CREATE EXTENSION IF NOT EXISTS</span> pgstattuple;
+<span class="kw">SELECT</span> * <span class="kw">FROM</span> <span class="fn">pgstatindex</span>(<span class="val">'idx_orders_customer_id'</span>);
+<span class="cm">-- avg_leaf_density: target 70–90%. Below 60% = significant bloat → REINDEX</span>
+<span class="cm">-- leaf_fragmentation: % of leaf pages out of physical sequential order</span></code></pre>
+
+    <h3>MySQL InnoDB — Clustered Primary Key Architecture</h3>
+    <p>InnoDB's primary architectural distinction is that every table's primary key <em>is</em> the clustered index — the table is physically stored as a B+Tree whose leaf pages contain full row data. There is no separate heap; the clustered index is the table. This layout provides optimal range scan performance for primary key queries (physically sequential leaf reads) and eliminates the second-lookup problem for covered queries.</p>
+
+    <h4>Adaptive Hash Index (AHI)</h4>
+    <p>InnoDB monitors B-Tree page access patterns and automatically constructs an in-memory hash index over the most frequently accessed internal B-Tree pages. Once the AHI is established for a particular access pattern, equality lookups against indexed columns served by the AHI bypass the B-Tree traversal entirely, achieving O(1) rather than O(log n) access. The AHI is partitioned to reduce contention in high-concurrency environments. It can be disabled (<code>innodb_adaptive_hash_index = OFF</code>) for workloads with high write concurrency where AHI maintenance overhead exceeds its benefit.</p>
+
+    <h4>Change Buffer — Deferred Secondary Index Maintenance</h4>
+    <p>Secondary index pages in InnoDB are distributed across the buffer pool without the physical locality of the clustered index. Inserting or deleting rows that require secondary index updates on pages not currently in the buffer pool would generate random I/O. InnoDB's <em>change buffer</em> defers these secondary index modifications: changes targeting secondary index pages absent from the buffer pool are buffered in a dedicated B-Tree structure within the tablespace. When those secondary index pages are eventually read into the buffer pool (for any reason), the buffered changes are applied synchronously. This deferred merge converts random write I/O into sequential merge I/O, reducing secondary index write amplification by up to 75% for insert-heavy workloads.</p>
+
+    <h3>SQLite — Minimal B-Tree for Embedded Use</h3>
+    <p>SQLite uses a B-Tree for indexes and a B+Tree (with rowid as the key) for tables. All data resides in a single file. SQLite table B-Trees store full row data in leaf nodes keyed on the rowid. <code>WITHOUT ROWID</code> tables use a B-Tree directly keyed on the declared PRIMARY KEY, avoiding the implicit rowid indirection layer entirely — appropriate for tables whose natural primary key is already compact and frequently used as a lookup key.</p>
+    <p>SQLite's WAL mode (<code>PRAGMA journal_mode = WAL</code>) enables concurrent reads during writes by maintaining a separate WAL file. Readers access a consistent snapshot by reading from the main database file plus any WAL entries that existed at their transaction start time. Writers append to the WAL without blocking readers. A checkpoint operation periodically transfers WAL content back to the main database file. SQLite's B-Tree page size is configurable from 512 to 65536 bytes (power of 2) and must be set before any data is written, as it determines the permanent fan-out for the life of the database.</p>
+
+  </div>
+</section>
+
+
+<!-- ═══════════════════════════════════════════════════
+     11. COMPLEXITY & TUNING
+═══════════════════════════════════════════════════ -->
+<section class="section-card" id="complexity">
+  <div class="section-header">
+    <div class="section-icon">📊</div>
+    <div>
+      <h2>Complexity Reference &amp; Production Tuning</h2>
+      <p>Complete complexity table, key tuning parameters, index bloat remediation, and planner interaction</p>
+    </div>
+  </div>
+  <div class="section-body">
+
+    <div class="tags">
+      <span class="tag">Time Complexity</span><span class="tag">Space Complexity</span>
+      <span class="tag">Bulk Loading</span><span class="tag">Index Bloat</span>
+      <span class="tag">REINDEX CONCURRENTLY</span><span class="tag">Fillfactor</span>
+      <span class="tag">random_page_cost</span><span class="tag">Statistics Target</span>
+    </div>
+
+    <h3>Complete Complexity Reference</h3>
+    <table>
+      <tr><th>Operation</th><th>Disk I/Os</th><th>Comparisons</th><th>Notes</th></tr>
+      <tr><td><strong>Point Lookup</strong></td><td>O(log_t n)</td><td>O(log n)</td><td>Effective I/Os ≈ 1 with hot cache (upper levels resident)</td></tr>
+      <tr><td><strong>Range Scan — k results</strong></td><td>O(log_t n + k/B)</td><td>O(log n + k)</td><td>B = keys per leaf page; sequential reads after initial seek</td></tr>
+      <tr><td><strong>Insertion (amortised)</strong></td><td>O(log_t n)</td><td>O(t · log_t n)</td><td>Amortised O(1) splits per insertion; worst case 2h+1 I/Os</td></tr>
+      <tr><td><strong>Deletion (amortised)</strong></td><td>O(log_t n)</td><td>O(t · log_t n)</td><td>Amortised O(1) merges; lazy deletion avoids most merges in practice</td></tr>
+      <tr><td><strong>Split (per occurrence)</strong></td><td>O(h) worst case</td><td>O(t)</td><td>3 page writes minimum (left, right, parent); cascading splits rare</td></tr>
+      <tr><td><strong>Merge (per occurrence)</strong></td><td>O(h) worst case</td><td>O(t)</td><td>Cascading merges exceedingly rare; lazy deletion avoids entirely</td></tr>
+      <tr><td><strong>Bulk Build</strong></td><td>O(n/B · log_{M/B}(n/B))</td><td>O(n log n)</td><td>External merge sort + bottom-up tree construction; far faster than N inserts</td></tr>
+      <tr><td><strong>Tree Height</strong></td><td>⌈log_t(n+1)⌉</td><td>—</td><td>For t=500, n=10⁹: height = 3; n=10¹²: height = 4</td></tr>
+      <tr><td><strong>Space</strong></td><td>O(n) pages</td><td>—</td><td>Average fill factor ≈ 69% for random insertions; sequential ≈ 90%</td></tr>
+    </table>
+    <p style="color: var(--subtext); font-size: 0.85rem; margin-top: -14px;"><em>t = minimum degree; n = total records; B = keys per leaf page; M = buffer pool size in pages; h = tree height</em></p>
+
+    <h3>Bulk Loading — Bottom-Up Tree Construction</h3>
+    <p>When building a B+Tree index from scratch over an existing dataset (via <code>CREATE INDEX</code>), inserting each key individually through the standard insertion path costs O(n log n) I/Os. Bulk loading reduces this dramatically by sorting all index entries first and then constructing the B+Tree bottom-up in a single sequential pass.</p>
+
+    <p>The process: the entire set of (key, pointer) pairs is sorted using an external merge sort (bounded by <code>maintenance_work_mem</code> in PostgreSQL). Sorted pairs are packed into leaf pages from left to right at the configured fill factor (default 90% for index builds, higher than the 70% operational fill factor to minimise initial tree size). As each leaf page fills, its boundary key is promoted to construct the level-1 internal nodes. This continues until the root is constructed. The resulting tree is uniformly packed at the fill factor, physically sequential on disk, and requires no buffer pool pressure during construction beyond the sort memory.</p>
+
+    <pre><code><span class="cm">-- Maximise build speed by allocating more sort memory:</span>
+<span class="kw">SET</span> maintenance_work_mem = <span class="val">'4GB'</span>;
+<span class="kw">SET</span> max_parallel_maintenance_workers = 4; <span class="cm">-- Parallel sort (PostgreSQL 11+)</span>
+<span class="kw">CREATE INDEX</span> idx_orders_customer_id <span class="kw">ON</span> orders(customer_id);
+<span class="cm">-- 4 parallel workers sort independent data ranges, then merge-sort.</span>
+<span class="cm">-- Effective build time scales near-linearly with worker count for I/O-bound builds.</span>
+
+<span class="cm">-- Build without blocking concurrent reads (PostgreSQL 8.2+):</span>
+<span class="kw">CREATE INDEX CONCURRENTLY</span> idx_orders_created <span class="kw">ON</span> orders(created_at);
+<span class="cm">-- Phase 1: build index snapshot from one heap scan (no locks)</span>
+<span class="cm">-- Phase 2: apply changes from concurrent modifications (second scan)</span>
+<span class="cm">-- Phase 3: wait for active transactions, validate index consistency</span>
+<span class="cm">-- Total: ~2× longer than standard CREATE INDEX; zero write blocking</span></code></pre>
+
+    <h3>Index Bloat — Detection, Causes, and Remediation</h3>
+    <p>B+Tree indexes accumulate structural bloat over time through several mechanisms: lazy deletion leaves dead index entries occupying leaf page space; random-key insertions cause splits that produce half-full pages that are never refilled; frequent updates to indexed columns produce a stream of deletes and inserts that fragment leaf pages. The cumulative effect is an index that is physically larger than necessary, requires more I/Os per scan, and exhibits reduced buffer pool efficiency.</p>
+
+    <pre><code><span class="cm">-- Measure index bloat precisely:</span>
+<span class="kw">CREATE EXTENSION IF NOT EXISTS</span> pgstattuple;
+
+<span class="kw">SELECT</span>
+  indexrelname,
+  <span class="fn">pg_size_pretty</span>(<span class="fn">pg_relation_size</span>(indexrelid))  AS current_size,
+  <span class="fn">round</span>(s.avg_leaf_density, 1)                     AS avg_leaf_fill_pct,
+  <span class="fn">round</span>(s.leaf_fragmentation, 1)                   AS fragmentation_pct,
+  s.dead_leaf_pages
+<span class="kw">FROM</span> pg_stat_user_indexes i,
+     <span class="fn">pgstatindex</span>(i.indexrelname::text) s
+<span class="kw">WHERE</span> schemaname = <span class="val">'public'</span>
+<span class="kw">ORDER BY</span> <span class="fn">pg_relation_size</span>(indexrelid) <span class="kw">DESC</span>;
+
+<span class="cm">-- avg_leaf_density < 60% → significant bloat → schedule REINDEX</span>
+<span class="cm">-- leaf_fragmentation > 30% → physical ordering degraded → sequential scans less efficient</span>
+
+<span class="cm">-- Online remediation (PostgreSQL 12+, no table lock):</span>
+<span class="kw">REINDEX INDEX CONCURRENTLY</span> idx_orders_customer_id;
+<span class="cm">-- Builds a new index alongside the old one, atomically swaps, drops old.</span>
+<span class="cm">-- ~2× longer than offline REINDEX. Zero query downtime.</span>
+
+<span class="cm">-- Fillfactor — leave headroom for future updates:</span>
+<span class="kw">CREATE INDEX</span> idx_accounts_balance <span class="kw">ON</span> accounts(balance)
+<span class="kw">WITH</span> (fillfactor = 70);
+<span class="cm">-- Leaf pages filled to 70% during build and splits.</span>
+<span class="cm">-- 30% headroom absorbs future insertions before triggering splits.</span>
+<span class="cm">-- Optimal for: range-update heavy tables, hot-row update tables.</span>
+<span class="cm">-- Tradeoff: ~43% more leaf pages than fillfactor=100.</span></code></pre>
+
+    <h3>Query Planner Interaction — When Indexes Are Bypassed</h3>
+    <p>The query planner chooses between index access paths and sequential scans based on estimated I/O cost, which depends on the estimated row count, the table's physical characteristics, and the configured cost parameters. Several common causes of index bypass:</p>
+
+    <ul>
+      <li><strong>Low selectivity:</strong> If the predicate matches more than approximately 5–15% of the table, a sequential scan becomes cheaper than the random I/O pattern of an index scan (this threshold varies by <code>random_page_cost</code> setting).</li>
+      <li><strong>Stale statistics:</strong> After bulk loads or large DELETE operations, statistics from the previous <code>ANALYZE</code> run may be severely inaccurate. The planner's row count estimates diverge from reality, causing incorrect plan choices.</li>
+      <li><strong>Default cost parameters for HDD:</strong> The default <code>random_page_cost = 4.0</code> reflects HDD seek latency. On NVMe SSDs where random and sequential I/O costs are nearly equal, this setting causes the planner to undervalue index scans. Setting <code>random_page_cost = 1.1</code> on SSD-backed systems substantially increases index scan selection frequency.</li>
+      <li><strong>Function wrapping:</strong> A predicate like <code>WHERE UPPER(email) = 'ALICE@EXAMPLE.COM'</code> cannot use an index on <code>email</code> — the B+Tree is ordered by the raw column value, not its uppercased form. A functional index on <code>UPPER(email)</code> is required.</li>
+    </ul>
+
+    <pre><code><span class="cm">-- Calibrate cost parameters for SSD storage:</span>
+<span class="kw">SET</span> random_page_cost = 1.1;  <span class="cm">-- SSD: random ≈ sequential → planner favours indexes</span>
+<span class="kw">SET</span> seq_page_cost    = 1.0;  <span class="cm">-- Baseline (default)</span>
+
+<span class="cm">-- Increase statistics target for skewed columns:</span>
+<span class="kw">ALTER TABLE</span> orders <span class="kw">ALTER COLUMN</span> status <span class="kw">SET STATISTICS</span> 500;
+<span class="kw">ANALYZE</span> orders;
+<span class="cm">-- Default 100 histogram buckets is insufficient for heavily skewed distributions.</span>
+<span class="cm">-- 500 buckets gives the planner finer-grained frequency estimates per value.</span>
+
+<span class="cm">-- Verify index usage and efficiency:</span>
+<span class="kw">EXPLAIN</span> (ANALYZE, BUFFERS, FORMAT TEXT)
+<span class="kw">SELECT</span> * <span class="kw">FROM</span> orders <span class="kw">WHERE</span> customer_id = 12345 <span class="kw">AND</span> status = <span class="val">'pending'</span>;
+<span class="cm">-- Buffers: shared hit=N read=M → N pages from buffer pool, M from disk</span>
+<span class="cm">-- "Index Scan" → good. "Seq Scan" on large table → investigate statistics/cost params.</span>
+<span class="cm">-- "Bitmap Heap Scan" → many rows, batching heap I/O by block number.</span></code></pre>
+
+    <div class="callout success">
+      <strong>✅ B-Tree Production Engineering Checklist</strong>
+      <strong>Primary key design:</strong> Use monotonically increasing keys (BIGSERIAL, UUID v7, ULID). Random keys (UUID v4) cause right-branch fragmentation, constant splits across the tree, and long-term 69% fill factor. Monotonic keys maintain ~90% fill and near-zero fragmentation.<br/><br/>
+      <strong>Fillfactor configuration:</strong> Default fillfactor (90%) is optimal for append-only tables. Reduce to 70–80% for tables with frequent in-place updates to indexed columns, enabling HOT update chains and deferring split events.<br/><br/>
+      <strong>shared_buffers sizing:</strong> Allocate 25% of physical RAM. This ensures the root and all first-level internal B-Tree pages for active indexes remain permanently resident, collapsing effective lookup cost to one physical leaf page read.<br/><br/>
+      <strong>random_page_cost:</strong> Set to 1.1 on NVMe SSD deployments. The default 4.0 causes systematic underuse of indexes on random-access workloads where SSD random I/O cost is near-equal to sequential.<br/><br/>
+      <strong>Bloat monitoring:</strong> Schedule monthly <code>pg

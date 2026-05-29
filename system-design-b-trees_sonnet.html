@@ -1,0 +1,1700 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>B-Trees — Deep Dive | System Design _sonnet</title>
+  <style>
+    :root {
+      --primary: #0d1117;
+      --accent: #0f3460;
+      --highlight: #e94560;
+      --card-bg: #161b22;
+      --text: #e6edf3;
+      --subtext: #8b949e;
+      --code-bg: #010409;
+      --border: #30363d;
+      --tag-bg: #21262d;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+      background: var(--primary);
+      color: var(--text);
+      line-height: 1.85;
+    }
+
+    /* ── HEADER ── */
+    header {
+      background: linear-gradient(135deg, #0f3460 0%, #16213e 30%, #1a3a2a 60%, #e94560 100%);
+      padding: 72px 40px;
+      text-align: center;
+    }
+    header h1 { font-size: 3.2rem; font-weight: 800; letter-spacing: -1.5px; }
+    header .subtitle { font-size: 1.15rem; color: rgba(255,255,255,0.85); margin-top: 12px; }
+    .badge-row { display: flex; justify-content: center; gap: 10px; flex-wrap: wrap; margin-top: 18px; }
+    .badge {
+      display: inline-block;
+      background: rgba(255,255,255,0.15);
+      border: 1px solid rgba(255,255,255,0.3);
+      border-radius: 20px;
+      padding: 5px 16px;
+      font-size: 0.8rem;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+    }
+
+    /* ── TOC ── */
+    nav.toc {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      margin: 40px auto;
+      max-width: 960px;
+      padding: 34px 44px;
+    }
+    nav.toc h2 { color: var(--highlight); font-size: 1rem; margin-bottom: 18px;
+                 text-transform: uppercase; letter-spacing: 1.5px; }
+    nav.toc ol { padding-left: 22px; }
+    nav.toc li { margin: 10px 0; }
+    nav.toc a  { color: #58a6ff; text-decoration: none; font-size: 1rem; transition: color .2s; }
+    nav.toc a:hover { color: var(--highlight); }
+
+    /* ── MAIN ── */
+    main { max-width: 1060px; margin: 0 auto; padding: 20px 30px 100px; }
+
+    /* ── SECTION CARD ── */
+    .section-card {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      margin-bottom: 56px;
+      overflow: hidden;
+      box-shadow: 0 4px 40px rgba(0,0,0,.45);
+    }
+    .section-header {
+      background: linear-gradient(100deg, var(--accent) 0%, #1a1a3e 100%);
+      padding: 28px 44px;
+      border-bottom: 2px solid var(--highlight);
+      display: flex;
+      align-items: center;
+      gap: 20px;
+    }
+    .section-icon {
+      background: var(--highlight);
+      color: white;
+      font-size: 1.4rem;
+      width: 52px; height: 52px;
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0;
+    }
+    .section-header h2 { font-size: 1.8rem; font-weight: 700; }
+    .section-header p  { color: var(--subtext); font-size: 0.93rem; margin-top: 4px; }
+    .section-body { padding: 38px 44px; }
+
+    /* ── HEADINGS ── */
+    .section-body h3 {
+      color: #58a6ff; font-size: 1.22rem;
+      margin: 34px 0 13px;
+      padding-left: 14px;
+      border-left: 4px solid var(--highlight);
+    }
+    .section-body h4 { color: #e3b341; font-size: 1.03rem; margin: 22px 0 9px; }
+    .section-body h5 { color: #3fb950; font-size: 0.95rem; margin: 16px 0 7px; }
+    .section-body p  { color: var(--text); margin-bottom: 13px; }
+    .section-body ul,
+    .section-body ol { padding-left: 24px; margin-bottom: 13px; }
+    .section-body li { margin: 7px 0; color: var(--text); }
+    strong { color: #c9d1d9; }
+
+    /* ── CODE ── */
+    pre {
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 22px 26px;
+      overflow-x: auto;
+      margin: 13px 0 24px;
+      font-size: 0.86rem;
+      line-height: 1.7;
+    }
+    code { font-family: 'Fira Code','Cascadia Code','Consolas',monospace; color: #c9d1d9; }
+    pre code { color: #c9d1d9; }
+    .kw  { color: #ff79c6; }
+    .fn  { color: #50fa7b; }
+    .str { color: #f1fa8c; }
+    .cm  { color: #6272a4; font-style: italic; }
+    .nm  { color: #bd93f9; }
+    .cls { color: #8be9fd; }
+    .at  { color: #ffb86c; }
+
+    /* ── CALLOUT ── */
+    .callout {
+      border-radius: 10px;
+      padding: 17px 21px;
+      margin: 17px 0;
+      border-left: 5px solid;
+      font-size: 0.94rem;
+    }
+    .callout.info    { background: #0c2d48; border-color: #58a6ff; }
+    .callout.warn    { background: #2d1f00; border-color: #e3b341; }
+    .callout.success { background: #0d2a0d; border-color: #3fb950; }
+    .callout.danger  { background: #2d0d0d; border-color: #f85149; }
+    .callout.purple  { background: #1a0d2e; border-color: #bc8cff; }
+    .callout.teal    { background: #0a2530; border-color: #39d0d8; }
+    .callout strong  { display: block; margin-bottom: 5px;
+                       font-size: 0.81rem; text-transform: uppercase; letter-spacing: .6px; }
+    .callout.info    strong { color: #58a6ff; }
+    .callout.warn    strong { color: #e3b341; }
+    .callout.success strong { color: #3fb950; }
+    .callout.danger  strong { color: #f85149; }
+    .callout.purple  strong { color: #bc8cff; }
+    .callout.teal    strong { color: #39d0d8; }
+
+    /* ── DIAGRAM ── */
+    .diagram {
+      background: #010409;
+      border: 1px dashed #444c56;
+      border-radius: 10px;
+      padding: 22px 28px;
+      margin: 15px 0 25px;
+      font-family: 'Fira Code','Consolas',monospace;
+      font-size: 0.81rem;
+      color: #8b949e;
+      white-space: pre;
+      overflow-x: auto;
+      line-height: 1.65;
+    }
+    .diagram .hl { color: #79c0ff; }
+    .diagram .ar { color: var(--highlight); }
+    .diagram .gr { color: #3fb950; }
+    .diagram .yw { color: #e3b341; }
+    .diagram .pk { color: #ff79c6; }
+    .diagram .wh { color: #e6edf3; }
+    .diagram .or { color: #f0883e; }
+
+    /* ── TABLE ── */
+    table { width: 100%; border-collapse: collapse; margin: 15px 0 26px; font-size: .89rem; }
+    th { background: #0f3460; color: #e6edf3; padding: 12px 15px;
+         text-align: left; font-size: .84rem; letter-spacing: .3px; }
+    td { padding: 10px 15px; border-bottom: 1px solid var(--border);
+         color: var(--text); vertical-align: top; }
+    tr:nth-child(even) td { background: rgba(255,255,255,.025); }
+    tr:hover td { background: rgba(88,166,255,.05); }
+
+    /* ── TAGS ── */
+    .tags { display: flex; flex-wrap: wrap; gap: 8px; margin: 13px 0 5px; }
+    .tag { background: var(--tag-bg); border: 1px solid var(--border);
+           border-radius: 20px; padding: 4px 14px; font-size: .77rem; color: #79c0ff; }
+
+    /* ── METRICS ── */
+    .metrics { display: grid; grid-template-columns: repeat(auto-fit,minmax(155px,1fr));
+               gap: 13px; margin: 17px 0 26px; }
+    .metric-card { background: var(--primary); border: 1px solid var(--border);
+                   border-radius: 10px; padding: 17px 13px; text-align: center; }
+    .metric-card .val { font-size: 1.55rem; font-weight: 700; color: var(--highlight); }
+    .metric-card .lbl { font-size: .73rem; color: var(--subtext); margin-top: 4px; line-height: 1.4; }
+
+    /* ── TWO-COL ── */
+    .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; margin: 15px 0 23px; }
+    .col-card { background: var(--primary); border: 1px solid var(--border);
+                border-radius: 10px; padding: 19px 21px; }
+    .col-card h5 { color: #58a6ff; margin-bottom: 9px; font-size: .94rem; }
+    .col-card ul { padding-left: 17px; }
+    .col-card li { font-size: .87rem; margin: 5px 0; color: var(--subtext); }
+
+    /* ── STEP LIST ── */
+    .steps { counter-reset: step; padding: 0; list-style: none; margin: 15px 0 24px; }
+    .steps li {
+      counter-increment: step;
+      position: relative;
+      padding: 12px 15px 12px 52px;
+      margin: 8px 0;
+      background: var(--primary);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      font-size: .92rem;
+    }
+    .steps li::before {
+      content: counter(step);
+      position: absolute; left: 13px; top: 50%; transform: translateY(-50%);
+      background: var(--highlight); color: white;
+      width: 27px; height: 27px; border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: .77rem; font-weight: 700;
+    }
+
+    /* ── ALGO BOX ── */
+    .algo-box {
+      background: linear-gradient(135deg, #0f1f30 0%, #0d1117 100%);
+      border: 1px solid #1f6feb;
+      border-radius: 12px;
+      padding: 22px 26px;
+      margin: 16px 0 24px;
+    }
+    .algo-box h5 {
+      color: #79c0ff;
+      font-size: 0.92rem;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      margin-bottom: 12px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid #1f6feb;
+    }
+
+    /* ── FOOTER ── */
+    footer { text-align: center; padding: 34px; color: var(--subtext);
+             font-size: .83rem; border-top: 1px solid var(--border); }
+
+    @media print {
+      body { background: #fff; color: #111; }
+      pre, .diagram { background: #f6f8fa !important; color: #111 !important;
+                      border-color: #ccc !important; }
+      .section-card { border-color: #ccc !important; page-break-inside: avoid; }
+      .section-header { background: #1a1a2e !important; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ═══════════════════════ HEADER ═══════════════════════ -->
+<header>
+  <h1>🌳 B-Trees — Complete Deep Dive</h1>
+  <p class="subtitle">Internals, algorithms, variants, and why every database uses them</p>
+  <div class="badge-row">
+    <span class="badge">9+ Years Experience</span>
+    <span class="badge">Advanced Level</span>
+    <span class="badge">Database Internals</span>
+    <span class="badge">_sonnet</span>
+  </div>
+</header>
+
+<!-- ═══════════════════════ TOC ═══════════════════════ -->
+<nav class="toc">
+  <h2>📚 Table of Contents</h2>
+  <ol>
+    <li><a href="#motivation">Why B-Trees Exist — The Problem They Solve</a></li>
+    <li><a href="#btree-structure">B-Tree Structure — Formal Definition &amp; Properties</a></li>
+    <li><a href="#bplus-tree">B+Tree — The Database Standard &amp; Leaf Linking</a></li>
+    <li><a href="#search">Search Algorithm — O(log n) Traversal Internals</a></li>
+    <li><a href="#insertion">Insertion — Node Splits, Cascading, and Median Promotion</a></li>
+    <li><a href="#deletion">Deletion — Merges, Rotations, and Underflow Handling</a></li>
+    <li><a href="#disk-io">Disk I/O &amp; Page Layout — How Pages Map to Hardware</a></li>
+    <li><a href="#concurrency">Concurrency — Lock Coupling, Blink-Trees, Latch-Free</a></li>
+    <li><a href="#variants">Variants — B*Tree, Fractal Tree, Copy-on-Write, LSM</a></li>
+    <li><a href="#real-world">Real-World Implementations — PostgreSQL, InnoDB, SQLite</a></li>
+    <li><a href="#complexity">Complexity Analysis &amp; Tuning Parameters</a></li>
+  </ol>
+</nav>
+
+<main>
+
+<!-- ═══════════════════════════════════════════════════
+     1. MOTIVATION
+═══════════════════════════════════════════════════ -->
+<section class="section-card" id="motivation">
+  <div class="section-header">
+    <div class="section-icon">💡</div>
+    <div>
+      <h2>Why B-Trees Exist</h2>
+      <p>The fundamental problem of efficient data retrieval from disk-based storage</p>
+    </div>
+  </div>
+  <div class="section-body">
+
+    <div class="tags">
+      <span class="tag">Disk I/O Model</span><span class="tag">Fan-out</span>
+      <span class="tag">Block Storage</span><span class="tag">Random vs Sequential</span>
+      <span class="tag">BST Limitations</span>
+    </div>
+
+    <h3>The Disk Access Problem</h3>
+    <p>Computers have two tiers of storage with vastly different access characteristics. B-Trees were designed in 1970 by Rudolf Bayer and Edward McCreight at Boeing specifically to minimize disk I/O — the dominant bottleneck for database performance:</p>
+
+    <div class="diagram">
+<span class="hl">Storage Hierarchy Latencies (2024)</span>
+
+L1 Cache:         ~1   ns   │█
+L2 Cache:         ~4   ns   │████
+L3 Cache:         ~12  ns   │████████████
+RAM:              ~80  ns   │████████████████████████████████████████
+NVMe SSD:         ~100 µs   │█████████████ 100,000 ns (1000× RAM)
+SATA SSD:         ~500 µs   │████████████████████████████████████████ 500,000 ns
+HDD (7200 RPM):   ~10  ms   │ 10,000,000 ns  (seek + rotational latency)
+                             │
+                             └──── Each disk seek = ~125,000 L3 cache hits
+
+<span class="yw">Key insight:</span> Reading 4KB from disk costs same time as reading 4 bytes.
+→ When you pay for a disk I/O, read as much useful data as possible!
+→ This is why B-Trees use large nodes (pages) = 4KB–64KB each
+→ Fan-out: pack hundreds of keys per node = minimize tree height = minimize I/Os
+    </div>
+
+    <h3>Why Not Binary Search Trees (BST)?</h3>
+    <pre><code><span class="cm">// Binary Search Tree — why it fails for disk-based storage:</span>
+
+<span class="cm">// BST properties:</span>
+<span class="cm">// Each node stores 1 key, 2 children pointers</span>
+<span class="cm">// Height = O(log₂ n) for balanced tree</span>
+
+<span class="cm">// For 1 billion records (n = 10^9):</span>
+BST height = log₂(1,000,000,000) ≈ 30 levels
+<span class="cm">// = 30 disk I/Os per lookup (each node likely on different disk page!)</span>
+<span class="cm">// At 10ms per HDD seek: 30 × 10ms = 300ms per lookup → unusable</span>
+
+<span class="cm">// BST node size: 1 key (~8 bytes) + 2 pointers (~16 bytes) = ~24 bytes</span>
+<span class="cm">// Page size: 4096 bytes</span>
+<span class="cm">// Keys per page: 4096 / 24 = 170 keys → but BST only uses 1 key per node!</span>
+<span class="cm">// 169 keys wasted per page fetch → terrible cache efficiency</span>
+
+<span class="cm">// B-Tree node: fills the entire page</span>
+<span class="cm">// Page size: 16384 bytes (PostgreSQL default)</span>
+<span class="cm">// Key size: 8 bytes (bigint), pointer: 6 bytes</span>
+<span class="cm">// Keys per internal node: ~1000</span>
+
+<span class="cm">// For 1 billion records:</span>
+BTree height = log₁₀₀₀(1,000,000,000) = 3 levels
+<span class="cm">// = 3 disk I/Os per lookup!</span>
+<span class="cm">// 300ms → 30ms (10× improvement on HDD, even better on SSD)</span></code></pre>
+
+    <div class="callout info">
+      <strong>📐 The Fan-out Principle</strong>
+      B-Tree performance is governed by <strong>fan-out</strong> — the number of children per internal node. Higher fan-out = shorter tree = fewer I/Os. Fan-out = ⌊(page_size - header) / (key_size + pointer_size)⌋. A 16KB page with 8-byte keys achieves fan-out ≈ 1000, giving a 3-level tree for billions of rows.
+    </div>
+
+  </div>
+</section>
+
+
+<!-- ═══════════════════════════════════════════════════
+     2. B-TREE STRUCTURE
+═══════════════════════════════════════════════════ -->
+<section class="section-card" id="btree-structure">
+  <div class="section-header">
+    <div class="section-icon">🏗️</div>
+    <div>
+      <h2>B-Tree Structure</h2>
+      <p>Formal definition, node anatomy, invariants and the order parameter</p>
+    </div>
+  </div>
+  <div class="section-body">
+
+    <div class="tags">
+      <span class="tag">Order t</span><span class="tag">Node Invariants</span>
+      <span class="tag">Internal Node</span><span class="tag">Leaf Node</span>
+      <span class="tag">Fill Factor</span><span class="tag">Key Ordering</span>
+    </div>
+
+    <h3>Formal B-Tree Definition (Knuth / CLRS)</h3>
+    <p>A B-Tree of <strong>minimum degree t</strong> (also called order t) satisfies these invariants at ALL times — violations are impossible by construction of the algorithms:</p>
+
+    <div class="algo-box">
+      <h5>🔒 B-Tree Invariants (minimum degree t)</h5>
+      <ol style="padding-left:20px; color: var(--text); font-size:0.92rem;">
+        <li style="margin:8px 0"><strong>Key bounds:</strong> Every node (except root) has at least <code>t-1</code> keys and at most <code>2t-1</code> keys.</li>
+        <li style="margin:8px 0"><strong>Root bounds:</strong> Root has at least 1 key (unless tree is empty) and at most <code>2t-1</code> keys.</li>
+        <li style="margin:8px 0"><strong>Child count:</strong> Internal node with k keys has exactly k+1 children.</li>
+        <li style="margin:8px 0"><strong>Ordering:</strong> For internal node with keys [k₁, k₂, ..., kₙ] and children [c₀, c₁, ..., cₙ]: all keys in subtree cᵢ lie in range (kᵢ₋₁, kᵢ).</li>
+        <li style="margin:8px 0"><strong>Leaf depth:</strong> ALL leaves are at the SAME depth (perfectly balanced by construction).</li>
+        <li style="margin:8px 0"><strong>Key ordering:</strong> Keys within each node are stored in sorted (non-decreasing) order.</li>
+      </ol>
+    </div>
+
+    <h3>Node Anatomy — What's Actually Stored on Disk</h3>
+
+    <div class="diagram">
+<span class="hl">B-Tree Internal Node Layout (t=3, max 5 keys, 6 children)</span>
+
+┌────────────────────────────────────────────────────────────────┐
+│ <span class="hl">Header</span>                                                         │
+│  is_leaf: false  │  num_keys: 4  │  page_id: 0x0042           │
+├──────┬──────────┬──────┬──────────┬──────┬──────────┬──────┬──┤
+│<span class="yw">ptr c0</span>│ <span class="gr">key: 15</span>  │<span class="yw">ptr c1</span>│ <span class="gr">key: 32</span>  │<span class="yw">ptr c2</span>│ <span class="gr">key: 58</span>  │<span class="yw">ptr c3</span>│<span class="gr">71</span>│<span class="yw">c4</span>│
+│<span class="yw">0x0010</span>│          │<span class="yw">0x0023</span>│          │<span class="yw">0x0031</span>│          │<span class="yw">0x0044</span>│  │<span class="yw">0x005</span>│
+└──────┴──────────┴──────┴──────────┴──────┴──────────┴──────┴──┘
+     ↓                 ↓                 ↓                 ↓
+  Subtree:         Subtree:         Subtree:          Subtree:
+  keys &lt; 15      15 ≤ k &lt; 32     32 ≤ k &lt; 58      58 ≤ k &lt; 71
+
+<span class="hl">B-Tree Leaf Node Layout (t=3, stores actual data or record pointers)</span>
+
+┌─────────────────────────────────────────────────────────────────┐
+│ <span class="hl">Header</span>                                                          │
+│  is_leaf: true   │  num_keys: 3  │  page_id: 0x0023            │
+├────────┬─────────┼────────┬──────┴──┬────────┬─────────────────┤
+│<span class="gr">key: 20</span> │<span class="pk">→ row ptr</span>│<span class="gr">key: 25</span> │<span class="pk">→ row ptr</span>│<span class="gr">key: 28</span>│<span class="pk">→ row ptr</span>       │
+│        │<span class="pk">(heap,off)</span>│        │<span class="pk">(heap,off)</span>│       │<span class="pk">(heap,off)</span>      │
+└────────┴─────────┴────────┴─────────┴────────┴─────────────────┘
+<span class="cm">Note: In classic B-Tree, data stored at ALL levels (internal + leaf)</span>
+<span class="cm">      In B+Tree, data only at leaf level (see next section)</span>
+    </div>
+
+    <h3>The Order Parameter — Choosing t in Practice</h3>
+    <pre><code><span class="cm">// Relationship between minimum degree t and real-world parameters:</span>
+
+<span class="cm">// Given: page_size P, key_size K, pointer_size PTR, data_size D</span>
+<span class="cm">// Max keys per internal node: (P - header) / (K + PTR) - 1  ≈  P / (K + PTR)</span>
+<span class="cm">// Min degree t = (max_keys + 1) / 2</span>
+
+<span class="cm">// PostgreSQL B-Tree (heap table index):</span>
+page_size    = 8192 bytes  (default, configurable to 32KB)
+key_size     = 8 bytes     (bigint primary key)
+item_pointer = 6 bytes     (ItemPointer: 4-byte block + 2-byte offset)
+header       = ~28 bytes   (PageHeader + opaque data)
+
+max_keys_per_page ≈ (8192 - 28) / (8 + 6) ≈ 583 keys per leaf page
+<span class="cm">// Internal nodes: key + pointer → slightly fewer</span>
+<span class="cm">// Effective fan-out ≈ 292 (t = 292, min keys = 291)</span>
+
+<span class="cm">// Tree height for various table sizes:</span>
+n = 1,000         → height = 1   (root is leaf, 583 keys fit in 1 page)
+n = 583,000       → height = 2   (root + 583 leaf pages)
+n = 339,889,000   → height = 3   (583² leaf pages)
+n = 198,155M      → height = 4   (583³ leaf pages)
+<span class="cm">// Even 198 billion rows: only 4 I/Os to find any record!</span>
+
+<span class="cm">// MySQL InnoDB (clustered index — data IN the leaf):</span>
+<span class="cm">// Leaf page stores full row, not just pointer</span>
+<span class="cm">// 16KB page, average row 200 bytes → ~80 rows per leaf page</span>
+<span class="cm">// Internal pages: key(4 bytes) + pointer(6 bytes) → ~1365 per page</span>
+<span class="cm">// Height 3: 1365 × 1365 × 80 = ~149M rows → 3 I/Os for 149M row table</span></code></pre>
+
+    <div class="metrics">
+      <div class="metric-card"><div class="val">2t-1</div><div class="lbl">Max Keys Per Node (min degree t)</div></div>
+      <div class="metric-card"><div class="val">t-1</div><div class="lbl">Min Keys Per Node (non-root)</div></div>
+      <div class="metric-card"><div class="val">583</div><div class="lbl">PostgreSQL Keys Per 8KB Page (bigint)</div></div>
+      <div class="metric-card"><div class="val">3</div><div class="lbl">Tree Height for 339M Rows</div></div>
+      <div class="metric-card"><div class="val">O(log_t n)</div><div class="lbl">Lookup Complexity</div></div>
+    </div>
+
+  </div>
+</section>
+
+
+<!-- ═══════════════════════════════════════════════════
+     3. B+TREE
+═══════════════════════════════════════════════════ -->
+<section class="section-card" id="bplus-tree">
+  <div class="section-header">
+    <div class="section-icon">🌲</div>
+    <div>
+      <h2>B+Tree — The Database Standard</h2>
+      <p>How B+Tree differs from B-Tree, leaf-level linked lists, and why all major databases use it</p>
+    </div>
+  </div>
+  <div class="section-body">
+
+    <div class="tags">
+      <span class="tag">Leaf Linked List</span><span class="tag">Internal Key Copies</span>
+      <span class="tag">Range Scans</span><span class="tag">Clustered Index</span>
+      <span class="tag">Secondary Index</span><span class="tag">Index-Only Scan</span>
+    </div>
+
+    <h3>B-Tree vs B+Tree — The Critical Differences</h3>
+
+    <table>
+      <tr><th>Property</th><th>B-Tree</th><th>B+Tree</th></tr>
+      <tr><td>Data storage</td><td>Data at <strong>every</strong> level (internal + leaf)</td><td>Data <strong>only at leaf</strong> level</td></tr>
+      <tr><td>Internal node keys</td><td>Each key appears ONCE (with its data)</td><td>Keys COPIED to internal nodes (guides only)</td></tr>
+      <tr><td>Leaf nodes</td><td>Not linked to each other</td><td>Doubly-linked list (sibling pointers)</td></tr>
+      <tr><td>Range scan</td><td>Requires back-and-forth tree traversal</td><td>Find start leaf → follow linked list → O(k) for k results</td></tr>
+      <tr><td>Fan-out</td><td>Lower — internal nodes carry data too</td><td>Higher — internal nodes are guide keys only</td></tr>
+      <tr><td>Point lookup</td><td>May terminate at any level (lucky hit)</td><td>Always goes to leaf (consistent O(log n))</td></tr>
+      <tr><td>Used by</td><td>Some filesystems (ext4 extents)</td><td>PostgreSQL, MySQL, Oracle, SQLite, SQL Server</td></tr>
+    </table>
+
+    <div class="diagram">
+<span class="hl">B+Tree — Full Structure (t=2, max 3 keys per node)</span>
+
+                         <span class="hl">Root (Internal)</span>
+                    ┌──────────────────────┐
+                    │      30   │   60      │
+                    └────┬──────┴─────┬─────┘
+              ┌──────────┘            └──────────────┐
+       <span class="hl">Internal</span>                               <span class="hl">Internal</span>
+    ┌──────────────┐                     ┌──────────────────┐
+    │  10  │  20   │                     │  40  │  50  │ 60 │
+    └─┬────┴──┬────┘                     └──┬───┴──┬───┴──┬─┘
+      │       │                             │      │      │
+  ┌───┴──┐ ┌──┴───┐ ┌─────┐ ┌─────┐ ┌──────┐ ┌─────┐ ┌─────┐
+  │ <span class="hl">LEAF</span> │ │ <span class="hl">LEAF</span> │ │<span class="hl">LEAF</span> │ │<span class="hl">LEAF</span> │ │ <span class="hl">LEAF</span> │ │<span class="hl">LEAF</span> │ │<span class="hl">LEAF</span> │
+  │ 1  5 │ │10 15 │ │20 25│ │30 35│ │ 40 45│ │50 55│ │60 70│
+  │ ↓  ↓ │ │ ↓  ↓ │ │ ↓  ↓│ │ ↓  ↓│ │ ↓  ↓ │ │ ↓  ↓│ │ ↓  ↓│
+  │(rowptr)│ │(rowptr)│ ....                                   │
+  └──────┘ └──────┘ └─────┘ └─────┘ └──────┘ └─────┘ └─────┘
+      │◄────────────────────────────────────────────────────►│
+      <span class="gr">Doubly-linked list across ALL leaf nodes (left ↔ right sibling ptrs)</span>
+
+Key observations:
+  1. Key 30 appears in both internal node AND leaf → duplication is intentional
+  2. ALL data (row pointers) is at leaf level → consistent access time
+  3. Leaf chain enables: SELECT * WHERE key BETWEEN 20 AND 45
+     → find leaf(20) → scan right through linked list → stop at 45
+     → pure sequential read! No tree traversal needed for subsequent keys
+    </div>
+
+    <h3>Clustered vs Non-Clustered (Secondary) Index</h3>
+    <pre><code><span class="cm">// CLUSTERED INDEX (Primary Key Index — InnoDB, SQL Server):</span>
+<span class="cm">// Leaf nodes contain the ACTUAL ROW DATA (not just a pointer)</span>
+<span class="cm">// Table is physically stored in primary key order</span>
+<span class="cm">// Each table can have ONLY ONE clustered index</span>
+
+<span class="cm">// InnoDB clustered index leaf structure:</span>
+Leaf Page:
+┌──────────────────────────────────────────────────────────┐
+│ key=1001 │ col1="Alice" │ col2=30 │ col3="NYC" │ ...full row │
+│ key=1002 │ col1="Bob"   │ col2=25 │ col3="LA"  │ ...full row │
+│ key=1003 │ col1="Carol" │ col2=35 │ col3="SF"  │ ...full row │
+└──────────────────────────────────────────────────────────┘
+<span class="cm">// Range scan on PK: pure sequential I/O → very fast</span>
+<span class="cm">// INSERT in PK order: always appends to rightmost leaf → minimal splits</span>
+<span class="cm">// INSERT random PK (UUID v4): splits everywhere → fragmentation nightmare</span>
+
+<span class="cm">// NON-CLUSTERED (SECONDARY) INDEX:</span>
+<span class="cm">// Leaf nodes contain key VALUE + PRIMARY KEY (pointer back to clustered index)</span>
+<span class="cm">// Two-step lookup: secondary index → primary key → clustered index lookup</span>
+
+<span class="cm">// Example: secondary index on email column</span>
+Secondary Index Leaf:
+┌──────────────────────────────────────────────────────────┐
+│ key="alice@ex.com" │ pk=1001 │   ← pointer to PK, not row │
+│ key="bob@ex.com"   │ pk=1002 │                             │
+│ key="carol@ex.com" │ pk=1003 │                             │
+└──────────────────────────────────────────────────────────┘
+
+<span class="cm">// Secondary index lookup steps (InnoDB "double dip"):</span>
+SELECT * FROM users WHERE email = 'alice@ex.com';
+<span class="cm">// Step 1: Traverse secondary index B+Tree → find pk=1001</span>
+<span class="cm">// Step 2: Traverse clustered index B+Tree → find full row (extra I/Os!)</span>
+<span class="cm">// Fix: covering index (include all needed columns in secondary index)</span>
+<span class="cm">//   → Index-Only Scan: data in secondary index leaf, no step 2 needed</span>
+
+<span class="cm">// PostgreSQL secondary index leaf stores:</span>
+<span class="cm">// (indexed_value, ctid) where ctid = (page_number, tuple_offset)</span>
+<span class="cm">// Direct heap access — no clustered index lookup needed</span>
+<span class="cm">// Trade-off: heap is unordered → random I/O for range scans on secondary index</span></code></pre>
+
+  </div>
+</section>
+
+
+<!-- ═══════════════════════════════════════════════════
+     4. SEARCH
+═══════════════════════════════════════════════════ -->
+<section class="section-card" id="search">
+  <div class="section-header">
+    <div class="section-icon">🔍</div>
+    <div>
+      <h2>Search Algorithm</h2>
+      <p>Point lookup, range scan, and binary search within nodes — all the details</p>
+    </div>
+  </div>
+  <div class="section-body">
+
+    <div class="tags">
+      <span class="tag">Binary Search</span><span class="tag">Node Traversal</span>
+      <span class="tag">Range Scan</span><span class="tag">Prefix Search</span>
+      <span class="tag">Bitmap Heap Scan</span>
+    </div>
+
+    <h3>Point Lookup — Full Algorithm</h3>
+    <pre><code><span class="kw">class</span> <span class="cls">BPlusTree</span> {
+  <span class="cm">/**
+   * Search for a key. Returns associated value or null.
+   * Time: O(log_t n) disk I/Os, O(log t × log_t n) comparisons
+   */</span>
+  <span class="fn">search</span>(key) {
+    <span class="kw">let</span> node = <span class="kw">this</span>.<span class="fn">readPage</span>(<span class="kw">this</span>.rootPageId); <span class="cm">// 1 disk I/O</span>
+
+    <span class="kw">while</span> (!node.isLeaf) {
+      <span class="cm">// Binary search within this node's keys (all in memory — 1 page)</span>
+      <span class="cm">// Find first key >= search key</span>
+      <span class="kw">const</span> childIndex = <span class="kw">this</span>.<span class="fn">binarySearchInternal</span>(node.keys, key);
+      <span class="cm">// childIndex 0: key < all keys → follow leftmost child</span>
+      <span class="cm">// childIndex i: keys[i-1] <= key < keys[i] → follow child[i]</span>
+      <span class="cm">// childIndex n: key >= all keys → follow rightmost child</span>
+
+      node = <span class="kw">this</span>.<span class="fn">readPage</span>(node.children[childIndex]); <span class="cm">// 1 disk I/O per level</span>
+    }
+
+    <span class="cm">// Now at leaf level — binary search for exact key</span>
+    <span class="kw">const</span> keyIndex = <span class="kw">this</span>.<span class="fn">binarySearchLeaf</span>(node.keys, key);
+
+    <span class="kw">if</span> (keyIndex !== -<span class="nm">1</span> && node.keys[keyIndex] === key) {
+      <span class="kw">return</span> node.values[keyIndex]; <span class="cm">// Found!</span>
+    }
+    <span class="kw">return null</span>; <span class="cm">// Not found</span>
+  }
+
+  <span class="cm">// Binary search within internal node — returns child index to follow</span>
+  <span class="fn">binarySearchInternal</span>(keys, searchKey) {
+    <span class="kw">let</span> lo = <span class="nm">0</span>, hi = keys.length;
+    <span class="kw">while</span> (lo &lt; hi) {
+      <span class="kw">const</span> mid = (lo + hi) >> <span class="nm">1</span>;
+      <span class="kw">if</span> (keys[mid] &lt;= searchKey) lo = mid + <span class="nm">1</span>;
+      <span class="kw">else</span> hi = mid;
+    }
+    <span class="kw">return</span> lo; <span class="cm">// lo = number of keys less than searchKey = child index</span>
+  }
+}
+
+<span class="cm">// Complexity analysis:</span>
+<span class="cm">// Tree height h = ⌈log_t n⌉ where t = min degree, n = number of entries</span>
+<span class="cm">// Disk I/Os: exactly h (one per level, including leaf)</span>
+<span class="cm">// Comparisons per node: O(log t) using binary search</span>
+<span class="cm">// Total comparisons: O(log t × log_t n) = O(log n)</span>
+<span class="cm">// For t=500, n=10^9: 3 disk I/Os, ~27 comparisons → extremely fast</span></code></pre>
+
+    <h3>Range Scan — The Leaf Chain Advantage</h3>
+    <pre><code><span class="kw">async function* </span><span class="fn">rangeScan</span>(lowerKey, upperKey) {
+  <span class="cm">// Step 1: Find the leaf page containing lowerKey</span>
+  <span class="kw">let</span> leaf = <span class="kw">await</span> <span class="fn">findLeaf</span>(lowerKey); <span class="cm">// O(log_t n) I/Os</span>
+
+  <span class="cm">// Step 2: Find starting position within leaf</span>
+  <span class="kw">let</span> pos = <span class="fn">lowerBound</span>(leaf.keys, lowerKey); <span class="cm">// Binary search within page</span>
+
+  <span class="cm">// Step 3: Scan forward through leaf chain (sequential I/O!)</span>
+  <span class="kw">while</span> (leaf !== <span class="kw">null</span>) {
+    <span class="kw">for</span> (<span class="kw">let</span> i = pos; i &lt; leaf.keys.length; i++) {
+      <span class="kw">if</span> (leaf.keys[i] > upperKey) <span class="kw">return</span>; <span class="cm">// Past upper bound → done</span>
+      <span class="kw">yield</span> { key: leaf.keys[i], value: leaf.values[i] };
+    }
+    <span class="cm">// Move to right sibling — ONE disk I/O, sequential read</span>
+    leaf = leaf.rightSibling ? <span class="kw">await</span> <span class="fn">readPage</span>(leaf.rightSiblingPtr) : <span class="kw">null</span>;
+    pos = <span class="nm">0</span>; <span class="cm">// Start from beginning of next leaf</span>
+  }
+}
+<span class="cm">// Total I/Os: O(log_t n) to find start + O(k/f) for k results (f = fill factor)</span>
+<span class="cm">// Sequential reads after initial seek → excellent SSD/HDD performance</span>
+<span class="cm">// OS read-ahead prefetcher can predict next leaf page → near-zero I/O latency</span></code></pre>
+
+    <h3>Prefix Search and LIKE Queries</h3>
+    <pre><code><span class="cm">-- B+Tree can satisfy leading wildcard LIKE queries:</span>
+WHERE name LIKE 'Alice%'    <span class="cm">← CAN use B+Tree (prefix match)</span>
+WHERE name LIKE '%Alice%'   <span class="cm">← CANNOT use B+Tree (leading wildcard)</span>
+WHERE name LIKE '%Alice'    <span class="cm">← CANNOT use B+Tree (suffix only)</span>
+
+<span class="cm">-- Why prefix works: 'Alice%' is equivalent to range scan:</span>
+<span class="cm">-- lowerKey = 'Alice', upperKey = 'Alicf' (increment last char)</span>
+<span class="cm">-- This maps directly to B+Tree range scan!</span>
+
+<span class="cm">-- PostgreSQL EXPLAIN for prefix LIKE (uses index):</span>
+EXPLAIN SELECT * FROM users WHERE name LIKE 'Alice%';
+<span class="cm">-- Index Scan using idx_users_name</span>
+<span class="cm">--   Index Cond: ((name >= 'Alice') AND (name < 'Alicf'))</span>
+<span class="cm">--   Filter: (name LIKE 'Alice%')</span>
+
+<span class="cm">-- For arbitrary substring search → GIN index with pg_trgm:</span>
+CREATE EXTENSION pg_trgm;
+CREATE INDEX idx_users_name_trgm ON users USING gin(name gin_trgm_ops);
+<span class="cm">-- Now WHERE name LIKE '%Alice%' uses trigram GIN index</span></code></pre>
+
+  </div>
+</section>
+
+
+<!-- ═══════════════════════════════════════════════════
+     5. INSERTION
+═══════════════════════════════════════════════════ -->
+<section class="section-card" id="insertion">
+  <div class="section-header">
+    <div class="section-icon">➕</div>
+    <div>
+      <h2>Insertion Algorithm</h2>
+      <p>Node splits, median promotion, cascading splits, and proactive splitting</p>
+    </div>
+  </div>
+  <div class="section-body">
+
+    <div class="tags">
+      <span class="tag">Node Split</span><span class="tag">Median Key</span>
+      <span class="tag">Cascading Splits</span><span class="tag">Proactive Split</span>
+      <span class="tag">Root Split</span><span class="tag">Height Increase</span>
+    </div>
+
+    <h3>Insertion — The Full Algorithm with Splits</h3>
+    <pre><code><span class="kw">class</span> <span class="cls">BPlusTree</span> {
+  <span class="fn">insert</span>(key, value) {
+    <span class="cm">// CLRS approach: proactive splitting on the way DOWN</span>
+    <span class="cm">// Splits full nodes before descending — avoids second upward pass</span>
+
+    <span class="kw">const</span> root = <span class="kw">this</span>.<span class="fn">readPage</span>(<span class="kw">this</span>.rootPageId);
+
+    <span class="cm">// If root is full → split root FIRST (only time tree height increases)</span>
+    <span class="kw">if</span> (root.keys.length === <span class="nm">2</span> * <span class="kw">this</span>.t - <span class="nm">1</span>) {
+      <span class="kw">const</span> newRoot = <span class="kw">this</span>.<span class="fn">newPage</span>({ isLeaf: <span class="kw">false</span>, keys: [], children: [<span class="kw">this</span>.rootPageId] });
+      <span class="kw">this</span>.rootPageId = newRoot.pageId;
+      <span class="kw">this</span>.<span class="fn">splitChild</span>(newRoot, <span class="nm">0</span>, root);  <span class="cm">// Split old root as child of new root</span>
+      <span class="kw">this</span>.<span class="fn">insertNonFull</span>(newRoot, key, value);
+    } <span class="kw">else</span> {
+      <span class="kw">this</span>.<span class="fn">insertNonFull</span>(root, key, value);
+    }
+  }
+
+  <span class="fn">insertNonFull</span>(node, key, value) {
+    <span class="kw">if</span> (node.isLeaf) {
+      <span class="cm">// Insert key into sorted position in leaf</span>
+      <span class="kw">const</span> pos = <span class="kw">this</span>.<span class="fn">upperBound</span>(node.keys, key);
+      node.keys.<span class="fn">splice</span>(pos, <span class="nm">0</span>, key);
+      node.values.<span class="fn">splice</span>(pos, <span class="nm">0</span>, value);
+      <span class="kw">this</span>.<span class="fn">writePage</span>(node); <span class="cm">// Write modified leaf to disk</span>
+    } <span class="kw">else</span> {
+      <span class="cm">// Find appropriate child</span>
+      <span class="kw">let</span> childIndex = <span class="kw">this</span>.<span class="fn">upperBound</span>(node.keys, key);
+      <span class="kw">let</span> child = <span class="kw">this</span>.<span class="fn">readPage</span>(node.children[childIndex]);
+
+      <span class="cm">// PROACTIVE SPLIT: if child is full, split before descending</span>
+      <span class="kw">if</span> (child.keys.length === <span class="nm">2</span> * <span class="kw">this</span>.t - <span class="nm">1</span>) {
+        <span class="kw">this</span>.<span class="fn">splitChild</span>(node, childIndex, child);
+        <span class="cm">// After split: node gained a new key. Recheck which child to follow.</span>
+        <span class="kw">if</span> (key > node.keys[childIndex]) childIndex++;
+        child = <span class="kw">this</span>.<span class="fn">readPage</span>(node.children[childIndex]);
+      }
+
+      <span class="kw">this</span>.<span class="fn">insertNonFull</span>(child, key, value); <span class="cm">// Recurse into non-full child</span>
+    }
+  }
+
+  <span class="fn">splitChild</span>(parent, childIndex, fullChild) {
+    <span class="cm">// Split fullChild (2t-1 keys) into two nodes of t-1 keys each</span>
+    <span class="cm">// Median key promoted to parent</span>
+    <span class="kw">const</span> t = <span class="kw">this</span>.t;
+    <span class="kw">const</span> medianIndex = t - <span class="nm">1</span>; <span class="cm">// Middle key (0-indexed)</span>
+
+    <span class="kw">const</span> rightChild = <span class="kw">this</span>.<span class="fn">newPage</span>({
+      isLeaf:   fullChild.isLeaf,
+      keys:     fullChild.keys.<span class="fn">slice</span>(medianIndex + <span class="nm">1</span>),    <span class="cm">// Upper half</span>
+      values:   fullChild.isLeaf ? fullChild.values.<span class="fn">slice</span>(medianIndex + <span class="nm">1</span>) : [],
+      children: fullChild.isLeaf ? [] : fullChild.children.<span class="fn">slice</span>(t)
+    });
+
+    <span class="cm">// For B+Tree leaf split: median key STAYS in right leaf + copied to parent</span>
+    <span class="cm">// For B-Tree internal split: median key MOVES to parent (not in children)</span>
+    <span class="kw">const</span> medianKey = fullChild.isLeaf
+      ? fullChild.keys[medianIndex]     <span class="cm">// B+Tree: copy (stays in right leaf)</span>
+      : fullChild.keys[medianIndex];    <span class="cm">// B-Tree: move (removed from child)</span>
+
+    <span class="cm">// Truncate left child to t-1 keys</span>
+    fullChild.keys   = fullChild.keys.<span class="fn">slice</span>(<span class="nm">0</span>, fullChild.isLeaf ? medianIndex + <span class="nm">1</span> : medianIndex);
+    fullChild.values = fullChild.isLeaf ? fullChild.values.<span class="fn">slice</span>(<span class="nm">0</span>, medianIndex + <span class="nm">1</span>) : [];
+    fullChild.children = fullChild.isLeaf ? [] : fullChild.children.<span class="fn">slice</span>(<span class="nm">0</span>, t);
+
+    <span class="cm">// Wire B+Tree leaf siblings (linked list maintenance)</span>
+    <span class="kw">if</span> (fullChild.isLeaf) {
+      rightChild.rightSibling = fullChild.rightSibling;
+      fullChild.rightSibling  = rightChild.pageId;
+      <span class="kw">if</span> (rightChild.rightSibling) {
+        <span class="kw">const</span> nextLeaf = <span class="kw">this</span>.<span class="fn">readPage</span>(rightChild.rightSibling);
+        nextLeaf.leftSibling = rightChild.pageId;
+        <span class="kw">this</span>.<span class="fn">writePage</span>(nextLeaf);
+      }
+    }
+
+    <span class="cm">// Insert median key into parent</span>
+    parent.keys.<span class="fn">splice</span>(childIndex, <span class="nm">0</span>, medianKey);
+    parent.children.<span class="fn">splice</span>(childIndex + <span class="nm">1</span>, <span class="nm">0</span>, rightChild.pageId);
+
+    <span class="cm">// Write all modified pages (3 writes: left child, right child, parent)</span>
+    <span class="kw">this</span>.<span class="fn">writePage</span>(fullChild);
+    <span class="kw">this</span>.<span class="fn">writePage</span>(rightChild);
+    <span class="kw">this</span>.<span class="fn">writePage</span>(parent);
+  }
+}</code></pre>
+
+    <h3>Split Walkthrough — Step by Step</h3>
+
+    <div class="diagram">
+<span class="hl">INSERT key=35 into B+Tree (t=2, max 3 keys, min 1 key)</span>
+
+<span class="yw">Before insertion:</span>
+                    [30]
+                   /    \
+            [10 20]      [30 40 50]  ← FULL (3 keys = 2t-1)
+           /   |   \        |    \
+         [5] [15] [25]   [35][45][55]
+
+<span class="yw">Step 1: Descend from root. Root not full → proceed.</span>
+<span class="yw">Step 2: Choose child [30 40 50] — it IS full (3 keys). PROACTIVE SPLIT.</span>
+
+Split [30 40 50]:
+  median index = t-1 = 1 → median key = 40
+  Left child:  [30]       (keys 0..medianIndex-1)
+  Right child: [40 50]    (keys medianIndex..end, for B+Tree leaf: copy median)
+  Promote 40 to parent:
+
+After split:
+                  [30 | 40]          ← 40 promoted to root
+                 /    |    \
+          [10 20]   [30]   [40 50]
+         /   |   \    |       |   \
+       [5] [15] [25] [35]  [45]  [55]
+
+<span class="yw">Step 3: key=35 > 30, key=35 < 40 → descend into [30] (now non-full)</span>
+<span class="yw">Step 4: [30] is a leaf. Insert 35 in sorted order.</span>
+
+<span class="gr">Final tree:</span>
+                  [30 | 40]
+                 /    |    \
+          [10 20]  [30 35]  [40 50]
+         /   |   \    ↕         ↕
+       [5] [15] [25] linked list continues ...
+    </div>
+
+    <h3>I/O Cost of Insertion</h3>
+    <pre><code><span class="cm">// Best case (leaf not full): read h pages + write 1 leaf = h+1 I/Os</span>
+<span class="cm">// Worst case (all nodes full, cascading splits):</span>
+<span class="cm">//   Read h pages (traversal) + write h+1 pages (each split level) = 2h+1 I/Os</span>
+<span class="cm">// Average case: O(h) I/Os (splits rare when nodes average ~69% full)</span>
+
+<span class="cm">// PostgreSQL WAL amplification per INSERT:</span>
+<span class="cm">// 1. WAL record for heap tuple insert</span>
+<span class="cm">// 2. WAL record for index leaf page modification</span>
+<span class="cm">// 3. (If split) WAL records for: new right page, parent page update, possibly root</span>
+<span class="cm">// Full-page images (FPI) on first modification after checkpoint: 8KB per page!</span>
+<span class="cm">// min_wal_size, wal_compression can reduce WAL bloat</span>
+
+<span class="cm">// PostgreSQL page fill factor (reduce splits by leaving space):</span>
+CREATE INDEX idx_orders_date ON orders(created_at)
+WITH (fillfactor = 70);  <span class="cm">// Leave 30% free in each page</span>
+<span class="cm">// New insertions fit in existing pages → fewer splits → lower write amplification</span>
+<span class="cm">// Cost: more pages needed → slightly taller tree → more I/Os per read</span>
+<span class="cm">// Use for: append-heavy workloads (time-series), not point updates</span></code></pre>
+
+  </div>
+</section>
+
+
+<!-- ═══════════════════════════════════════════════════
+     6. DELETION
+═══════════════════════════════════════════════════ -->
+<section class="section-card" id="deletion">
+  <div class="section-header">
+    <div class="section-icon">🗑️</div>
+    <div>
+      <h2>Deletion Algorithm</h2>
+      <p>Underflow handling, borrowing from siblings, node merges, and height reduction</p>
+    </div>
+  </div>
+  <div class="section-body">
+
+    <div class="tags">
+      <span class="tag">Underflow</span><span class="tag">Borrow Left/Right</span>
+      <span class="tag">Node Merge</span><span class="tag">Separator Key Update</span>
+      <span class="tag">Height Reduction</span><span class="tag">Lazy Deletion</span>
+    </div>
+
+    <h3>Deletion Cases — The Three Scenarios</h3>
+    <pre><code><span class="kw">function</span> <span class="fn">delete</span>(node, key) {
+  <span class="kw">if</span> (node.isLeaf) {
+    <span class="cm">// ════ CASE 1: Key is in a leaf ════</span>
+    <span class="kw">const</span> idx = <span class="fn">findKey</span>(node.keys, key);
+    <span class="kw">if</span> (idx === -<span class="nm">1</span>) <span class="kw">return</span>; <span class="cm">// Key not found</span>
+
+    node.keys.<span class="fn">splice</span>(idx, <span class="nm">1</span>);
+    node.values.<span class="fn">splice</span>(idx, <span class="nm">1</span>);
+    <span class="cm">// May create underflow (< t-1 keys) — handled by caller</span>
+    <span class="fn">writePage</span>(node);
+
+  } <span class="kw">else</span> {
+    <span class="kw">const</span> idx = <span class="fn">findKey</span>(node.keys, key);
+
+    <span class="kw">if</span> (idx !== -<span class="nm">1</span>) {
+      <span class="cm">// ════ CASE 2: Key is in this internal node ════</span>
+      <span class="cm">// Cannot simply remove (would break tree structure)</span>
+      <span class="cm">// Replace with predecessor (rightmost key of left subtree)</span>
+      <span class="cm">// OR successor (leftmost key of right subtree)</span>
+
+      <span class="kw">const</span> leftChild  = <span class="fn">readPage</span>(node.children[idx]);
+      <span class="kw">const</span> rightChild = <span class="fn">readPage</span>(node.children[idx + <span class="nm">1</span>]);
+
+      <span class="kw">if</span> (leftChild.keys.length >= t) {
+        <span class="cm">// Left child has spare key — steal predecessor</span>
+        <span class="kw">const</span> pred = <span class="fn">findPredecessor</span>(leftChild); <span class="cm">// Rightmost leaf of left subtree</span>
+        node.keys[idx] = pred.key;
+        <span class="fn">delete</span>(leftChild, pred.key); <span class="cm">// Recursively delete predecessor</span>
+
+      } <span class="kw">else if</span> (rightChild.keys.length >= t) {
+        <span class="cm">// Right child has spare key — steal successor</span>
+        <span class="kw">const</span> succ = <span class="fn">findSuccessor</span>(rightChild); <span class="cm">// Leftmost leaf of right subtree</span>
+        node.keys[idx] = succ.key;
+        <span class="fn">delete</span>(rightChild, succ.key); <span class="cm">// Recursively delete successor</span>
+
+      } <span class="kw">else</span> {
+        <span class="cm">// Both children have exactly t-1 keys → MERGE them</span>
+        <span class="fn">mergeChildren</span>(node, idx, leftChild, rightChild);
+        <span class="fn">delete</span>(leftChild, key); <span class="cm">// Key now in merged child</span>
+      }
+
+    } <span class="kw">else</span> {
+      <span class="cm">// ════ CASE 3: Key not in this node → descend ════</span>
+      <span class="kw">let</span> childIdx = <span class="fn">upperBound</span>(node.keys, key);
+      <span class="kw">let</span> child = <span class="fn">readPage</span>(node.children[childIdx]);
+
+      <span class="cm">// Ensure child won't underflow after deletion (proactive fix)</span>
+      <span class="kw">if</span> (child.keys.length === t - <span class="nm">1</span>) {
+        childIdx = <span class="fn">fixUnderflow</span>(node, childIdx, child);
+        child = <span class="fn">readPage</span>(node.children[childIdx]);
+      }
+      <span class="fn">delete</span>(child, key);
+    }
+  }
+}
+
+<span class="kw">function</span> <span class="fn">fixUnderflow</span>(parent, childIdx, child) {
+  <span class="kw">const</span> leftSibling  = childIdx > <span class="nm">0</span>
+    ? <span class="fn">readPage</span>(parent.children[childIdx - <span class="nm">1</span>]) : <span class="kw">null</span>;
+  <span class="kw">const</span> rightSibling = childIdx &lt; parent.children.length - <span class="nm">1</span>
+    ? <span class="fn">readPage</span>(parent.children[childIdx + <span class="nm">1</span>]) : <span class="kw">null</span>;
+
+  <span class="kw">if</span> (leftSibling && leftSibling.keys.length >= t) {
+    <span class="cm">// BORROW from left sibling (rotate right)</span>
+    <span class="fn">borrowFromLeft</span>(parent, childIdx, child, leftSibling);
+    <span class="kw">return</span> childIdx;
+
+  } <span class="kw">else if</span> (rightSibling && rightSibling.keys.length >= t) {
+    <span class="cm">// BORROW from right sibling (rotate left)</span>
+    <span class="fn">borrowFromRight</span>(parent, childIdx, child, rightSibling);
+    <span class="kw">return</span> childIdx;
+
+  } <span class="kw">else if</span> (leftSibling) {
+    <span class="cm">// MERGE with left sibling</span>
+    <span class="fn">mergeChildren</span>(parent, childIdx - <span class="nm">1</span>, leftSibling, child);
+    <span class="kw">return</span> childIdx - <span class="nm">1</span>; <span class="cm">// Merged node is at childIdx-1</span>
+
+  } <span class="kw">else</span> {
+    <span class="cm">// MERGE with right sibling</span>
+    <span class="fn">mergeChildren</span>(parent, childIdx, child, rightSibling);
+    <span class="kw">return</span> childIdx;
+  }
+}</code></pre>
+
+    <h3>Borrow and Merge — Visual Walkthrough</h3>
+
+    <div class="diagram">
+<span class="hl">Scenario: DELETE key=10 from B+Tree (t=2, min keys = t-1 = 1)</span>
+
+<span class="yw">Before:</span>
+              [20 | 40]
+             /    |    \
+         [10 15] [25 30] [40 50 60]
+                              ↑ Full sibling
+
+<span class="yw">Step 1: Find leaf [10 15]. Key 10 found. Remove it.</span>
+         [15] ← only 1 key = t-1 = minimum. No underflow yet!
+         (t=2 means t-1=1 is the minimum — exactly at threshold)
+
+<span class="yw">If we needed to delete one more, say DELETE key=15:</span>
+
+Before deletion:
+              [20 | 40]
+             /    |    \
+         [15]  [25 30]  [40 50 60]
+
+<span class="yw">Delete 15 from [15] → [EMPTY] — UNDERFLOW (0 < t-1=1)</span>
+
+<span class="yw">Fix: Look at siblings</span>
+  Left sibling: none (leftmost child)
+  Right sibling: [25 30] — has 2 keys >= t → BORROW RIGHT
+
+<span class="yw">Borrow from right (rotate left):</span>
+  1. Pull separator key 20 DOWN into left child:    [15] → [15, 20]
+  2. Pull 25 (leftmost of right sibling) UP to parent as new separator
+  3. Right sibling loses 25: [25, 30] → [30]
+
+<span class="gr">After borrow:</span>
+              [25 | 40]          ← separator updated to 25
+             /    |    \
+         [15 20] [30]  [40 50 60]
+
+<span class="yw">If borrow impossible (both siblings at minimum) → MERGE:</span>
+  Pull separator DOWN from parent + merge children into one node
+  Parent loses a key → may underflow → recurse up → may shrink tree height
+    </div>
+
+    <h4>Lazy Deletion — The Production Shortcut</h4>
+    <pre><code><span class="cm">// Full deletion with merges is expensive and rarely done immediately</span>
+<span class="cm">// PostgreSQL, MySQL: LAZY DELETION using tombstones + VACUUM</span>
+
+<span class="cm">// PostgreSQL approach:</span>
+<span class="cm">// DELETE statement marks heap tuple as deleted (xmax set)</span>
+<span class="cm">// Index entry remains! Points to dead heap tuple.</span>
+<span class="cm">// Query: index scan → heap lookup → tuple is dead → skip</span>
+<span class="cm">// VACUUM: walks index, removes dead index entries, reclaims space</span>
+<span class="cm">// VACUUM can do "page-at-a-time" deletion without merges</span>
+
+<span class="cm">// HOT (Heap Only Tuple) updates — avoid index modification:</span>
+<span class="cm">// UPDATE that only changes non-indexed columns:</span>
+<span class="cm">// Old tuple marked dead, new tuple added to SAME heap page</span>
+<span class="cm">// t_ctid chain: old tuple → new tuple</span>
+<span class="cm">// Index still points to old tuple → follows chain → finds new tuple</span>
+<span class="cm">// Result: UPDATE doesn't touch the index at all!</span>
+<span class="cm">// Monitor HOT updates: SELECT n_tup_hot_upd FROM pg_stat_user_tables;</span>
+<span class="cm">// High HOT ratio = good (index not thrashed by updates)</span></code></pre>
+
+  </div>
+</section>
+
+
+<!-- ═══════════════════════════════════════════════════
+     7. DISK I/O & PAGE LAYOUT
+═══════════════════════════════════════════════════ -->
+<section class="section-card" id="disk-io">
+  <div class="section-header">
+    <div class="section-icon">💾</div>
+    <div>
+      <h2>Disk I/O &amp; Page Layout</h2>
+      <p>How B-Tree pages map to disk blocks, the buffer pool, WAL interaction, and OS page cache</p>
+    </div>
+  </div>
+  <div class="section-body">
+
+    <div class="tags">
+      <span class="tag">Buffer Pool</span><span class="tag">Page Cache</span>
+      <span class="tag">WAL</span><span class="tag">Dirty Pages</span>
+      <span class="tag">Checkpointing</span><span class="tag">Random I/O</span>
+      <span class="tag">Read-Ahead</span>
+    </div>
+
+    <h3>PostgreSQL Page Layout — Exact Byte Map</h3>
+    <div class="diagram">
+<span class="hl">PostgreSQL B-Tree Page (8192 bytes default)</span>
+
+Offset  Size  Field
+──────────────────────────────────────────────────────────────────
+  0       24   PageHeader
+               │ lsn:          8 bytes  (WAL log sequence number)
+               │ checksum:     2 bytes  (data integrity)
+               │ flags:        2 bytes  (all-visible, all-frozen...)
+               │ lower:        2 bytes  (start of free space)
+               │ upper:        2 bytes  (end of free space)
+               │ special:      2 bytes  (offset to special area)
+               │ pagesize_vers:2 bytes
+               │ prune_xid:    4 bytes  (oldest dead xid for pruning)
+
+ 24      var   <span class="hl">Item ID Array</span> (grows DOWN from offset 24)
+               │ Each ItemId: 4 bytes (offset:15, flags:2, length:15)
+               │ Points to actual item data in page body
+
+mid      var   <span class="gr">Free Space</span> (between ItemId array and item data)
+
+ ..      var   <span class="hl">Item Data</span> (grows UP from page end)
+               │ Index tuples: key value + heap pointer (ItemPointer)
+               │ Stored in REVERSE order (newest at top of data area)
+
+8152     40    <span class="pk">BTPageOpaqueData</span> (special area — B-Tree metadata)
+               │ btpo_prev:    4 bytes  (left sibling page number)
+               │ btpo_next:    4 bytes  (right sibling page number)
+               │ btpo_level:   4 bytes  (0 = leaf, 1 = first internal, etc.)
+               │ btpo_flags:   2 bytes  (BTP_LEAF, BTP_ROOT, BTP_META...)
+               │ btpo_cycleid: 2 bytes  (for concurrent index build)
+    </div>
+
+    <h3>Buffer Pool — The Database's Cache Layer</h3>
+    <pre><code><span class="cm">// PostgreSQL shared_buffers: dedicated RAM for caching B-Tree pages</span>
+<span class="cm">// Default: 128MB (way too small — set to 25% of RAM)</span>
+<span class="cm">// Recommendation: 4-16GB for production databases</span>
+
+<span class="cm">// Buffer pool clock-sweep eviction (PostgreSQL):</span>
+<span class="cm">// Each buffer has usage_count (0-5)</span>
+<span class="cm">// On access: usage_count++ (max 5)</span>
+<span class="cm">// On eviction scan: usage_count-- if > 0, else evict</span>
+<span class="cm">// Clock hand sweeps → "second chance" algorithm</span>
+<span class="cm">// Hot pages (root, upper internal nodes) stay pinned (always hit before eviction)</span>
+
+<span class="cm">// Monitor buffer hit rate:</span>
+SELECT
+  sum(heap_blks_hit)  AS heap_hits,
+  sum(heap_blks_read) AS heap_reads,
+  round(sum(heap_blks_hit)::numeric /
+    NULLIF(sum(heap_blks_hit + heap_blks_read), 0) * 100, 2) AS heap_hit_pct,
+  sum(idx_blks_hit)   AS idx_hits,
+  sum(idx_blks_read)  AS idx_reads,
+  round(sum(idx_blks_hit)::numeric /
+    NULLIF(sum(idx_blks_hit + idx_blks_read), 0) * 100, 2) AS idx_hit_pct
+FROM pg_statio_user_tables;
+<span class="cm">-- Target: > 99% hit rate for OLTP workloads</span>
+<span class="cm">-- < 95%: increase shared_buffers or check for index bloat</span>
+
+<span class="cm">// Pages accessed in B-Tree lookups (frequency → caching importance):</span>
+<span class="cm">// Root page:               accessed by EVERY lookup → always in buffer pool</span>
+<span class="cm">// Level-1 internal pages:  accessed ~1/fan-out of lookups → usually cached</span>
+<span class="cm">// Level-2 internal pages:  accessed ~1/fan-out² → often cached</span>
+<span class="cm">// Leaf pages:              accessed 1/n → rarely cached for large tables</span>
+<span class="cm">// Effective I/Os for height-3 tree: typically 1 (leaf only, upper cached)</span></code></pre>
+
+    <h3>WAL Integration — Crash Safety for B-Tree Modifications</h3>
+    <pre><code><span class="cm">// Every B-Tree page modification generates WAL records</span>
+<span class="cm">// WAL must be flushed to disk BEFORE modified page can leave buffer pool</span>
+<span class="cm">// This is the Write-Ahead Log rule (no data without WAL first)</span>
+
+<span class="cm">// WAL record for B-Tree leaf insert (simplified):</span>
+WAL_Record {
+  lsn:     0x00000001/83B210A0,   <span class="cm">// Log Sequence Number (unique, monotonic)</span>
+  xid:     7823,                   <span class="cm">// Transaction ID</span>
+  rmid:    RM_BTREE_ID,            <span class="cm">// Resource manager (BTree WAL handler)</span>
+  op_type: XLOG_BTREE_INSERT_LEAF,
+  target_page: 42,                 <span class="cm">// Which page was modified</span>
+  offset: 115,                     <span class="cm">// Offset within page</span>
+  new_item: [key_bytes, itemptr]   <span class="cm">// The actual inserted index entry</span>
+}
+
+<span class="cm">// Full-Page Image (FPI): first modification of a page after checkpoint</span>
+<span class="cm">// Includes entire 8KB page content in WAL record (instead of just delta)</span>
+<span class="cm">// Why: partial page writes are possible if crash during write of 8KB page</span>
+<span class="cm">// FPI ensures crash recovery can reconstruct complete page</span>
+<span class="cm">// FPI WAL records are 8KB+ → significant WAL volume during checkpoints!</span>
+<span class="cm">// wal_compression = on: compresses FPIs → typically 50-80% size reduction</span>
+
+<span class="cm">// Checkpoint: writes all dirty buffer pages to disk</span>
+<span class="cm">// After checkpoint: WAL replay only needed from checkpoint forward</span>
+<span class="cm">// checkpoint_completion_target: spread checkpoint I/O over time</span>
+<span class="cm">// max_wal_size: trigger checkpoint when WAL reaches this size</span></code></pre>
+
+  </div>
+</section>
+
+
+<!-- ═══════════════════════════════════════════════════
+     8. CONCURRENCY
+═══════════════════════════════════════════════════ -->
+<section class="section-card" id="concurrency">
+  <div class="section-header">
+    <div class="section-icon">🔒</div>
+    <div>
+      <h2>Concurrency Control</h2>
+      <p>Lock coupling (crabbing), Blink-Tree, latch-free techniques for high-throughput concurrent access</p>
+    </div>
+  </div>
+  <div class="section-body">
+
+    <div class="tags">
+      <span class="tag">Lock Coupling</span><span class="tag">Crabbing</span>
+      <span class="tag">Latch vs Lock</span><span class="tag">Blink-Tree</span>
+      <span class="tag">Right-Link Pointer</span><span class="tag">Optimistic Reads</span>
+    </div>
+
+    <h3>Latches vs Locks — Critical Distinction</h3>
+    <div class="two-col">
+      <div class="col-card">
+        <h5>🔐 Latch (Mutex)</h5>
+        <ul>
+          <li>Protects physical B-Tree page structure</li>
+          <li>Held for microseconds (duration of page access)</li>
+          <li>No deadlock detection (must avoid by ordering)</li>
+          <li>Modes: read (shared), write (exclusive)</li>
+          <li>NOT visible to transactions — internal to storage engine</li>
+          <li>Example: shared latch on page during traversal</li>
+        </ul>
+      </div>
+      <div class="col-card">
+        <h5>🔑 Lock (Transaction Lock)</h5>
+        <ul>
+          <li>Protects logical data (rows, tables, ranges)</li>
+          <li>Held for transaction duration (ms to seconds)</li>
+          <li>Deadlock detection required (wait-for graph)</li>
+          <li>Modes: S, X, IS, IX, SIX</li>
+          <li>Visible to transaction manager / MVCC</li>
+          <li>Example: row lock during UPDATE</li>
+        </ul>
+      </div>
+    </div>
+
+    <h3>Lock Coupling (Latch Crabbing) — Safe Concurrent Traversal</h3>
+    <pre><code><span class="cm">// Naive approach: lock root, traverse, release all → bottleneck on root!</span>
+<span class="cm">// Lock coupling: release parent latch as soon as child is safe</span>
+
+<span class="cm">// READ traversal (latch crabbing for search):</span>
+<span class="kw">function</span> <span class="fn">search</span>(key) {
+  <span class="kw">let</span> parent = <span class="kw">null</span>;
+  <span class="kw">let</span> node = <span class="fn">acquireReadLatch</span>(rootPage);  <span class="cm">// Acquire read latch on root</span>
+
+  <span class="kw">while</span> (!node.isLeaf) {
+    <span class="kw">const</span> child = <span class="fn">acquireReadLatch</span>(node.children[<span class="fn">findChild</span>(node, key)]);
+    <span class="kw">if</span> (parent) <span class="fn">releaseReadLatch</span>(parent);  <span class="cm">// Release parent immediately!</span>
+    parent = node;
+    node = child;
+  }
+  <span class="cm">// Only hold latch on current node — parent released</span>
+  <span class="cm">// Root latch held for nanoseconds, not entire traversal</span>
+
+  <span class="kw">const</span> result = <span class="fn">searchLeaf</span>(node, key);
+  <span class="fn">releaseReadLatch</span>(node);
+  <span class="kw">return</span> result;
+}
+
+<span class="cm">// WRITE traversal (insertion/deletion with potential splits/merges):</span>
+<span class="kw">function</span> <span class="fn">insert</span>(key, value) {
+  <span class="kw">const</span> path = [];  <span class="cm">// Stack of write-latched ancestors</span>
+
+  <span class="kw">let</span> node = <span class="fn">acquireWriteLatch</span>(rootPage); <span class="cm">// Write latch root</span>
+  path.<span class="fn">push</span>(node);
+
+  <span class="kw">while</span> (!node.isLeaf) {
+    <span class="kw">const</span> child = <span class="fn">acquireWriteLatch</span>(node.children[<span class="fn">findChild</span>(node, key)]);
+
+    <span class="cm">// "Safe" node: will NOT need to split (has room) → release ancestors</span>
+    <span class="kw">if</span> (child.keys.length &lt; <span class="nm">2</span> * t - <span class="nm">1</span>) {
+      <span class="cm">// Child is safe → no split → ancestors unaffected → release them all</span>
+      <span class="kw">for</span> (<span class="kw">const</span> ancestor <span class="kw">of</span> path) <span class="fn">releaseWriteLatch</span>(ancestor);
+      path.<span class="fn">length</span> = <span class="nm">0</span>;
+    }
+
+    path.<span class="fn">push</span>(child);
+    node = child;
+  }
+  <span class="cm">// path contains only necessary ancestors (those that might split)</span>
+  <span class="cm">// Root is released early if lower nodes are safe → massive concurrency gain</span>
+}
+<span class="cm">// In practice: 99%+ of inserts release root latch within 1-2 levels</span></code></pre>
+
+    <h3>Blink-Tree — Non-Blocking Concurrent B+Trees</h3>
+    <p>Blink-Tree (Lehman &amp; Yao 1981) is the foundation for most production database B-Tree implementations (PostgreSQL, InnoDB). It adds a <strong>right-link pointer</strong> to each node, enabling concurrent readers to recover from concurrent splits without holding parent latches:</p>
+
+    <pre><code><span class="cm">// Problem with lock coupling: writer holds write latch on root for splits</span>
+<span class="cm">// → blocks all other readers/writers during root splits</span>
+
+<span class="cm">// Blink-Tree insight: add "right sibling" pointer to INTERNAL nodes too</span>
+<span class="cm">// (B+Tree already has right sibling for LEAF nodes)</span>
+
+<span class="cm">// When a split occurs (concurrent with a reader traversal):</span>
+<span class="cm">// BEFORE split: internal node N has keys [10, 20, 30]</span>
+<span class="cm">// Reader latches N, sees child for key=25 → chooses child C</span>
+<span class="cm">// Reader releases latch on N, latches C</span>
+<span class="cm">// SPLIT occurs: N splits into N=[10,20] and N'=[30]</span>
+<span class="cm">// But child C is now under N' not N!</span>
+<span class="cm">// Reader would lose key=25 without Blink-Tree</span>
+
+<span class="cm">// Blink-Tree fix: N has a "high key" (max key in this node) + right-link</span>
+<span class="cm">// When reader reaches C and finds key > N's high key:</span>
+<span class="cm">// → Follow right-link to N' (the new node created by split)</span>
+<span class="cm">// → Continue search in N' without going back up to parent</span>
+<span class="cm">// → No parent latch needed → lockless descent!</span>
+
+<span class="kw">function</span> <span class="fn">blinkSearch</span>(key, startPage) {
+  <span class="kw">let</span> node = <span class="fn">readPage</span>(startPage);
+
+  <span class="kw">while</span> (key > node.highKey && node.rightLink) {
+    <span class="cm">// Key belongs in a right sibling (concurrent split happened)</span>
+    node = <span class="fn">readPage</span>(node.rightLink); <span class="cm">// Follow right-link</span>
+  }
+
+  <span class="kw">if</span> (!node.isLeaf) {
+    <span class="kw">const</span> childPageId = node.children[<span class="fn">findChild</span>(node, key)];
+    <span class="kw">return</span> <span class="fn">blinkSearch</span>(key, childPageId); <span class="cm">// Recurse to child</span>
+  }
+
+  <span class="kw">return</span> <span class="fn">findInLeaf</span>(node, key);
+}
+<span class="cm">// PostgreSQL uses Blink-Tree variant with concurrent index scans</span>
+<span class="cm">// Result: reads never block writes, writes rarely block reads</span></code></pre>
+
+  </div>
+</section>
+
+
+<!-- ═══════════════════════════════════════════════════
+     9. VARIANTS
+═══════════════════════════════════════════════════ -->
+<section class="section-card" id="variants">
+  <div class="section-header">
+    <div class="section-icon">🔀</div>
+    <div>
+      <h2>B-Tree Variants</h2>
+      <p>B*Tree, Fractal Tree, Copy-on-Write B-Tree, and comparison with LSM-Trees</p>
+    </div>
+  </div>
+  <div class="section-body">
+
+    <div class="tags">
+      <span class="tag">B*Tree</span><span class="tag">Fractal Tree Index</span>
+      <span class="tag">Copy-on-Write</span><span class="tag">Append-Only</span>
+      <span class="tag">LSM-Tree Comparison</span><span class="tag">Write Amplification</span>
+    </div>
+
+    <h3>B*Tree — Deferring Splits with 3-Way Distribution</h3>
+    <pre><code><span class="cm">// B*Tree: when a node overflows, try to redistribute with sibling first</span>
+<span class="cm">// Only split when BOTH the node AND its sibling are full</span>
+<span class="cm">// Then: split two nodes into THREE nodes (instead of B-Tree's 1→2)</span>
+
+<span class="cm">// B-Tree split: 1 full node → 2 nodes at ~50% full</span>
+<span class="cm">// B*Tree split: 2 full nodes → 3 nodes at ~67% full</span>
+<span class="cm">// B*Tree minimum fill: 2/3 (vs 1/2 for B-Tree)</span>
+
+<span class="cm">// Benefits:</span>
+<span class="cm">// ✓ Higher average fill factor → fewer pages → shorter tree → fewer I/Os</span>
+<span class="cm">// ✓ Fewer splits (distributes to sibling before splitting)</span>
+<span class="cm">// ✗ More complex implementation (must coordinate 2 siblings)</span>
+
+<span class="cm">// Used by: older IBM systems, some file systems</span>
+<span class="cm">// PostgreSQL/MySQL: use standard B+Tree with configurable fillfactor instead</span></code></pre>
+
+    <h3>Fractal Tree Index (TokuDB / Percona FT)</h3>
+    <pre><code><span class="cm">// Fractal Tree: B-Tree + message buffers at each internal node</span>
+<span class="cm">// Writes go to root buffer → cascade down lazily (batched I/O)</span>
+<span class="cm">// Write amplification: O(log²n / B) vs B-Tree's O(log n)</span>
+<span class="cm">// where B = buffer size ratio</span>
+
+<span class="cm">// Each internal node has:</span>
+<span class="cm">// - Standard B-Tree keys and child pointers</span>
+<span class="cm">// - A buffer of pending messages (inserts/updates/deletes)</span>
+
+<span class="cm">// Write path:</span>
+<span class="cm">// 1. Insert message deposited at root buffer (1 I/O: root usually cached)</span>
+<span class="cm">// 2. When buffer full → "flush" messages to child buffers (batch I/O)</span>
+<span class="cm">// 3. Messages propagate down lazily</span>
+<span class="cm">// 4. At leaf: apply all messages for that key range</span>
+
+<span class="cm">// Read path:</span>
+<span class="cm">// Must check ALL buffers on path from root to leaf (may contain relevant msgs)</span>
+<span class="cm">// Reads slower than B-Tree → optimized with bloom filters per buffer</span>
+
+<span class="cm">// Write amplification comparison:</span>
+<span class="cm">// B-Tree:       O(log n)     → ~30 I/Os for 1B records</span>
+<span class="cm">// Fractal Tree: O(log²n/B)   → ~3 I/Os  for 1B records (with B=100)</span>
+<span class="cm">// LSM-Tree:     O(L×log n)   → similar to Fractal for writes, worse for reads</span>
+
+<span class="cm">// Used by: TokuDB (acquired by Percona), BetrFS, Tokutek</span></code></pre>
+
+    <h3>Copy-on-Write B-Tree (Append-Only / Persistent)</h3>
+    <pre><code><span class="cm">// COW B-Tree: NEVER modify existing pages in-place</span>
+<span class="cm">// Instead: copy modified page to new location, update parent pointer</span>
+<span class="cm">// Cascade up to root: root is always a NEW page</span>
+<span class="cm">// Old pages become immutable snapshots (garbage collected eventually)</span>
+
+<span class="cm">// Used by: ZFS (ZFS DMU), Btrfs, LMDB (Lightning Memory-Mapped DB)</span>
+
+<span class="cm">// COW write path for updating leaf page L:</span>
+<span class="cm">// 1. Copy L → L' (new page with modification)</span>
+<span class="cm">// 2. Update parent P: pointer to L → pointer to L'</span>
+<span class="cm">// 3. Copy P → P' (parent also changes)</span>
+<span class="cm">// 4. Update grandparent: pointer to P → pointer to P'</span>
+<span class="cm">// 5. ... cascade to root</span>
+<span class="cm">// 6. New root R' points to entire new consistent tree</span>
+<span class="cm">// 7. Atomically update "root pointer" to R'</span>
+<span class="cm">// All in one atomic operation (one pointer change)</span>
+
+<span class="cm">// Benefits:</span>
+<span class="cm">// ✓ NO WAL needed! Old tree version always valid → crash safe</span>
+<span class="cm">// ✓ Free snapshots: old root pointer = old consistent snapshot</span>
+<span class="cm">// ✓ Readers never blocked (reading old version while writes create new)</span>
+<span class="cm">// ✓ MVCC naturally: transactions see snapshot at start time</span>
+
+<span class="cm">// Drawbacks:</span>
+<span class="cm">// ✗ Write amplification = O(h) pages written per leaf update (path to root)</span>
+<span class="cm">// ✗ Space: old pages accumulate until garbage collected</span>
+<span class="cm">// ✗ More I/Os than in-place update for write-heavy workloads</span>
+
+<span class="cm">// LMDB (used by OpenLDAP, many embedded systems):</span>
+<span class="cm">// Pure COW B-Tree, memory-mapped files, zero-copy reads</span>
+<span class="cm">// Readers: NEVER blocked, NEVER lock, ZERO overhead</span>
+<span class="cm">// Writers: serialized (one writer at a time)</span>
+<span class="cm">// Perfect for: read-heavy, embedded, single-writer workloads</span></code></pre>
+
+    <h3>B+Tree vs LSM-Tree — The Fundamental Trade-off</h3>
+    <table>
+      <tr><th>Property</th><th>B+Tree</th><th>LSM-Tree</th></tr>
+      <tr><td>Write path</td><td>Random write to leaf page (in-place)</td><td>Sequential write to MemTable → SSTable</td></tr>
+      <tr><td>Read path</td><td>O(log n) tree traversal (fast)</td><td>MemTable + multiple SSTable levels (slower)</td></tr>
+      <tr><td>Write amplification</td><td>Low (1-3 page writes per insert)</td><td>High (10-30× during compaction)</td></tr>
+      <tr><td>Read amplification</td><td>Low (tree height, usually 3-4)</td><td>Higher (check multiple levels + bloom filters)</td></tr>
+      <tr><td>Space amplification</td><td>Low (~30% overhead for internal nodes)</td><td>Higher (multiple copies during compaction)</td></tr>
+      <tr><td>Range scan</td><td>Excellent (leaf linked list)</td><td>Good (sorted SSTables, but multi-level merge)</td></tr>
+      <tr><td>Update in-place</td><td>Yes (modify leaf)</td><td>No (new version + tombstone for old)</td></tr>
+      <tr><td>Best for</td><td>Read-heavy, updates, mixed OLTP</td><td>Write-heavy, time-series, append-only</td></tr>
+      <tr><td>Used by</td><td>PostgreSQL, MySQL, Oracle, SQL Server</td><td>Cassandra, RocksDB, LevelDB, HBase</td></tr>
+    </table>
+
+  </div>
+</section>
+
+
+<!-- ═══════════════════════════════════════════════════
+     10. REAL-WORLD IMPLEMENTATIONS
+═══════════════════════════════════════════════════ -->
+<section class="section-card" id="real-world">
+  <div class="section-header">
+    <div class="section-icon">🏭</div>
+    <div>
+      <h2>Real-World Implementations</h2>
+      <p>How PostgreSQL nbtree, MySQL InnoDB, and SQLite actually implement B+Trees — specific details</p>
+    </div>
+  </div>
+  <div class="section-body">
+
+    <div class="tags">
+      <span class="tag">PostgreSQL nbtree</span><span class="tag">InnoDB Clustered</span>
+      <span class="tag">SQLite</span><span class="tag">Deduplication</span>
+      <span class="tag">Prefix Compression</span><span class="tag">Suffix Truncation</span>
+    </div>
+
+    <h3>PostgreSQL — nbtree Implementation Details</h3>
+    <pre><code><span class="cm">-- PostgreSQL uses "nbtree" — a Blink-Tree variant</span>
+<span class="cm">-- Key features beyond standard B+Tree:</span>
+
+<span class="cm">-- 1. UNIQUE INDEX DEDUPLICATION (PostgreSQL 13+)</span>
+<span class="cm">-- For non-unique indexes: multiple entries with same key are deduplicated</span>
+<span class="cm">-- Instead of: [key=42, ctid=(1,1)] [key=42, ctid=(1,2)] [key=42, ctid=(1,3)]</span>
+<span class="cm">-- Stored as: [key=42, posting_list=[(1,1),(1,2),(1,3)]]</span>
+<span class="cm">-- Saves ~70% space for low-cardinality indexes (e.g., status, type columns)</span>
+CREATE INDEX idx_orders_status ON orders(status);
+<span class="cm">-- 'pending' status on 1M rows: without dedup = 1M entries, with dedup = 5 entries</span>
+
+<span class="cm">-- 2. COVERING INDEXES WITH INCLUDE</span>
+CREATE INDEX idx_users_email_covering ON users(email)
+INCLUDE (name, avatar_url);
+<span class="cm">-- email = B+Tree key (determines sort order, used for lookups)</span>
+<span class="cm">-- name, avatar_url = stored in leaf only (not key, not in internal nodes)</span>
+<span class="cm">-- SELECT name, avatar_url FROM users WHERE email = ? → Index Only Scan</span>
+<span class="cm">-- No heap access needed! All data in index leaf.</span>
+
+<span class="cm">-- 3. SUFFIX TRUNCATION (internal nodes)</span>
+<span class="cm">-- Internal node separator keys can be truncated to minimum distinguishing prefix</span>
+<span class="cm">-- Instead of full key "2024-01-15 10:30:45.123456" as separator</span>
+<span class="cm">-- Use just "2024-01-15" if that's enough to route correctly</span>
+<span class="cm">-- Saves space in internal nodes → higher fan-out → shorter tree</span>
+
+<span class="cm">-- 4. CONCURRENT INDEX BUILD (CREATE INDEX CONCURRENTLY)</span>
+<span class="cm">-- Phase 1: Build index snapshot (one heap scan, no locks)</span>
+<span class="cm">-- Phase 2: Apply changes that occurred during Phase 1 (second scan)</span>
+<span class="cm">-- Phase 3: Wait for all transactions that might have outdated info</span>
+<span class="cm">-- Phase 4: Validate index (mark as valid)</span>
+<span class="cm">-- Total: 2 heap scans, no table lock, ~2× longer than regular CREATE INDEX</span>
+
+<span class="cm">-- 5. METAPAGE (page 0 of every index)</span>
+SELECT * FROM bt_metap('idx_orders_customer');
+<span class="cm">--  magic | version | root | level | fastroot | fastlevel | last_cleanup_num_delpages</span>
+<span class="cm">-- -------+---------+------+-------+----------+-----------+--------------------------</span>
+<span class="cm">--  340322|       4  |  412 |     3 |      412 |         3 |                       28</span>
+<span class="cm">-- root=412: page number of current root</span>
+<span class="cm">-- level=3: tree height (0-indexed, so 4 levels: meta, root, internal, leaf)</span>
+
+<span class="cm">-- INSPECT B-TREE INTERNALS (pg_am, pageinspect extension):</span>
+CREATE EXTENSION pageinspect;
+SELECT * FROM bt_page_stats('idx_orders_customer', 3); <span class="cm">-- Stats for page 3</span>
+SELECT * FROM bt_page_items('idx_orders_customer', 3); <span class="cm">-- Items on page 3</span></code></pre>
+
+    <h3>MySQL InnoDB — Clustered Index Specifics</h3>
+    <pre><code><span class="cm">-- InnoDB: PRIMARY KEY = Clustered Index (table IS the B+Tree)</span>
+<span class="cm">-- Row data stored in B+Tree leaf pages (not separate heap)</span>
+
+<span class="cm">-- InnoDB page structure (16KB default):</span>
+<span class="cm">-- File Header (38 bytes): page type, checksums, prev/next page pointers</span>
+<span class="cm">-- Page Header (56 bytes): slot count, free space offset, etc.</span>
+<span class="cm">-- Infimum/Supremum Records: virtual boundary records (always present)</span>
+<span class="cm">-- User Records: sorted singly-linked list (physical order ≠ logical order!)</span>
+<span class="cm">-- Page Directory: array of slot pointers (enables binary search)</span>
+<span class="cm">-- File Trailer (8 bytes): checksum</span>
+
+<span class="cm">-- ADAPTIVE HASH INDEX (AnnoDB unique feature):</span>
+<span class="cm">-- InnoDB monitors which B+Tree pages are accessed most</span>
+<span class="cm">-- Automatically builds in-memory hash index for "hot" pages</span>
+<span class="cm">-- Equality lookup on hot index: O(1) hash → skip B+Tree traversal</span>
+<span class="cm">-- Controlled by: innodb_adaptive_hash_index = ON (default)</span>
+<span class="cm">-- Disable for: high-concurrency workloads (AHI has internal contention)</span>
+
+SHOW ENGINE INNODB STATUS\G
+<span class="cm">-- Hash table size 553229, node heap has 2 buffer(s)</span>
+<span class="cm">-- 0.00 hash searches/s, 0.00 non-hash searches/s</span>
+<span class="cm">-- ↑ 0 means AHI not being used (table too small or access pattern not hot)</span>
+
+<span class="cm">-- CHANGE BUFFER: defers secondary index updates</span>
+<span class="cm">-- Problem: secondary index pages randomly distributed → random I/O on insert</span>
+<span class="cm">-- Solution: buffer secondary index changes when page NOT in buffer pool</span>
+<span class="cm">-- Merge changes when page IS read into buffer pool later</span>
+<span class="cm">-- Reduces random I/O for secondary index maintenance by up to 75%</span>
+<span class="cm">-- innodb_change_buffer_max_size = 25 (% of buffer pool, default)</span></code></pre>
+
+    <h3>SQLite — The Minimal B-Tree</h3>
+    <pre><code><span class="cm">-- SQLite uses B+Tree for tables and B-Tree for indexes</span>
+<span class="cm">-- Everything in one file: header (100 bytes) + pages</span>
+<span class="cm">-- Page size: 512-65536 bytes (power of 2, default 4096)</span>
+
+<span class="cm">-- SQLite table B-Tree specifics:</span>
+<span class="cm">-- rowid = primary key (always present, auto-generated if not specified)</span>
+<span class="cm">-- Table stored as B+Tree keyed on rowid</span>
+<span class="cm">-- WITHOUT ROWID tables: stored as B-Tree keyed on PRIMARY KEY</span>
+
+<span class="cm">-- Inspect SQLite B-Tree pages:</span>
+PRAGMA page_size;                     <span class="cm">-- Current page size</span>
+PRAGMA page_count;                    <span class="cm">-- Total pages in file</span>
+PRAGMA freelist_count;                <span class="cm">-- Free (recycled) pages</span>
+PRAGMA integrity_check;               <span class="cm">-- Verify B-Tree invariants</span>
+PRAGMA stats;                         <span class="cm">-- Table + index statistics</span>
+
+<span class="cm">-- SQLite WAL mode (Write-Ahead Log):</span>
+PRAGMA journal_mode = WAL;
+<span class="cm">-- WAL file: appended to during writes</span>
+<span class="cm">-- Readers: read from original db file + WAL (if newer version exists)</span>
+<span class="cm">-- Checkpoint: periodically copies WAL back to main database</span>
+<span class="cm">-- WAL allows ONE writer + MULTIPLE concurrent readers (no read-write conflict)</span></code></pre>
+
+  </div>
+</section>
+
+
+<!-- ═══════════════════════════════════════════════════
+     11. COMPLEXITY & TUNING
+═══════════════════════════════════════════════════ -->
+<section class="section-card" id="complexity">
+  <div class="section-header">
+    <div class="section-icon">📊</div>
+    <div>
+      <h2>Complexity Analysis &amp; Tuning</h2>
+      <p>Complete complexity reference, practical tuning parameters, and anti-patterns to avoid</p>
+    </div>
+  </div>
+  <div class="section-body">
+
+    <div class="tags">
+      <span class="tag">Time Complexity</span><span class="tag">Space Complexity</span>
+      <span class="tag">Fillfactor</span><span class="tag">Index Bloat</span>
+      <span class="tag">REINDEX</span><span class="tag">Statistics</span>
+      <span class="tag">Query Planner</span>
+    </div>
+
+    <h3>Complete Complexity Reference</h3>
+    <table>
+      <tr><th>Operation</th><th>Time (Disk I/Os)</th><th>Time (Comparisons)</th><th>Space</th></tr>
+      <tr><td>Point Lookup</td><td>O(log_t n)</td><td>O(log n)</td><td>—</td></tr>
+      <tr><td>Range Scan (k results)</td><td>O(log_t n + k/B)</td><td>O(log n + k)</td><td>—</td></tr>
+      <tr><td>Insert</td><td>O(log_t n) amortized</td><td>O(log n)</td><td>—</td></tr>
+      <tr><td>Delete</td><td>O(log_t n) amortized</td><td>O(log n)</td><td>—</td></tr>
+      <tr><td>Split (worst case)</td><td>O(h) = O(log_t n)</td><td>O(t)</td><td>—</td></tr>
+      <tr><td>Merge (worst case)</td><td>O(h) = O(log_t n)</td><td>O(t)</td><td>—</td></tr>
+      <tr><td>Build (n keys, bulk load)</td><td>O(n/B × log_{M/B}(n/B))</td><td>O(n log n)</td><td>—</td></tr>
+      <tr><td>Space (n records)</td><td>—</td><td>—</td><td>O(n) pages, 50-70% full avg</td></tr>
+      <tr><td>Tree height</td><td>⌈log_t (n+1)⌉</td><td>—</td><td>—</td></tr>
+    </table>
+    <p><em>t = minimum degree (fan-out/2), n = records, B = page capacity, M = memory size, h = height</em></p>
+
+    <h3>Bulk Loading — Building Index from Scratch</h3>
+    <pre><code><span class="cm">-- Bulk loading: much faster than N individual inserts</span>
+<span class="cm">-- Individual inserts: O(N log N) I/Os (each insert = tree traversal)</span>
+<span class="cm">-- Bulk load: O(N/B) I/Os (sequential scan of sorted data)</span>
+
+<span class="cm">-- PostgreSQL: CREATE INDEX uses bulk loading automatically</span>
+<span class="cm">-- 1. Scan table → sort all index entries (using external merge sort)</span>
+<span class="cm">-- 2. Build B+Tree bottom-up: fill leaf pages to 90% (fillfactor=90 default for build)</span>
+<span class="cm">-- 3. Build internal pages from leaf page boundary keys</span>
+<span class="cm">-- 4. Build root from internal page boundary keys</span>
+<span class="cm">-- Result: perfectly packed tree with consistent fill factor</span>
+
+<span class="cm">-- maintenance_work_mem controls sort memory:</span>
+SET maintenance_work_mem = '2GB';  <span class="cm">-- More RAM → faster sort → less temp disk I/O</span>
+CREATE INDEX idx_orders_customer ON orders(customer_id);
+
+<span class="cm">-- For very large tables: parallel index build (PostgreSQL 11+)</span>
+SET max_parallel_maintenance_workers = 4;
+CREATE INDEX idx_huge_table ON huge_table(col);
+<span class="cm">-- 4 workers sort partitions in parallel → up to 4× faster</span></code></pre>
+
+    <h3>Index Bloat — Detection and Remediation</h3>
+    <pre><code><span class="cm">-- Why indexes bloat:</span>
+<span class="cm">-- Deletions: dead tuples in leaf pages (lazy deletion)</span>
+<span class="cm">-- Updates: HOT fails (indexed column changed) → new entry + old entry</span>
+<span class="cm">-- Splits: half-full pages after splits never fill back up</span>
+<span class="cm">-- Random inserts: splits at random positions → all pages ~50% full</span>
+
+<span class="cm">-- Measure index bloat (PostgreSQL):</span>
+SELECT
+  schemaname,
+  tablename,
+  indexname,
+  pg_size_pretty(pg_relation_size(indexrelid)) AS index_size,
+  idx_scan AS scans,
+  round(100.0 * idx_scan / NULLIF(seq_scan + idx_scan, 0), 1) AS idx_scan_pct
+FROM pg_stat_user_indexes
+JOIN pg_stat_user_tables USING (relname)
+ORDER BY pg_relation_size(indexrelid) DESC;
+
+<span class="cm">-- pgstattuple extension (exact bloat measurement):</span>
+CREATE EXTENSION pgstattuple;
+SELECT * FROM pgstatindex('idx_orders_customer');
+<span class="cm">-- avg_leaf_density: 42.3  ← only 42% full! Heavy bloat</span>
+<span class="cm">-- leaf_fragmentation: 23.5 ← 23% of leaf pages are out of order on disk</span>
+
+<span class="cm">-- Fix index bloat:</span>
+<span class="cm">-- Option 1: REINDEX (locks table, not suitable for production)</span>
+REINDEX INDEX idx_orders_customer;
+
+<span class="cm">-- Option 2: REINDEX CONCURRENTLY (PostgreSQL 12+, no locks)</span>
+REINDEX INDEX CONCURRENTLY idx_orders_customer;
+<span class="cm">-- Creates new index, atomically swaps → zero downtime</span>
+<span class="cm">-- Takes ~2× longer than regular REINDEX</span>
+
+<span class="cm">-- Option 3: pg_repack extension (online, no locks)</span>
+pg_repack --index idx_orders_customer mydb</code></pre>
+
+    <h3>Query Planner Interaction — When the Planner Ignores Your Index</h3>
+    <pre><code><span class="cm">-- Planner uses statistics to decide: index scan vs seq scan</span>
+<span class="cm">-- Statistics: pg_statistic table, updated by ANALYZE</span>
+
+<span class="cm">-- Planner chooses INDEX SCAN when:</span>
+<span class="cm">-- Estimated rows to return < ~5-10% of table (high selectivity)</span>
+<span class="cm">-- Sequential scan too expensive relative to random I/O cost</span>
+
+<span class="cm">-- Planner chooses SEQ SCAN when:</span>
+<span class="cm">-- Low selectivity (most rows match WHERE clause)</span>
+<span class="cm">-- Small table (fits in cache → seq scan faster)</span>
+<span class="cm">-- LIKE '%suffix%' → index useless</span>
+
+<span class="cm">-- Force/test index usage (debugging only):</span>
+SET enable_seqscan = off;   <span class="cm">-- Disable seq scan for testing</span>
+SET enable_bitmapscan = off; <span class="cm">-- Disable bitmap heap scan</span>
+EXPLAIN ANALYZE SELECT * FROM orders WHERE customer_id = 42;
+
+<span class="cm">-- Update statistics (when planner makes wrong choices):</span>
+ANALYZE orders;              <span class="cm">-- Update all columns</span>
+ANALYZE orders(customer_id); <span class="cm">-- Update specific column</span>
+
+<span class="cm">-- Increase statistics target for skewed columns:</span>
+ALTER TABLE orders ALTER COLUMN status SET STATISTICS 500;
+<span class="cm">-- Default: 100 histogram buckets. 500 = more accurate estimates for skewed data</span>
+ANALYZE orders;
+
+<span class="cm">-- random_page_cost vs seq_page_cost (crucial for index decisions):</span>
+<span class="cm">-- Default: random=4.0, seq=1.0 (HDD assumption: random 4× more expensive)</span>
+<span class="cm">-- For NVMe SSD: random≈1.1, seq=1.0 (nearly equal!)</span>
+SET random_page_cost = 1.1;  <span class="cm">-- Makes planner favor index scans more</span>
+<span class="cm">-- Low random_page_cost → planner uses indexes more aggressively → correct for SSD</span></code></pre>
+
+    <div class="callout success">
+      <strong>✅ B-Tree Production Checklist</strong>
+      <strong>1. Page size:</strong> Match to storage block size. 8KB (PostgreSQL default) or 16KB (MySQL) are good for most workloads. Use 32KB for very large tables with range scans.<br/>
+      <strong>2. Primary key order:</strong> Use sequential keys (BIGSERIAL, UUID v7, ULID) — always appends to rightmost leaf → no page splits on insert.<br/>
+      <strong>3. Fillfactor:</strong> Set to 70-80% for tables with many updates — leaves room for HOT updates without index modifications.<br/>
+      <strong>4. Monitor bloat:</strong> Run pgstatindex monthly. REINDEX CONCURRENTLY when avg_leaf_density drops below 60%.<br/>
+      <strong>5. Cover your queries:</strong> Use INCLUDE columns to eliminate heap fetches for your most frequent queries (Index Only Scans).<br/>
+      <strong>6. Statistics:</strong> Run ANALYZE after bulk loads. Increase statistics target for skewed columns. Set random_page_cost=1.1 for SSDs.<br/>
+      <strong>7. shared_buffers:</strong> Set to 25% of RAM. Root and top internal nodes will stay hot → effectively 1 I/O per lookup.
+    </div>
+
+    <div class="metrics">
+      <div class="metric-card"><div class="val">3–4</div><div class="lbl">Typical B+Tree Height for Billions of Rows</div></div>
+      <div class="metric-card"><div class="val">~1 I/O</div><div class="lbl">Effective Lookup (Upper Levels Cached)</div></div>
+      <div class="metric-card"><div class="val">69%</div><div class="lbl">Average Fill Factor (B-Tree)</div></div>
+      <div class="metric-card"><div class="val">O(n)</div><div class="lbl">Bulk Build vs O(n log n) Individual Inserts</div></div>
+      <div class="metric-card"><div class="val">0</div><div class="lbl">Downtime with REINDEX CONCURRENTLY</div></div>
+      <div class="metric-card"><div class="val">25%</div><div class="lbl">RAM for shared_buffers (Recommended)</div></div>
+    </div>
+
+  </div>
+</section>
+
+</main>
+
+<!-- ═══════════════════════════ FOOTER ═══════════════════════════ -->
+<footer>
+  <p>B-Trees — Complete Deep Dive · System Design Reference · <strong>_sonnet</strong></p>
+  <p style="margin-top:6px; font-size:0.78rem;">
+    Structure · Search · Insertion · Deletion · Disk I/O · Concurrency · Variants · Real-World
+  </p>
+  <p style="margin-top:6px; font-size:0.75rem; color:#444c56;">
+    B-Tree · B+Tree · B*Tree · Blink-Tree · Fractal Tree · Copy-on-Write ·
+    PostgreSQL nbtree · InnoDB Clustered · SQLite · Lock Coupling · Latch-Free
+  </p>
+</footer>
+
+</body>
+</html>

@@ -1,0 +1,1698 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>System Design Deep Dive — Part 3</title>
+  <style>
+    :root {
+      --primary: #0d1117;
+      --accent: #0f3460;
+      --highlight: #e94560;
+      --card-bg: #161b22;
+      --text: #e6edf3;
+      --subtext: #8b949e;
+      --code-bg: #010409;
+      --border: #30363d;
+      --tag-bg: #21262d;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+      background: var(--primary);
+      color: var(--text);
+      line-height: 1.85;
+    }
+
+    /* ── HEADER ── */
+    header {
+      background: linear-gradient(135deg, #0f3460 0%, #16213e 40%, #533483 70%, #e94560 100%);
+      padding: 68px 40px;
+      text-align: center;
+    }
+    header h1 { font-size: 2.9rem; font-weight: 800; letter-spacing: -1px; }
+    header p  { font-size: 1.1rem; color: rgba(255,255,255,0.85); margin-top: 10px; }
+    .badge-row { display: flex; justify-content: center; gap: 10px; flex-wrap: wrap; margin-top: 16px; }
+    .badge {
+      display: inline-block;
+      background: rgba(255,255,255,0.15);
+      border: 1px solid rgba(255,255,255,0.3);
+      border-radius: 20px;
+      padding: 5px 16px;
+      font-size: 0.8rem;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+    }
+
+    /* ── TOC ── */
+    nav.toc {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      margin: 40px auto;
+      max-width: 940px;
+      padding: 34px 44px;
+    }
+    nav.toc h2 { color: var(--highlight); font-size: 1rem; margin-bottom: 18px;
+                 text-transform: uppercase; letter-spacing: 1.5px; }
+    nav.toc ol { padding-left: 22px; }
+    nav.toc li { margin: 10px 0; }
+    nav.toc a  { color: #58a6ff; text-decoration: none; font-size: 1rem; transition: color .2s; }
+    nav.toc a:hover { color: var(--highlight); }
+
+    /* ── MAIN ── */
+    main { max-width: 1040px; margin: 0 auto; padding: 20px 30px 100px; }
+
+    /* ── TOPIC CARD ── */
+    .topic {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      margin-bottom: 68px;
+      overflow: hidden;
+      box-shadow: 0 4px 40px rgba(0,0,0,.45);
+    }
+    .topic-header {
+      background: linear-gradient(100deg, var(--accent) 0%, #1a1a3e 100%);
+      padding: 34px 44px;
+      border-bottom: 2px solid var(--highlight);
+      display: flex;
+      align-items: center;
+      gap: 22px;
+    }
+    .topic-header .num {
+      background: var(--highlight);
+      color: white;
+      font-size: 1.35rem;
+      font-weight: 800;
+      width: 52px; height: 52px;
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0;
+    }
+    .topic-header h2 { font-size: 1.95rem; font-weight: 700; }
+    .topic-header p  { color: var(--subtext); font-size: 0.95rem; margin-top: 5px; }
+    .topic-body { padding: 40px 44px; }
+
+    /* ── HEADINGS ── */
+    .topic-body h3 {
+      color: #58a6ff; font-size: 1.25rem;
+      margin: 36px 0 14px;
+      padding-left: 14px;
+      border-left: 4px solid var(--highlight);
+    }
+    .topic-body h4 { color: #e3b341; font-size: 1.03rem; margin: 24px 0 10px; }
+    .topic-body p  { color: var(--text); margin-bottom: 14px; }
+    .topic-body ul,
+    .topic-body ol { padding-left: 24px; margin-bottom: 14px; }
+    .topic-body li { margin: 7px 0; color: var(--text); }
+    strong { color: #c9d1d9; }
+
+    /* ── CODE ── */
+    pre {
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 22px 26px;
+      overflow-x: auto;
+      margin: 14px 0 26px;
+      font-size: 0.865rem;
+      line-height: 1.68;
+    }
+    code { font-family: 'Fira Code','Cascadia Code','Consolas',monospace; color: #c9d1d9; }
+    pre code { color: #c9d1d9; }
+    .kw  { color: #ff79c6; }
+    .fn  { color: #50fa7b; }
+    .str { color: #f1fa8c; }
+    .cm  { color: #6272a4; font-style: italic; }
+    .nm  { color: #bd93f9; }
+    .cls { color: #8be9fd; }
+    .at  { color: #ffb86c; }
+
+    /* ── CALLOUT ── */
+    .callout {
+      border-radius: 10px;
+      padding: 18px 22px;
+      margin: 18px 0;
+      border-left: 5px solid;
+      font-size: 0.95rem;
+    }
+    .callout.info    { background: #0c2d48; border-color: #58a6ff; }
+    .callout.warn    { background: #2d1f00; border-color: #e3b341; }
+    .callout.success { background: #0d2a0d; border-color: #3fb950; }
+    .callout.danger  { background: #2d0d0d; border-color: #f85149; }
+    .callout.purple  { background: #1a0d2e; border-color: #bc8cff; }
+    .callout.teal    { background: #0a2530; border-color: #39d0d8; }
+    .callout strong  { display: block; margin-bottom: 6px;
+                       font-size: 0.82rem; text-transform: uppercase; letter-spacing: .6px; }
+    .callout.info    strong { color: #58a6ff; }
+    .callout.warn    strong { color: #e3b341; }
+    .callout.success strong { color: #3fb950; }
+    .callout.danger  strong { color: #f85149; }
+    .callout.purple  strong { color: #bc8cff; }
+    .callout.teal    strong { color: #39d0d8; }
+
+    /* ── DIAGRAM ── */
+    .diagram {
+      background: #010409;
+      border: 1px dashed #444c56;
+      border-radius: 10px;
+      padding: 22px 28px;
+      margin: 16px 0 26px;
+      font-family: 'Fira Code','Consolas',monospace;
+      font-size: 0.82rem;
+      color: #8b949e;
+      white-space: pre;
+      overflow-x: auto;
+      line-height: 1.65;
+    }
+    .diagram .hl { color: #79c0ff; }
+    .diagram .ar { color: var(--highlight); }
+    .diagram .gr { color: #3fb950; }
+    .diagram .yw { color: #e3b341; }
+    .diagram .pk { color: #ff79c6; }
+
+    /* ── TABLE ── */
+    table { width: 100%; border-collapse: collapse; margin: 16px 0 28px; font-size: .9rem; }
+    th { background: #0f3460; color: #e6edf3; padding: 13px 16px;
+         text-align: left; font-size: .85rem; letter-spacing: .3px; }
+    td { padding: 11px 16px; border-bottom: 1px solid var(--border);
+         color: var(--text); vertical-align: top; }
+    tr:nth-child(even) td { background: rgba(255,255,255,.025); }
+    tr:hover td { background: rgba(88,166,255,.05); }
+
+    /* ── TAGS ── */
+    .tags { display: flex; flex-wrap: wrap; gap: 8px; margin: 14px 0 6px; }
+    .tag { background: var(--tag-bg); border: 1px solid var(--border);
+           border-radius: 20px; padding: 4px 14px; font-size: .78rem; color: #79c0ff; }
+
+    /* ── METRICS ── */
+    .metrics { display: grid; grid-template-columns: repeat(auto-fit,minmax(155px,1fr));
+               gap: 14px; margin: 18px 0 28px; }
+    .metric-card { background: var(--primary); border: 1px solid var(--border);
+                   border-radius: 10px; padding: 18px 14px; text-align: center; }
+    .metric-card .val { font-size: 1.5rem; font-weight: 700; color: var(--highlight); }
+    .metric-card .lbl { font-size: .74rem; color: var(--subtext); margin-top: 5px; line-height: 1.4; }
+
+    /* ── TWO-COL ── */
+    .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; margin: 16px 0 24px; }
+    .col-card { background: var(--primary); border: 1px solid var(--border);
+                border-radius: 10px; padding: 20px 22px; }
+    .col-card h5 { color: #58a6ff; margin-bottom: 10px; font-size: .95rem; }
+    .col-card ul { padding-left: 18px; }
+    .col-card li { font-size: .88rem; margin: 5px 0; color: var(--subtext); }
+
+    /* ── STEP LIST ── */
+    .steps { counter-reset: step; padding: 0; list-style: none; margin: 16px 0 26px; }
+    .steps li {
+      counter-increment: step;
+      position: relative;
+      padding: 13px 16px 13px 54px;
+      margin: 9px 0;
+      background: var(--primary);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      font-size: .93rem;
+    }
+    .steps li::before {
+      content: counter(step);
+      position: absolute; left: 14px; top: 50%; transform: translateY(-50%);
+      background: var(--highlight); color: white;
+      width: 28px; height: 28px; border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: .78rem; font-weight: 700;
+    }
+
+    /* ── FOOTER ── */
+    footer { text-align: center; padding: 34px; color: var(--subtext);
+             font-size: .83rem; border-top: 1px solid var(--border); }
+
+    @media print {
+      body { background: #fff; color: #111; }
+      pre, .diagram { background: #f6f8fa !important; color: #111 !important; border-color: #ccc !important; }
+      .topic { border-color: #ccc !important; page-break-inside: avoid; }
+      .topic-header { background: #1a1a2e !important; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ══════════════════════ HEADER ══════════════════════ -->
+<header>
+  <h1>⚙️ System Design Deep Dive — Part 3</h1>
+  <p>Advanced internals, algorithms &amp; real-world patterns for senior engineers</p>
+  <div class="badge-row">
+    <span class="badge">9+ Years Experience</span>
+    <span class="badge">Advanced Level</span>
+    <span class="badge">Topics 14 – 20</span>
+  </div>
+</header>
+
+<!-- ══════════════════════ TOC ══════════════════════ -->
+<nav class="toc">
+  <h2>📚 Table of Contents</h2>
+  <ol start="14">
+    <li><a href="#throughput-latency">Throughput &amp; Latency — Percentiles, Tail Amplification, USL, Coordinated Omission</a></li>
+    <li><a href="#observability">Observability — Metrics, Logs, Traces, OpenTelemetry, SLO Alerting</a></li>
+    <li><a href="#consensus">Consensus Algorithms — Paxos, Raft, Leader Election, Log Replication</a></li>
+    <li><a href="#cap">CAP Theorem — Partition Handling, PACELC, Consistency Models</a></li>
+    <li><a href="#fault-tolerance">Fault Tolerance — Failure Domains, RTO/RPO, Redundancy, Recovery Patterns</a></li>
+    <li><a href="#rest-grpc">REST vs gRPC — HTTP Semantics, Protobuf Encoding, Streaming, Contracts</a></li>
+    <li><a href="#graphql-rest">GraphQL vs REST — Schema, Resolver Chain, N+1 Problem, DataLoader, Federation</a></li>
+  </ol>
+</nav>
+
+<main>
+
+<!-- ═══════════════════════════════════════════════════
+     14. THROUGHPUT AND LATENCY
+═══════════════════════════════════════════════════ -->
+<section class="topic" id="throughput-latency">
+  <div class="topic-header">
+    <div class="num">14</div>
+    <div>
+      <h2>Throughput &amp; Latency</h2>
+      <p>The two fundamental performance axes — measurement, percentiles, tail amplification, and system models</p>
+    </div>
+  </div>
+  <div class="topic-body">
+
+    <div class="tags">
+      <span class="tag">p50 / p99 / p999</span><span class="tag">Tail Latency Amplification</span>
+      <span class="tag">Little's Law</span><span class="tag">USL</span><span class="tag">Coordinated Omission</span>
+      <span class="tag">HDR Histogram</span><span class="tag">Amdahl's Law</span><span class="tag">Backpressure</span>
+    </div>
+
+    <h3>Precise Definitions — What They Are and Are Not</h3>
+    <div class="two-col">
+      <div class="col-card">
+        <h5>⚡ Throughput</h5>
+        <ul>
+          <li>Work completed per unit time (req/s, MB/s, tx/s)</li>
+          <li>A <em>rate</em> measured at the system output</li>
+          <li>Maximized by parallelism, batching, pipelining</li>
+          <li>Bounded by the slowest stage (bottleneck)</li>
+          <li>Governed by Amdahl's Law for parallel sections</li>
+          <li>Example: 50,000 req/s on an API server</li>
+        </ul>
+      </div>
+      <div class="col-card">
+        <h5>🕰️ Latency</h5>
+        <ul>
+          <li>Time for one operation to complete (ms, µs, ns)</li>
+          <li>A <em>duration</em> measured per individual request</li>
+          <li>Minimized by reducing hops, caching, co-location</li>
+          <li>Has an absolute floor: speed-of-light propagation</li>
+          <li>Distributions matter far more than means</li>
+          <li>Example: p99 = 45ms on an API endpoint</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="callout warn">
+      <strong>⚠️ The Fundamental Tension</strong>
+      Throughput and latency trade off against each other. <strong>Batching</strong> increases throughput (amortizes fixed overhead across many items) but increases latency (items wait to fill the batch). TCP's Nagle algorithm coalesces small packets for better throughput at the cost of up to 200ms of added latency. Disable with <code>TCP_NODELAY</code> for latency-sensitive services (Redis, trading systems, real-time APIs).
+    </div>
+
+    <h3>Why Averages Are Lies — The Case for Percentiles</h3>
+    <p>The arithmetic mean (average) hides the most important information in a latency distribution. A bimodal distribution (90% of requests: 1ms, 10% of requests: 1000ms) yields a mean of ~101ms — which describes neither population accurately. Percentiles expose the truth:</p>
+
+    <pre><code><span class="cm">// Realistic latency sample set — 1000 requests (milliseconds)</span>
+<span class="cm">// 890 requests:  2ms   ← cache hit fast path</span>
+<span class="cm">// 95  requests: 50ms   ← DB read (index scan)</span>
+<span class="cm">// 10  requests: 200ms  ← DB read (full table scan / lock wait)</span>
+<span class="cm">// 4   requests: 800ms  ← downstream service slow</span>
+<span class="cm">// 1   request: 5000ms  ← GC stop-the-world pause</span>
+
+mean   = (890×2 + 95×50 + 10×200 + 4×800 + 1×5000) / 1000 = 14.5ms
+<span class="cm">// ↑ Completely hides the 5-second outlier. Nobody experienced 14.5ms!</span>
+
+p50  (median) =   2ms   <span class="cm">← half of users faster than this</span>
+p90           =  10ms
+p95           =  50ms   <span class="cm">← 1 in 20 requests at this latency</span>
+p99           = 300ms   <span class="cm">← 1 in 100 requests at this latency</span>
+p99.9         = 5000ms  <span class="cm">← 1 in 1000 requests — at 1000 req/s: 1 per second!</span>
+
+<span class="cm">// Golden Rule: Always set SLOs on percentiles, never on means.</span>
+<span class="cm">// Good SLO: "p99 latency ≤ 200ms measured over a 5-minute window"</span>
+<span class="cm">// Bad SLO:  "average latency ≤ 50ms"</span></code></pre>
+
+    <h3>Tail Latency Amplification — The Hidden Killer at Scale</h3>
+    <p>When a single user-facing request fans out to multiple downstream services in parallel, the <strong>observed latency equals the maximum of all dependency latencies</strong>. What looks like a rare p99 event at the service level becomes a near-certain experience at the user level:</p>
+
+    <pre><code><span class="cm">// Fan-out to N independent services, each with p99 = 1% slow</span>
+<span class="cm">// P(user request is fast) = P(ALL services fast)</span>
+
+P(all fast | N=1)   = 0.99^1   = 99.0%  → 1.0% slow
+P(all fast | N=10)  = 0.99^10  = 90.4%  → 9.6% slow
+P(all fast | N=50)  = 0.99^50  = 60.5%  → 39.5% slow
+P(all fast | N=100) = 0.99^100 = 36.6%  → 63.4% slow ← majority experience tail!
+
+<span class="cm">// Solution 1: Hedged Requests (Google "The Tail at Scale", Dean &amp; Barroso 2013)</span>
+<span class="kw">async function</span> <span class="fn">hedgedRequest</span>(primaryBackend, hedgeBackends, key) {
+  <span class="cm">// Send to primary; if no response within p95 latency, also send to hedge</span>
+  <span class="kw">const</span> p95Threshold = <span class="nm">20</span>; <span class="cm">// ms</span>
+
+  <span class="kw">return new</span> <span class="cls">Promise</span>((resolve, reject) => {
+    <span class="kw">let</span> resolved = <span class="kw">false</span>;
+
+    <span class="kw">const</span> <span class="fn">tryBackend</span> = (backend) => {
+      backend.<span class="fn">get</span>(key).<span class="fn">then</span>(result => {
+        <span class="kw">if</span> (!resolved) { resolved = <span class="kw">true</span>; <span class="fn">resolve</span>(result); }
+      });
+    };
+
+    <span class="fn">tryBackend</span>(primaryBackend);
+
+    <span class="cm">// After p95 threshold, fire hedge to second backend</span>
+    <span class="fn">setTimeout</span>(() => {
+      <span class="kw">if</span> (!resolved) <span class="fn">tryBackend</span>(hedgeBackends[<span class="nm">0</span>]);
+    }, p95Threshold);
+  });
+  <span class="cm">// Cost: ~5% extra backend load. Benefit: p99 → near p95 latency for user</span>
+}
+
+<span class="cm">// Solution 2: Tie-breaking — send to 2 backends simultaneously,</span>
+<span class="cm">// cancel slower one when first responds (used by Cassandra speculative execution)</span></code></pre>
+
+    <h3>Coordinated Omission — The Load Testing Fallacy</h3>
+    <p>The most dangerous and least understood performance measurement mistake. When a system is slow, a naive load tester <em>slows down too</em> — it waits for the previous response before sending the next request. This means the tester doesn't measure the experience of requests that would have been queuing during that slow period:</p>
+
+    <pre><code><span class="cm">// Naive load test — WRONG (coordinated omission):</span>
+<span class="kw">for</span> (;;) {
+  <span class="kw">const</span> start = Date.<span class="fn">now</span>();
+  <span class="kw">await</span> http.<span class="fn">get</span>(<span class="str">'/api'</span>);            <span class="cm">// Waits for response before next req</span>
+  record(Date.<span class="fn">now</span>() - start);
+}
+<span class="cm">// If server stalls for 30s, tester records 1 request at 30s</span>
+<span class="cm">// Reality: 30,000 real users would have been queuing during that 30s!</span>
+
+<span class="cm">// Correct load test — scheduled arrivals (HdrHistogram + wrk2 / Gatling):</span>
+<span class="kw">const</span> targetRPS = <span class="nm">1000</span>;
+<span class="kw">const</span> intervalMs = <span class="nm">1000</span> / targetRPS; <span class="cm">// 1ms between requests</span>
+
+<span class="kw">let</span> nextSendTime = Date.<span class="fn">now</span>();
+<span class="kw">while</span> (running) {
+  <span class="kw">const</span> scheduledStart = nextSendTime;
+  nextSendTime += intervalMs;         <span class="cm">// Advance clock regardless of completion</span>
+
+  <span class="cm">// Send asynchronously — don't wait for response before scheduling next</span>
+  http.<span class="fn">get</span>(<span class="str">'/api'</span>).<span class="fn">then</span>(res => {
+    <span class="cm">// Record against SCHEDULED start time, not actual send time</span>
+    histogram.<span class="fn">record</span>(Date.<span class="fn">now</span>() - scheduledStart);
+  });
+
+  <span class="kw">await</span> <span class="fn">sleepUntil</span>(nextSendTime);
+}
+<span class="cm">// Now if server stalls 30s, histogram records 30,000 requests each at 30s</span></code></pre>
+
+    <h3>Little's Law — The Universal System Capacity Formula</h3>
+    <pre><code><span class="cm">// L = λ × W</span>
+<span class="cm">// L = average number of items in system (concurrent requests in flight)</span>
+<span class="cm">// λ = arrival rate (requests per second)</span>
+<span class="cm">// W = average time in system (response time in seconds)</span>
+
+<span class="cm">// Example 1: Capacity Planning</span>
+<span class="cm">// Target: 10,000 req/s with p99 latency of 100ms</span>
+L = <span class="nm">10000</span> × <span class="nm">0.1</span> = <span class="nm">1000</span>  <span class="cm">← must support 1000 concurrent requests</span>
+<span class="cm">// If each thread handles 1 concurrent request: need 1000 threads</span>
+<span class="cm">// If async (Node.js event loop): 1 thread can handle all 1000</span>
+
+<span class="cm">// Example 2: Database Connection Pool Sizing</span>
+<span class="cm">// DB query rate: 500 qps, average query time: 20ms</span>
+L = <span class="nm">500</span> × <span class="nm">0.02</span> = <span class="nm">10</span>  <span class="cm">← 10 concurrent DB connections needed</span>
+<span class="cm">// Set pool size = 10–15 (with buffer). Don't set 100+ — wastes resources</span>
+<span class="cm">// and causes context switching overhead on DB server</span>
+
+<span class="cm">// Example 3: Why latency increases under load (queuing effect)</span>
+<span class="cm">// Service capacity: 1000 req/s. Arrival rate: 900 req/s (90% utilization)</span>
+<span class="cm">// M/M/1 queue: W = 1/(μ-λ) = 1/(1000-900) = 10ms service time becomes 10ms wait</span>
+<span class="cm">// Arrival rate: 990 req/s (99% utilization)</span>
+<span class="cm">// W = 1/(1000-990) = 100ms ← 10x latency increase for 10% more load!</span></code></pre>
+
+    <h3>Universal Scalability Law (USL) — Modeling Concurrency Limits</h3>
+    <p>Neil Gunther's USL extends Amdahl's Law with a <strong>coherency penalty</strong> — the cost of keeping distributed state consistent. It predicts throughput degradation as concurrency rises:</p>
+
+    <pre><code><span class="cm">// USL Formula: X(N) = N / (1 + α(N-1) + βN(N-1))</span>
+<span class="cm">// X(N) = throughput with N workers/nodes</span>
+<span class="cm">// α    = contention coefficient (serialization — Amdahl component)</span>
+<span class="cm">// β    = coherency coefficient (cross-node coordination cost)</span>
+
+<span class="cm">// Three regimes:</span>
+<span class="cm">// β = 0, α = 0: Perfect linear scaling X(N) = N</span>
+<span class="cm">// β = 0, α > 0: Amdahl — saturates at 1/α</span>
+<span class="cm">// β > 0, α > 0: USL — throughput PEAKS then DECREASES (retrograde scalability!)</span>
+
+<span class="cm">// Real example: Database cluster benchmark</span>
+<span class="cm">// At N=1:  X=1000 tps</span>
+<span class="cm">// At N=8:  X=6200 tps  (fits USL with α=0.02, β=0.001)</span>
+<span class="cm">// At N=16: X=9800 tps  (still growing)</span>
+<span class="cm">// At N=32: X=8500 tps  ← DEGRADES! Coherency cost exceeds parallelism gain</span>
+<span class="cm">// At N=64: X=5200 tps  ← Worse than 8 nodes!</span>
+
+<span class="cm">// Why: at high node counts, cache coherency protocols (MESI), distributed</span>
+<span class="cm">// locking, and gossip overhead consume more CPU than the work itself</span>
+<span class="cm">// USL lets you predict the optimal node count BEFORE running expensive tests</span></code></pre>
+
+    <h3>Measuring Latency Correctly — HDR Histogram</h3>
+    <pre><code><span class="cm">// HDR Histogram (High Dynamic Range) — stores values with fixed relative error</span>
+<span class="cm">// Standard histograms: fixed bucket width → poor precision at high values</span>
+<span class="cm">// HDR: logarithmic bucket sizing → 1% relative error at ALL scales</span>
+
+<span class="cm">// Stores values from 1µs to 1 hour in ~3600 bytes</span>
+<span class="cm">// Can represent 1ms and 1,000,000ms with equal relative precision</span>
+<span class="cm">// Supports non-destructive merging: combine histograms from multiple nodes</span>
+
+<span class="cm">// Usage in Java (HdrHistogram library):</span>
+Histogram h = <span class="kw">new</span> <span class="cls">Histogram</span>(<span class="nm">3600000000L</span>, <span class="nm">3</span>); <span class="cm">// max=1hr, 3 sig figs</span>
+h.<span class="fn">recordValue</span>(latencyMicros);
+
+<span class="cm">// Retrieve percentiles:</span>
+h.<span class="fn">getValueAtPercentile</span>(<span class="nm">50.0</span>)   <span class="cm">// p50</span>
+h.<span class="fn">getValueAtPercentile</span>(<span class="nm">99.0</span>)   <span class="cm">// p99</span>
+h.<span class="fn">getValueAtPercentile</span>(<span class="nm">99.9</span>)   <span class="cm">// p99.9</span>
+h.<span class="fn">getValueAtPercentile</span>(<span class="nm">99.99</span>)  <span class="cm">// p99.99</span>
+
+<span class="cm">// Key insight: report percentiles over SHORT windows (1min)</span>
+<span class="cm">// A single 5s GC pause averaged over 24h looks like 3ms/req</span>
+<span class="cm">// But in that 1-minute window it dominates every measurement</span></code></pre>
+
+    <div class="metrics">
+      <div class="metric-card"><div class="val">p99</div><div class="lbl">Minimum SLO Target Percentile</div></div>
+      <div class="metric-card"><div class="val">70%</div><div class="lbl">Max Utilization Before Queuing Blowup</div></div>
+      <div class="metric-card"><div class="val">L=λW</div><div class="lbl">Little's Law (concurrency formula)</div></div>
+      <div class="metric-card"><div class="val">~63%</div><div class="lbl">Fan-out tail hit at N=100 services</div></div>
+      <div class="metric-card"><div class="val">1%</div><div class="lbl">HDR Histogram Relative Error</div></div>
+    </div>
+
+  </div>
+</section>
+
+
+<!-- ═══════════════════════════════════════════════════
+     15. OBSERVABILITY
+═══════════════════════════════════════════════════ -->
+<section class="topic" id="observability">
+  <div class="topic-header">
+    <div class="num">15</div>
+    <div>
+      <h2>Observability</h2>
+      <p>The three pillars — metrics, logs, traces — and how OpenTelemetry unifies them for deep system insight</p>
+    </div>
+  </div>
+  <div class="topic-body">
+
+    <div class="tags">
+      <span class="tag">Metrics / Logs / Traces</span><span class="tag">OpenTelemetry</span><span class="tag">Prometheus</span>
+      <span class="tag">Structured Logging</span><span class="tag">Distributed Tracing</span><span class="tag">SLO Alerting</span>
+      <span class="tag">Cardinality</span><span class="tag">Exemplars</span>
+    </div>
+
+    <h3>Observability vs. Monitoring — The Critical Distinction</h3>
+    <p><strong>Monitoring</strong> tells you <em>when</em> something is wrong (threshold alerts on known metrics). <strong>Observability</strong> lets you understand <em>why</em> something is wrong by asking arbitrary questions of your system without prior instrumentation. Observability is a property of the system; monitoring is something you do with it.</p>
+
+    <div class="callout info">
+      <strong>📐 The Three Pillars</strong>
+      <strong>Metrics:</strong> Numeric aggregations over time (CPU%, req/s, error rate). Cheap to store, great for alerting and dashboards.<br/>
+      <strong>Logs:</strong> Timestamped records of discrete events. Expensive at scale, essential for debugging specific incidents.<br/>
+      <strong>Traces:</strong> Causal chains of operations across services. Answer "why was this request slow?" with full call graph.
+    </div>
+
+    <h3>Metrics — Internals and Data Models</h3>
+
+    <h4>Prometheus Data Model and Metric Types</h4>
+    <pre><code><span class="cm">// Every metric is a time series identified by name + label set:</span>
+http_request_duration_seconds{method="GET", route="/api/users", status="200", pod="app-7d8f9"} 0.042
+
+<span class="cm">// Four metric types:</span>
+
+<span class="cm">// 1. Counter — monotonically increasing (resets on restart)</span>
+<span class="cm">//    Use: request counts, error counts, bytes sent</span>
+http_requests_total{method="POST", status="500"} 1847
+
+<span class="cm">// 2. Gauge — can go up or down (current value)</span>
+<span class="cm">//    Use: queue depth, active connections, memory used</span>
+active_connections{pool="db"} 43
+
+<span class="cm">// 3. Histogram — samples in configurable buckets + sum + count</span>
+<span class="cm">//    Use: request latency, payload size, DB query time</span>
+http_request_duration_seconds_bucket{le="0.005"} 24054
+http_request_duration_seconds_bucket{le="0.01"}  33444
+http_request_duration_seconds_bucket{le="0.05"}  100392
+http_request_duration_seconds_bucket{le="0.1"}   129389
+http_request_duration_seconds_bucket{le="+Inf"}  133988
+http_request_duration_seconds_sum   53423.29
+http_request_duration_seconds_count 133988
+
+<span class="cm">// Calculate p95 from histogram (Prometheus query):</span>
+histogram_quantile(0.95,
+  rate(http_request_duration_seconds_bucket[5m]))
+
+<span class="cm">// 4. Summary — client-side quantile calculation (less flexible)</span>
+<span class="cm">//    Quantiles calculated in app process — cannot aggregate across instances</span>
+<span class="cm">//    Use Histogram instead for multi-instance deployments</span></code></pre>
+
+    <h4>Cardinality — The Prometheus Killer</h4>
+    <pre><code><span class="cm">// Cardinality = number of unique time series = Cartesian product of label values</span>
+
+<span class="cm">// Safe labels (low cardinality):</span>
+http_requests_total{method, route, status_code}
+<span class="cm">// methods=5, routes=50, status=10 → 5×50×10 = 2,500 series ✓</span>
+
+<span class="cm">// DANGEROUS labels (high cardinality):</span>
+http_requests_total{user_id="usr_123456"}  <span class="cm">← 1M users = 1M series ✗</span>
+http_requests_total{session_id="abc"}      <span class="cm">← unbounded ✗</span>
+http_requests_total{trace_id="xyz"}        <span class="cm">← each request unique ✗</span>
+
+<span class="cm">// High cardinality kills Prometheus:</span>
+<span class="cm">// Each series = ~3KB RAM in Prometheus</span>
+<span class="cm">// 1M series = 3GB RAM for just this one metric!</span>
+<span class="cm">// Solution: use logs/traces for high-cardinality dimensions</span>
+<span class="cm">// Or: use Prometheus exemplars to link metric → trace for p99 samples</span></code></pre>
+
+    <h4>The RED and USE Methods — What to Measure</h4>
+    <pre><code><span class="cm">// RED Method (for services — request-driven):</span>
+<span class="cm">// Rate     — requests per second</span>
+<span class="cm">// Errors   — error rate (5xx / total)</span>
+<span class="cm">// Duration — latency distribution (histogram)</span>
+
+<span class="cm">// USE Method (for resources — CPU, memory, disk, network):</span>
+<span class="cm">// Utilization — % time resource is busy</span>
+<span class="cm">// Saturation  — queue depth / wait time (resource over-utilized)</span>
+<span class="cm">// Errors      — error events (e.g., disk I/O errors, packet drops)</span>
+
+<span class="cm">// Google's Four Golden Signals (superset):</span>
+<span class="cm">// Latency, Traffic, Errors, Saturation</span></code></pre>
+
+    <h3>Structured Logging — Internals and Best Practices</h3>
+    <pre><code><span class="cm">// Bad log (unstructured — hard to query at scale):</span>
+<span class="cm">// 2024-01-15 10:23:45 ERROR Payment failed for user 12345 amount 99.99</span>
+
+<span class="cm">// Good log (structured JSON — queryable in any log platform):</span>
+{
+  <span class="str">"timestamp"</span>: <span class="str">"2024-01-15T10:23:45.123Z"</span>,
+  <span class="str">"level"</span>:     <span class="str">"ERROR"</span>,
+  <span class="str">"service"</span>:   <span class="str">"payment-service"</span>,
+  <span class="str">"version"</span>:   <span class="str">"v2.3.1"</span>,
+  <span class="str">"trace_id"</span>:  <span class="str">"4bf92f3577b34da6"</span>,   <span class="cm">← Links to distributed trace!</span>
+  <span class="str">"span_id"</span>:   <span class="str">"00f067aa0ba902b7"</span>,
+  <span class="str">"user_id"</span>:   <span class="str">"usr_12345"</span>,
+  <span class="str">"event"</span>:     <span class="str">"payment_failed"</span>,
+  <span class="str">"amount"</span>:    <span class="nm">99.99</span>,
+  <span class="str">"currency"</span>:  <span class="str">"USD"</span>,
+  <span class="str">"error"</span>:     <span class="str">"insufficient_funds"</span>,
+  <span class="str">"duration_ms"</span>: <span class="nm">342</span>,
+  <span class="str">"pod"</span>:       <span class="str">"payment-7d9f-xk2p"</span>
+}
+
+<span class="cm">// Log pipeline architecture at scale:</span>
+<span class="cm">// App → stdout → Fluentd/Vector (collector) → Kafka (buffer) → Elasticsearch/Loki</span>
+<span class="cm">// Never write directly to log aggregation from app — Kafka buffers spikes</span>
+<span class="cm">// and prevents log loss during aggregation backpressure</span>
+
+<span class="cm">// Log sampling — reduce volume at high throughput:</span>
+<span class="kw">function</span> <span class="fn">shouldLog</span>(level, samplingRate) {
+  <span class="kw">if</span> (level === <span class="str">'ERROR'</span>) <span class="kw">return true</span>;   <span class="cm">// Always log errors</span>
+  <span class="kw">if</span> (level === <span class="str">'WARN'</span>)  <span class="kw">return true</span>;   <span class="cm">// Always log warnings</span>
+  <span class="kw">return</span> Math.<span class="fn">random</span>() &lt; samplingRate;    <span class="cm">// Sample INFO/DEBUG (e.g., 1%)</span>
+}
+<span class="cm">// Record sampled_rate in log entry so you can extrapolate totals</span></code></pre>
+
+    <h3>Distributed Tracing — How It Works Internally</h3>
+    <p>Distributed tracing propagates a context (trace ID + span ID) through every hop of a request, allowing reconstruction of the full call graph after the fact:</p>
+
+    <div class="diagram">
+<span class="hl">Distributed Trace — Anatomy of a Span Tree</span>
+
+TraceID: 4bf92f3577b34da6  (same across all services for one user request)
+
+<span class="hl">Span 1:</span> API Gateway            [0ms ────────────────────────── 350ms]
+  <span class="hl">Span 2:</span> Auth Service          [5ms ── 25ms]
+  <span class="hl">Span 3:</span> Order Service         [30ms ──────────────────── 340ms]
+    <span class="hl">Span 4:</span> DB Query (orders)    [35ms ─ 80ms]
+    <span class="hl">Span 5:</span> Payment Service      [90ms ────────────── 300ms]
+      <span class="hl">Span 6:</span> DB Query (payment) [95ms ── 180ms]
+      <span class="hl">Span 7:</span> Stripe API call    [185ms ────── 295ms]  <span class="ar">← BOTTLENECK</span>
+    <span class="hl">Span 8:</span> Inventory Service    [90ms ─────── 200ms]  (parallel with Payment)
+      <span class="hl">Span 9:</span> Redis GET           [91ms ─ 95ms]
+
+Critical path: Spans 1→3→5→7 = 295ms of the 350ms total
+<span class="yw">← This is what you optimize. Span 8 is not on critical path.</span>
+    </div>
+
+    <pre><code><span class="cm">// Trace context propagation (W3C Trace Context standard):</span>
+<span class="cm">// HTTP header: traceparent: 00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01</span>
+<span class="cm">//                           ver-traceId(128bit)-parentSpanId(64bit)-flags</span>
+
+<span class="cm">// OpenTelemetry SDK — instrumenting a service:</span>
+<span class="kw">const</span> { trace, context } = require(<span class="str">'@opentelemetry/api'</span>);
+<span class="kw">const</span> tracer = trace.<span class="fn">getTracer</span>(<span class="str">'order-service'</span>, <span class="str">'1.0.0'</span>);
+
+<span class="kw">async function</span> <span class="fn">processOrder</span>(req) {
+  <span class="cm">// Start a new span — automatically propagates trace context from incoming request</span>
+  <span class="kw">const</span> span = tracer.<span class="fn">startSpan</span>(<span class="str">'processOrder'</span>, {
+    attributes: {
+      <span class="str">'order.id'</span>:      req.body.orderId,
+      <span class="str">'order.amount'</span>:  req.body.amount,
+      <span class="str">'http.method'</span>:   req.method,
+      <span class="str">'http.route'</span>:    <span class="str">'/api/orders'</span>,
+    }
+  });
+
+  <span class="kw">try</span> {
+    <span class="kw">await</span> context.<span class="fn">with</span>(trace.<span class="fn">setSpan</span>(context.<span class="fn">active</span>(), span), <span class="kw">async</span> () => {
+      <span class="kw">await</span> <span class="fn">validateInventory</span>(req.body);  <span class="cm">// Child spans created inside</span>
+      <span class="kw">await</span> <span class="fn">chargePayment</span>(req.body);      <span class="cm">// Each fn creates its own span</span>
+      <span class="kw">await</span> <span class="fn">updateDatabase</span>(req.body);
+    });
+    span.<span class="fn">setStatus</span>({ code: SpanStatusCode.OK });
+  } <span class="kw">catch</span> (err) {
+    span.<span class="fn">recordException</span>(err);           <span class="cm">// Attach exception to span</span>
+    span.<span class="fn">setStatus</span>({ code: SpanStatusCode.ERROR, message: err.message });
+    <span class="kw">throw</span> err;
+  } <span class="kw">finally</span> {
+    span.<span class="fn">end</span>();  <span class="cm">// Export to Jaeger/Tempo/Zipkin via OTLP</span>
+  }
+}</code></pre>
+
+    <h3>SLO-Based Alerting — Alert on User Pain, Not Symptoms</h3>
+    <pre><code><span class="cm">// Traditional alerting (BAD): Alert when CPU > 80%</span>
+<span class="cm">// → Too noisy (CPU can be 90% with perfect user experience)</span>
+<span class="cm">// → Misses user impact (CPU=30% but DB is down)</span>
+
+<span class="cm">// SLO-based alerting (GOOD): Alert when error budget burns too fast</span>
+
+<span class="cm">// SLO: 99.9% of requests succeed over 30 days</span>
+<span class="cm">// Error budget: 0.1% × 30d × 24h × 60min = 43.2 minutes total downtime</span>
+
+<span class="cm">// Multi-window burn rate alert (Google SRE Workbook):</span>
+<span class="cm">// Page (fast burn):  error rate > 14.4× budget rate for 1h AND 5min window</span>
+<span class="cm">// Ticket (slow burn): error rate > 1× budget rate for 3d window</span>
+
+<span class="cm">// Prometheus alerting rules:</span>
+<span class="kw">groups</span>:
+  - <span class="kw">name</span>: slo_alerts
+    <span class="kw">rules</span>:
+      - <span class="kw">alert</span>: ErrorBudgetBurnRateFast
+        <span class="kw">expr</span>: |
+          (
+            <span class="fn">rate</span>(http_requests_total{status=~<span class="str">"5.."</span>}[1h])
+            /
+            <span class="fn">rate</span>(http_requests_total[1h])
+          ) > (<span class="nm">14.4</span> * <span class="nm">0.001</span>)   <span class="cm">// 14.4× burn rate of 0.1% budget</span>
+          <span class="kw">and</span>
+          (
+            <span class="fn">rate</span>(http_requests_total{status=~<span class="str">"5.."</span>}[5m])
+            /
+            <span class="fn">rate</span>(http_requests_total[5m])
+          ) > (<span class="nm">14.4</span> * <span class="nm">0.001</span>)
+        <span class="kw">for</span>: 2m
+        <span class="kw">labels</span>:
+          <span class="kw">severity</span>: page          <span class="cm">// Wake someone up!</span>
+        <span class="kw">annotations</span>:
+          <span class="kw">summary</span>: <span class="str">"Error budget burning 14.4x faster — only hours remaining"</span></code></pre>
+
+    <h3>OpenTelemetry — Unified Observability Standard</h3>
+    <div class="diagram">
+<span class="hl">OpenTelemetry Architecture</span>
+
+Your Application
+┌─────────────────────────────────────────────────────┐
+│  OTel SDK (auto-instrumentation + manual spans)     │
+│  Generates: Traces + Metrics + Logs (correlated!)   │
+└────────────────────────┬────────────────────────────┘
+                          │ OTLP (gRPC or HTTP/protobuf)
+                          ▼
+┌─────────────────────────────────────────────────────┐
+│           OpenTelemetry Collector                   │
+│  Receivers → Processors → Exporters                 │
+│  ┌──────────┐  ┌─────────────────┐  ┌───────────┐  │
+│  │OTLP recv │→ │Batch, Sample,   │→ │Prometheus │  │
+│  │Jaeger    │  │Attribute filter,│  │Jaeger     │  │
+│  │Zipkin    │  │Tail sampling    │  │Datadog    │  │
+│  └──────────┘  └─────────────────┘  │Loki, OTLP │  │
+└─────────────────────────────────────└───────────┘──┘
+
+<span class="yw">Tail Sampling</span>: Collector buffers trace data, only exports traces that are
+  - Slow (p99+ latency)
+  - Contain errors
+  - Match specific routes
+<span class="gr">Reduces storage cost 99%+ while keeping all interesting traces</span>
+    </div>
+
+  </div>
+</section>
+
+
+<!-- ═══════════════════════════════════════════════════
+     16. CONSENSUS ALGORITHMS
+═══════════════════════════════════════════════════ -->
+<section class="topic" id="consensus">
+  <div class="topic-header">
+    <div class="num">16</div>
+    <div>
+      <h2>Consensus Algorithms</h2>
+      <p>How distributed systems agree on a single value despite failures — Paxos, Raft, leader election, log replication</p>
+    </div>
+  </div>
+  <div class="topic-body">
+
+    <div class="tags">
+      <span class="tag">Paxos</span><span class="tag">Raft</span><span class="tag">Leader Election</span>
+      <span class="tag">Log Replication</span><span class="tag">Split-Brain</span><span class="tag">Quorum</span>
+      <span class="tag">Term / Epoch</span><span class="tag">etcd / ZooKeeper</span>
+    </div>
+
+    <h3>The Consensus Problem — Why It's Hard</h3>
+    <p>Consensus means: given N nodes, all nodes must <strong>agree on the same value</strong>, even if some nodes crash or messages are lost/delayed. The FLP Impossibility Theorem (Fischer, Lynch, Paterson 1985) proves that no deterministic algorithm can guarantee consensus in an asynchronous system with even ONE faulty process. Real-world systems work around this by assuming partial synchrony (messages eventually arrive) and using timeouts.</p>
+
+    <div class="callout danger">
+      <strong>🚨 Split-Brain — The Worst Failure Mode</strong>
+      A network partition creates two isolated groups, both believing themselves to be the legitimate leader. Both accept writes independently — the data diverges. When the partition heals, you have conflicting histories with no clear winner. Consensus algorithms prevent split-brain by requiring a <strong>quorum (majority)</strong> for any decision. With N nodes, quorum = ⌊N/2⌋ + 1. Only one partition can ever have a majority.
+    </div>
+
+    <h3>Paxos — The Original Consensus Algorithm</h3>
+    <p>Paxos (Lamport 1989/1998) is the theoretical foundation for all practical consensus algorithms. It runs in two phases and guarantees safety (never chooses two different values) but doesn't guarantee liveness (may loop forever in adversarial message ordering):</p>
+
+    <div class="diagram">
+<span class="hl">Paxos — Two-Phase Protocol (single value consensus)</span>
+
+Roles: Proposer (initiates), Acceptors (vote), Learners (observe)
+Quorum (majority) required: N=5 nodes → quorum=3
+
+<span class="hl">Phase 1: PREPARE</span>
+Proposer → All Acceptors: Prepare(n=5)    <span class="cm">← n = proposal number (globally unique)</span>
+
+Each Acceptor responds:
+  If n > highest_seen_proposal:
+    Promise: "I won't accept proposals &lt; n"
+    Return: (highest_accepted_proposal, highest_accepted_value)
+
+<span class="hl">Phase 2: ACCEPT</span>
+Proposer (after receiving quorum of promises):
+  value = highest previously accepted value (if any), else own value
+  Proposer → Quorum of Acceptors: Accept(n=5, value="v")
+
+Each Acceptor:
+  If n >= promised: Accept and store (n, value). Reply Accepted(n, value)
+  If n &lt; promised:  Reject (Proposer must retry with higher n)
+
+Proposer receives quorum of Accepted → <span class="gr">VALUE CHOSEN</span>
+Proposer → Learners: Decided(value="v")
+    </div>
+
+    <h4>Multi-Paxos — Efficient Repeated Consensus (Log Replication)</h4>
+    <pre><code><span class="cm">// Single-shot Paxos = 2 round trips per value = too slow for logs</span>
+<span class="cm">// Multi-Paxos optimization: once a leader is established with a stable ballot,</span>
+<span class="cm">// skip Phase 1 for subsequent log entries — only run Phase 2</span>
+
+<span class="cm">// This is how Google Chubby, Apache Zookeeper (ZAB), and etcd work internally</span>
+<span class="cm">// ZAB (Zookeeper Atomic Broadcast) is a Paxos variant that ensures:</span>
+<span class="cm">// 1. All committed updates delivered in order to all followers</span>
+<span class="cm">// 2. Leader broadcasts propose → followers ack → leader commits → followers apply</span>
+
+Leader state machine:
+  log[1] = "SET x=1" → Propose to quorum → Quorum ACK → Commit → Apply
+  log[2] = "SET y=2" → Propose to quorum → Quorum ACK → Commit → Apply
+  log[3] = "DEL z"   → Propose to quorum → Quorum ACK → Commit → Apply
+<span class="cm">// Each entry needs only 1 RTT (Phase 2 only) while leader stable</span></code></pre>
+
+    <h3>Raft — Paxos Made Understandable</h3>
+    <p>Raft (Ongaro &amp; Ousterhout 2014) decomposes consensus into three independent subproblems: <strong>leader election</strong>, <strong>log replication</strong>, and <strong>safety</strong>. Designed to be more understandable and implementable than Paxos. Used in etcd (Kubernetes), CockroachDB, TiKV, Consul:</p>
+
+    <h4>Raft Leader Election — Full Mechanism</h4>
+    <pre><code><span class="cm">// Node states: Follower → Candidate → Leader</span>
+<span class="cm">// Terms: monotonically increasing logical clock (like Paxos ballot numbers)</span>
+
+<span class="cm">// Normal operation: Leader sends heartbeats every 150ms</span>
+<span class="cm">// Election timeout: each follower picks random timeout 150–300ms</span>
+<span class="cm">// If no heartbeat received before timeout → start election</span>
+
+<span class="kw">class</span> <span class="cls">RaftNode</span> {
+  <span class="fn">startElection</span>() {
+    <span class="kw">this</span>.state       = <span class="str">'CANDIDATE'</span>;
+    <span class="kw">this</span>.currentTerm++;           <span class="cm">// Increment term</span>
+    <span class="kw">this</span>.votedFor    = <span class="kw">this</span>.id;   <span class="cm">// Vote for self</span>
+    <span class="kw">this</span>.votesReceived = <span class="nm">1</span>;
+
+    <span class="cm">// Send RequestVote to all peers</span>
+    <span class="kw">for</span> (<span class="kw">const</span> peer <span class="kw">of</span> <span class="kw">this</span>.peers) {
+      peer.<span class="fn">requestVote</span>({
+        term:         <span class="kw">this</span>.currentTerm,
+        candidateId:  <span class="kw">this</span>.id,
+        lastLogIndex: <span class="kw">this</span>.log.length - <span class="nm">1</span>,
+        lastLogTerm:  <span class="kw">this</span>.log.<span class="fn">at</span>(-<span class="nm">1</span>)?.term  <span class="cm">← Log completeness check!</span>
+      }).<span class="fn">then</span>(resp => <span class="kw">this</span>.<span class="fn">handleVoteResponse</span>(resp));
+    }
+
+    <span class="cm">// Reset election timer (random 150-300ms)</span>
+    <span class="kw">this</span>.<span class="fn">resetElectionTimer</span>();
+  }
+
+  <span class="fn">handleVoteRequest</span>({ term, candidateId, lastLogIndex, lastLogTerm }) {
+    <span class="cm">// Grant vote ONLY if:</span>
+    <span class="cm">// 1. Candidate's term >= our current term</span>
+    <span class="cm">// 2. We haven't voted yet this term (or voted for this candidate)</span>
+    <span class="cm">// 3. Candidate's log is AT LEAST as up-to-date as ours</span>
+    <span class="cm">//    (prevents node with stale log from becoming leader)</span>
+    <span class="kw">const</span> logUpToDate =
+      lastLogTerm  > <span class="kw">this</span>.log.<span class="fn">at</span>(-<span class="nm">1</span>)?.term ||
+      (lastLogTerm === <span class="kw">this</span>.log.<span class="fn">at</span>(-<span class="nm">1</span>)?.term &&
+       lastLogIndex >= <span class="kw">this</span>.log.length - <span class="nm">1</span>);
+
+    <span class="kw">const</span> canVote = (<span class="kw">this</span>.votedFor === <span class="kw">null</span> || <span class="kw">this</span>.votedFor === candidateId);
+
+    <span class="kw">if</span> (term >= <span class="kw">this</span>.currentTerm && canVote && logUpToDate) {
+      <span class="kw">this</span>.votedFor = candidateId;
+      <span class="kw">return</span> { voteGranted: <span class="kw">true</span>, term: <span class="kw">this</span>.currentTerm };
+    }
+    <span class="kw">return</span> { voteGranted: <span class="kw">false</span>, term: <span class="kw">this</span>.currentTerm };
+  }
+
+  <span class="fn">handleVoteResponse</span>({ voteGranted, term }) {
+    <span class="kw">if</span> (term > <span class="kw">this</span>.currentTerm) {  <span class="cm">// Discover higher term → revert to follower</span>
+      <span class="kw">this</span>.currentTerm = term;
+      <span class="kw">this</span>.state = <span class="str">'FOLLOWER'</span>;
+      <span class="kw">return</span>;
+    }
+    <span class="kw">if</span> (voteGranted) {
+      <span class="kw">this</span>.votesReceived++;
+      <span class="kw">if</span> (<span class="kw">this</span>.votesReceived > Math.<span class="fn">floor</span>(<span class="kw">this</span>.peers.length / <span class="nm">2</span>)) {
+        <span class="kw">this</span>.state = <span class="str">'LEADER'</span>;  <span class="cm">// Won majority → become leader</span>
+        <span class="kw">this</span>.<span class="fn">sendHeartbeats</span>();   <span class="cm">// Immediately assert leadership</span>
+      }
+    }
+  }
+}</code></pre>
+
+    <h4>Raft Log Replication — Keeping Followers In Sync</h4>
+    <pre><code><span class="cm">// Leader receives client write → appends to local log → replicates</span>
+<span class="kw">async function</span> <span class="fn">appendEntries</span>(entries) {
+  <span class="cm">// Append to leader's log (not committed yet)</span>
+  <span class="kw">this</span>.log.<span class="fn">push</span>(...entries.<span class="fn">map</span>(e => ({ ...e, term: <span class="kw">this</span>.currentTerm })));
+
+  <span class="cm">// Send AppendEntries RPC to all followers in parallel</span>
+  <span class="kw">const</span> promises = <span class="kw">this</span>.peers.<span class="fn">map</span>(peer =>
+    peer.<span class="fn">appendEntries</span>({
+      term:         <span class="kw">this</span>.currentTerm,
+      leaderId:     <span class="kw">this</span>.id,
+      prevLogIndex: <span class="kw">this</span>.nextIndex[peer.id] - <span class="nm">1</span>,   <span class="cm">// Consistency check</span>
+      prevLogTerm:  <span class="kw">this</span>.log[<span class="kw">this</span>.nextIndex[peer.id]-<span class="nm">1</span>]?.term,
+      entries:      entries,
+      leaderCommit: <span class="kw">this</span>.commitIndex  <span class="cm">// Tell follower what's safe to apply</span>
+    })
+  );
+
+  <span class="cm">// Wait for QUORUM acknowledgment</span>
+  <span class="kw">const</span> acks = <span class="kw">await</span> <span class="fn">waitForQuorum</span>(promises);
+
+  <span class="cm">// Once quorum acks: COMMIT (advance commitIndex)</span>
+  <span class="kw">this</span>.commitIndex = <span class="kw">this</span>.log.length - <span class="nm">1</span>;
+  <span class="kw">this</span>.stateMachine.<span class="fn">apply</span>(entries);  <span class="cm">// Apply to state machine</span>
+
+  <span class="cm">// On next heartbeat, followers learn commitIndex → apply themselves</span>
+  <span class="kw">return</span> <span class="str">'success'</span>;
+}
+
+<span class="cm">// Follower consistency check (prevLogIndex + prevLogTerm must match):</span>
+<span class="cm">// If mismatch → reject → leader sends earlier entries → follower overwrites</span>
+<span class="cm">// Ensures followers' logs eventually converge to leader's log</span></code></pre>
+
+    <div class="diagram">
+<span class="hl">Raft Log — 5 Node Cluster (Leader + 4 Followers)</span>
+
+         Index:  1      2      3      4      5
+Leader:  [T1:x=1][T1:y=2][T2:x=5][T3:z=9][T3:a=1] ← commitIndex=5
+Follower A: [T1:x=1][T1:y=2][T2:x=5][T3:z=9][T3:a=1] ← up to date ✓
+Follower B: [T1:x=1][T1:y=2][T2:x=5][T3:z=9]          ← 1 behind (in sync)
+Follower C: [T1:x=1][T1:y=2][T3:x=5]                   ← <span class="ar">stale! diverged</span>
+Follower D: [T1:x=1][T1:y=2][T2:x=5][T3:z=9][T3:a=1]  ← up to date ✓
+
+<span class="yw">Follower C fix:</span>
+Leader tries AppendEntries with prevLogIndex=2, prevLogTerm=1
+Follower C accepts (matches). Overwrites conflicting T3:x=5 → T2:x=5
+Leader sends remaining entries. Follower C catches up.
+<span class="gr">← Log Matching Property: if two logs have same index+term, all prior entries identical</span>
+    </div>
+
+  </div>
+</section>
+
+
+<!-- ═══════════════════════════════════════════════════
+     17. CAP THEOREM
+═══════════════════════════════════════════════════ -->
+<section class="topic" id="cap">
+  <div class="topic-header">
+    <div class="num">17</div>
+    <div>
+      <h2>CAP Theorem</h2>
+      <p>The fundamental distributed systems trade-off — consistency, availability, and partition tolerance in depth</p>
+    </div>
+  </div>
+  <div class="topic-body">
+
+    <div class="tags">
+      <span class="tag">Consistency Models</span><span class="tag">Availability</span><span class="tag">Partition Tolerance</span>
+      <span class="tag">PACELC</span><span class="tag">Eventual Consistency</span><span class="tag">Linearizability</span>
+      <span class="tag">Read-Your-Writes</span><span class="tag">Tunable Consistency</span>
+    </div>
+
+    <h3>CAP Theorem — The Formal Statement</h3>
+    <p>Eric Brewer (2000) / Gilbert &amp; Lynch (2002): A distributed data store can only guarantee <strong>two of three</strong> properties simultaneously during a network partition:</p>
+
+    <div class="two-col">
+      <div class="col-card">
+        <h5>C — Consistency</h5>
+        <ul>
+          <li>Every read receives the most recent write or an error</li>
+          <li>All nodes see the same data at the same time</li>
+          <li>NOT the "C" in ACID (which means data integrity)</li>
+          <li>CAP-C = Linearizability (strongest consistency model)</li>
+        </ul>
+      </div>
+      <div class="col-card">
+        <h5>A — Availability</h5>
+        <ul>
+          <li>Every request receives a (non-error) response</li>
+          <li>No guarantee the response contains the latest data</li>
+          <li>System stays responsive despite node failures</li>
+          <li>Does NOT mean "highly available" in SLA terms</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="callout info">
+      <strong>📌 Partition Tolerance Is Not Optional</strong>
+      Network partitions happen in any distributed system — cables cut, switches fail, BGP route flaps. You cannot choose to sacrifice P. The real choice is: during a partition, do you sacrifice C (stay available with potentially stale data) or sacrifice A (refuse requests until partition heals)?
+    </div>
+
+    <h3>The Partition Scenario — What Actually Happens</h3>
+    <pre><code><span class="cm">// 5-node cluster. Network partition splits into:</span>
+<span class="cm">// Partition A: Node1, Node2 (minority — 2 nodes)</span>
+<span class="cm">// Partition B: Node3, Node4, Node5 (majority — 3 nodes, quorum)</span>
+
+<span class="cm">// CP System (e.g., etcd, ZooKeeper, HBase) behavior:</span>
+<span class="cm">// Partition A (minority): refuses ALL writes and reads (no quorum)</span>
+<span class="cm">//   → Returns "503 Service Unavailable" or "No quorum" error</span>
+<span class="cm">// Partition B (majority): continues normally (has quorum)</span>
+<span class="cm">// Result: Partition A users experience full downtime during partition</span>
+<span class="cm">// Guarantee: no stale data ever returned. One consistent truth.</span>
+
+<span class="cm">// AP System (e.g., Cassandra, DynamoDB, CouchDB) behavior:</span>
+<span class="cm">// Partition A (minority): accepts reads AND writes (responds to all)</span>
+<span class="cm">//   → Returns potentially stale data (last known value)</span>
+<span class="cm">// Partition B (majority): accepts reads AND writes</span>
+<span class="cm">// Both partitions diverge. When partition heals → conflict resolution needed</span>
+<span class="cm">// Cassandra: last-write-wins (LWW) by timestamp, or application-level merging</span>
+<span class="cm">// DynamoDB: version vectors + application conflict resolution</span></code></pre>
+
+    <h3>Consistency Models — The Full Spectrum</h3>
+    <p>CAP's "consistency" is binary, but real systems offer a spectrum of consistency guarantees:</p>
+
+    <table>
+      <tr><th>Model</th><th>Guarantee</th><th>Performance</th><th>Example</th></tr>
+      <tr><td><strong>Linearizability (Strong)</strong></td><td>Reads always see latest write. Operations appear atomic at a single point in time.</td><td>Slowest — requires quorum reads</td><td>etcd, ZooKeeper, Spanner</td></tr>
+      <tr><td><strong>Sequential Consistency</strong></td><td>All nodes see operations in same order, but may be behind real time.</td><td>Moderate</td><td>Most databases with single leader</td></tr>
+      <tr><td><strong>Causal Consistency</strong></td><td>Causally related operations seen in order. Concurrent ops may differ between nodes.</td><td>Good — lightweight tracking</td><td>MongoDB (causal sessions), COPS</td></tr>
+      <tr><td><strong>Read-Your-Writes</strong></td><td>After a write, you always see your own write (not others' recent writes).</td><td>Good — session-scoped</td><td>DynamoDB consistent reads within session</td></tr>
+      <tr><td><strong>Monotonic Read</strong></td><td>Once you read a value, you'll never read an older value in future reads.</td><td>Good</td><td>Sticky sessions to same replica</td></tr>
+      <tr><td><strong>Eventual Consistency</strong></td><td>If no new writes, all replicas converge to the same value eventually.</td><td>Fastest — async replication</td><td>Cassandra (default), DynamoDB (default), DNS</td></tr>
+    </table>
+
+    <h3>PACELC — The More Complete Model</h3>
+    <p>CAP only describes behavior during a partition (P). Daniel Abadi's PACELC (2012) extends it: <em>even without a partition (E), systems must trade off Latency (L) vs Consistency (C)</em>:</p>
+
+    <pre><code><span class="cm">// PACELC notation: PA/EL or PC/EH etc.</span>
+<span class="cm">// First part: Partition behavior (A=available or C=consistent)</span>
+<span class="cm">// Second part: Else (no partition) behavior (L=low latency or C=consistent)</span>
+
+System          | Partition | Else      | Notes
+─────────────────────────────────────────────────────
+DynamoDB        | PA        | EL        | AP during partition, eventual consistency always
+Cassandra       | PA        | EL        | Tunable: quorum reads enable PC/EC
+MongoDB (default)| PC       | EC        | Strong consistency, higher write latency
+Spanner         | PC        | EC        | TrueTime API enables external consistency
+CockroachDB     | PC        | EC        | Serializable isolation across distributed nodes
+Riak            | PA        | EL        | Always favors availability
+Zookeeper       | PC        | EC        | Sequential consistency for coordination
+
+<span class="cm">// Cassandra tunable consistency (via read/write quorum levels):</span>
+<span class="cm">// W=ALL,  R=ONE  → strong write, fast read, but write fails if any node down</span>
+<span class="cm">// W=QUORUM, R=QUORUM → strong consistency (W+R > N), balanced availability</span>
+<span class="cm">// W=ONE,  R=ONE  → maximum availability, eventual consistency</span>
+<span class="cm">// Rule: W + R > N guarantees reading latest write (N = replication factor)</span>
+<span class="cm">// With N=3: W=2, R=2 → W+R=4 > 3 → always reads latest ✓</span></code></pre>
+
+    <h3>Conflict Resolution in AP Systems</h3>
+    <pre><code><span class="cm">// Cassandra: Last-Write-Wins (LWW) with client timestamps</span>
+<span class="cm">// Risk: clock skew means "later" timestamp isn't necessarily "later" write</span>
+<span class="cm">// Mitigation: Hybrid Logical Clocks (HLC) — monotonic, yet physical-time-aware</span>
+
+<span class="cm">// CRDTs (Conflict-free Replicated Data Types) — mathematically merge-safe</span>
+<span class="cm">// G-Counter: grow-only counter — each node has own counter, value = sum of all</span>
+
+<span class="kw">class</span> <span class="cls">GCounter</span> {
+  <span class="kw">constructor</span>(nodeId, numNodes) {
+    <span class="kw">this</span>.nodeId   = nodeId;
+    <span class="kw">this</span>.counters = <span class="kw">new</span> <span class="cls">Array</span>(numNodes).<span class="fn">fill</span>(<span class="nm">0</span>);
+  }
+  <span class="fn">increment</span>() { <span class="kw">this</span>.counters[<span class="kw">this</span>.nodeId]++; }
+  <span class="fn">value</span>()     { <span class="kw">return</span> <span class="kw">this</span>.counters.<span class="fn">reduce</span>((a, b) => a + b, <span class="nm">0</span>); }
+
+  <span class="cm">// Merge with another node's state — take max per element</span>
+  <span class="fn">merge</span>(other) {
+    <span class="kw">this</span>.counters = <span class="kw">this</span>.counters.<span class="fn">map</span>((v, i) => Math.<span class="fn">max</span>(v, other.counters[i]));
+  }
+  <span class="cm">// No matter what order merges happen, result is always correct! ✓</span>
+  <span class="cm">// Used in: shopping cart (add-only), likes/views, distributed metrics</span>
+}
+
+<span class="cm">// Vector Clocks — track causality between events</span>
+<span class="cm">// Each node maintains a counter per node in the system</span>
+<span class="cm">// On event: increment own counter. On send: attach vector. On receive: merge vectors.</span>
+<span class="cm">// If V1[i] ≥ V2[i] for all i AND V1[j] > V2[j] for some j: V1 happened-after V2</span>
+<span class="cm">// If neither dominates: concurrent events → conflict → application resolves</span></code></pre>
+
+  </div>
+</section>
+
+
+<!-- ═══════════════════════════════════════════════════
+     18. FAULT TOLERANCE
+═══════════════════════════════════════════════════ -->
+<section class="topic" id="fault-tolerance">
+  <div class="topic-header">
+    <div class="num">18</div>
+    <div>
+      <h2>Fault Tolerance</h2>
+      <p>Designing systems that continue operating correctly when components fail — failure domains, RTO/RPO, and recovery patterns</p>
+    </div>
+  </div>
+  <div class="topic-body">
+
+    <div class="tags">
+      <span class="tag">Failure Domains</span><span class="tag">RTO / RPO</span><span class="tag">Active-Active</span>
+      <span class="tag">Graceful Degradation</span><span class="tag">Timeout Strategy</span><span class="tag">Saga Pattern</span>
+      <span class="tag">Byzantine Fault Tolerance</span><span class="tag">Chaos Engineering</span>
+    </div>
+
+    <h3>Fault Tolerance vs. High Availability vs. Reliability</h3>
+
+    <table>
+      <tr><th>Property</th><th>Definition</th><th>Measured By</th><th>Example Target</th></tr>
+      <tr><td><strong>Fault Tolerance</strong></td><td>System continues CORRECT operation despite component failures</td><td>Failure impact scope</td><td>Any single AZ failure is transparent</td></tr>
+      <tr><td><strong>High Availability</strong></td><td>System is UP and RESPONDING the vast majority of the time</td><td>Uptime % (SLA)</td><td>99.99% = 52min/year downtime</td></tr>
+      <tr><td><strong>Reliability</strong></td><td>System CORRECTLY performs its function consistently over time</td><td>MTBF, error rate</td><td>p99 error rate &lt; 0.01%</td></tr>
+      <tr><td><strong>Durability</strong></td><td>Data is NOT LOST once acknowledged</td><td>Data loss events</td><td>11 nines (S3: 99.999999999%)</td></tr>
+    </table>
+
+    <h3>Failure Domains — Isolating Blast Radius</h3>
+    <p>A failure domain is a set of components that share a single point of failure. Designing independent failure domains ensures that a failure in one domain cannot cascade into another:</p>
+
+    <div class="diagram">
+<span class="hl">AWS Failure Domain Hierarchy</span>
+
+Region (us-east-1)          ← Independent geographic location
+  Availability Zone (us-east-1a)  ← Independent power, cooling, networking
+    Data Center                     ← Physical building
+      Rack                          ← Shared top-of-rack switch + PDU
+        Server                      ← Shared motherboard, CPU, RAM
+          Process                   ← Shared OS kernel, memory space
+            Thread                  ← Shared heap, GC
+
+Design rule: Replicate across failure domains at the right level for your SLA:
+  99.9%  → Multi-server (same AZ)
+  99.99% → Multi-AZ  (same region, independent power/network)
+  99.999%→ Multi-region (independent geography, BGP routing)
+
+<span class="yw">Anti-pattern: "Multi-AZ" deployment where all AZs share one RDS primary</span>
+<span class="ar">→ RDS primary failure takes down all AZs simultaneously!</span>
+<span class="gr">Fix: Active-active with independent primaries in each AZ</span>
+    </div>
+
+    <h3>RTO and RPO — Quantifying Recovery Requirements</h3>
+    <pre><code><span class="cm">// RTO (Recovery Time Objective):</span>
+<span class="cm">// Maximum acceptable time from failure to service restoration</span>
+<span class="cm">// "How long can we be down?"</span>
+<span class="cm">// RTO=0:    No downtime allowed → active-active with instant failover</span>
+<span class="cm">// RTO=1min: Hot standby with automated failover (keepalived/VRRP)</span>
+<span class="cm">// RTO=1hr:  Warm standby — pre-provisioned, fast startup</span>
+<span class="cm">// RTO=8hr:  Cold standby — restore from backup</span>
+
+<span class="cm">// RPO (Recovery Point Objective):</span>
+<span class="cm">// Maximum acceptable data loss measured in time</span>
+<span class="cm">// "How much data can we lose?"</span>
+<span class="cm">// RPO=0:     No data loss → synchronous replication to all replicas before ack</span>
+<span class="cm">// RPO=1min:  Async replication with 1-minute lag maximum</span>
+<span class="cm">// RPO=1hr:   Hourly snapshots / WAL archiving to S3</span>
+<span class="cm">// RPO=24hr:  Daily backups</span>
+
+<span class="cm">// Cost vs. RTO/RPO trade-off:</span>
+RTO  RPO  Strategy                    Relative Cost
+ 0    0   Active-Active multi-region       4×
+5min 1min Hot Standby + sync replication  2×
+1hr  1hr  Warm Standby + async repl       1.5×
+8hr  24hr Cold Standby + daily backup     1×</code></pre>
+
+    <h3>Timeout Strategy — Setting Timeouts Correctly</h3>
+    <pre><code><span class="cm">// Every network call MUST have a timeout — no exceptions!</span>
+<span class="cm">// Without timeouts: one slow dependency holds threads forever → cascades</span>
+
+<span class="cm">// Timeout anatomy:</span>
+<span class="kw">const</span> timeoutConfig = {
+  connectTimeout: <span class="nm">1000</span>,   <span class="cm">// TCP handshake: 1s (fast failure if server unreachable)</span>
+  requestTimeout: <span class="nm">5000</span>,   <span class="cm">// Full request-response cycle: 5s</span>
+  socketTimeout:  <span class="nm">30000</span>,  <span class="cm">// Idle connection timeout: 30s (keep-alive cleanup)</span>
+  readTimeout:    <span class="nm">10000</span>,  <span class="cm">// Time to receive response headers: 10s</span>
+};
+
+<span class="cm">// Timeout budget / deadline propagation (critical for microservices):</span>
+<span class="cm">// Client sets total budget (e.g., 500ms). Each hop deducts its elapsed time.</span>
+<span class="cm">// Prevents: A calls B with 5s timeout, B calls C with new 5s timeout</span>
+<span class="cm">// → A times out after 5s but B→C is still running, wasting resources</span>
+
+<span class="kw">async function</span> <span class="fn">handleRequest</span>(req) {
+  <span class="kw">const</span> deadline = req.startTime + <span class="nm">500</span>; <span class="cm">// 500ms total budget from client</span>
+
+  <span class="kw">const</span> remainingA = deadline - Date.<span class="fn">now</span>(); <span class="cm">// Remaining budget for service A</span>
+  <span class="kw">const</span> resultA = <span class="kw">await</span> serviceA.<span class="fn">call</span>({ timeout: remainingA });
+
+  <span class="kw">const</span> remainingB = deadline - Date.<span class="fn">now</span>(); <span class="cm">// Remaining budget after A</span>
+  <span class="kw">if</span> (remainingB &lt;= <span class="nm">0</span>) <span class="kw">throw new</span> Error(<span class="str">'Deadline exceeded before calling B'</span>);
+  <span class="kw">const</span> resultB = <span class="kw">await</span> serviceB.<span class="fn">call</span>({ timeout: remainingB });
+  <span class="cm">// gRPC context deadlines do this automatically with context propagation</span>
+}
+
+<span class="cm">// Timeout formula for dependent services:</span>
+<span class="cm">// upstream_timeout = sum(downstream_p99_latencies) + processing_time + buffer</span>
+<span class="cm">// If ServiceB p99 = 100ms, ServiceC p99 = 200ms, processing = 50ms:</span>
+<span class="cm">// ServiceA timeout = 100+200+50 + 100ms_buffer = 450ms</span></code></pre>
+
+    <h3>Saga Pattern — Distributed Transaction Fault Tolerance</h3>
+    <p>In microservices, you cannot use ACID transactions across services. The Saga pattern breaks a distributed transaction into a sequence of local transactions, with compensating transactions for rollback:</p>
+
+    <div class="diagram">
+<span class="hl">Saga Pattern — Order Placement (Choreography style)</span>
+
+OrderService        PaymentService     InventoryService    ShipmentService
+    │                     │                  │                   │
+    │──CreateOrder────────►│                  │                   │
+    │                      │                  │                   │
+    │◄─OrderCreated────────│                  │                   │
+    │                      │──ChargeCard──────►│                  │
+    │                      │                  │                   │
+    │                      │◄─PaymentOK───────│                   │
+    │                      │                  │──ReserveItems─────►│
+    │                      │                  │                   │
+    │                      │                  │◄─ItemsReserved────│
+    │                      │                  │──ShipOrder──────────►│
+
+<span class="ar">Failure scenario: ShipmentService fails after payment taken</span>
+ShipmentService publishes: OrderShipmentFailed
+InventoryService compensates: ReleaseItems (compensating tx)
+PaymentService compensates:   RefundCard   (compensating tx)
+OrderService compensates:     CancelOrder  (compensating tx)
+<span class="gr">← Each compensating tx must be idempotent (safe to retry)</span>
+    </div>
+
+    <pre><code><span class="cm">// Orchestration Saga — central coordinator controls flow</span>
+<span class="cm">// (Simpler to reason about, but coordinator is a coupling point)</span>
+
+<span class="kw">class</span> <span class="cls">OrderSagaOrchestrator</span> {
+  <span class="kw">async</span> <span class="fn">execute</span>(orderId) {
+    <span class="kw">const</span> saga = <span class="kw">await</span> sagaStore.<span class="fn">create</span>(orderId); <span class="cm">// Persist saga state</span>
+
+    <span class="kw">try</span> {
+      <span class="kw">await</span> <span class="kw">this</span>.<span class="fn">step</span>(saga, () => paymentService.<span class="fn">charge</span>(orderId),
+                           () => paymentService.<span class="fn">refund</span>(orderId));
+
+      <span class="kw">await</span> <span class="kw">this</span>.<span class="fn">step</span>(saga, () => inventoryService.<span class="fn">reserve</span>(orderId),
+                           () => inventoryService.<span class="fn">release</span>(orderId));
+
+      <span class="kw">await</span> <span class="kw">this</span>.<span class="fn">step</span>(saga, () => shipmentService.<span class="fn">create</span>(orderId),
+                           () => shipmentService.<span class="fn">cancel</span>(orderId));
+
+      <span class="kw">await</span> saga.<span class="fn">markCompleted</span>();
+    } <span class="kw">catch</span> (err) {
+      <span class="kw">await</span> saga.<span class="fn">rollback</span>(); <span class="cm">// Execute compensating txs in reverse order</span>
+    }
+  }
+
+  <span class="kw">async</span> <span class="fn">step</span>(saga, action, compensate) {
+    <span class="kw">const</span> result = <span class="kw">await</span> <span class="fn">action</span>();
+    saga.<span class="fn">addCompensation</span>(compensate); <span class="cm">// Register rollback for this step</span>
+    <span class="kw">await</span> sagaStore.<span class="fn">save</span>(saga);       <span class="cm">// Persist before proceeding!</span>
+    <span class="kw">return</span> result;
+    <span class="cm">// If orchestrator crashes, can resume from persisted saga state</span>
+  }
+}</code></pre>
+
+    <h3>Graceful Degradation Patterns</h3>
+    <table>
+      <tr><th>Pattern</th><th>Mechanism</th><th>User Experience</th></tr>
+      <tr><td><strong>Feature Flags</strong></td><td>Disable non-critical features (recommendations, social) when dependencies fail</td><td>Core functionality works; some sections hidden</td></tr>
+      <tr><td><strong>Cached Stale Data</strong></td><td>Serve last-known-good cached response when origin is down</td><td>Slightly outdated data; no error</td></tr>
+      <tr><td><strong>Read-Only Mode</strong></td><td>Accept reads but reject writes when primary DB is unavailable</td><td>Browse works; checkout disabled</td></tr>
+      <tr><td><strong>Queue Writes</strong></td><td>Accept write requests into durable queue; process when service recovers</td><td>Appears to work; delayed confirmation</td></tr>
+      <tr><td><strong>Static Fallback</strong></td><td>Serve pre-rendered static HTML from CDN if all compute fails</td><td>Read-only site; no dynamic content</td></tr>
+    </table>
+
+  </div>
+</section>
+
+
+<!-- ═══════════════════════════════════════════════════
+     19. REST AND gRPC
+═══════════════════════════════════════════════════ -->
+<section class="topic" id="rest-grpc">
+  <div class="topic-header">
+    <div class="num">19</div>
+    <div>
+      <h2>REST vs gRPC</h2>
+      <p>HTTP semantics, Protobuf binary encoding, streaming models, service contracts, and when to use each</p>
+    </div>
+  </div>
+  <div class="topic-body">
+
+    <div class="tags">
+      <span class="tag">REST Constraints</span><span class="tag">HTTP/2 Multiplexing</span><span class="tag">Protobuf Encoding</span>
+      <span class="tag">Bidirectional Streaming</span><span class="tag">Service Contracts</span><span class="tag">Interceptors</span>
+      <span class="tag">OpenAPI</span><span class="tag">gRPC-Web</span>
+    </div>
+
+    <h3>REST — The Six Architectural Constraints</h3>
+    <p>REST (Representational State Transfer, Roy Fielding 2000) is an <em>architectural style</em>, not a protocol. Many APIs called "REST" violate its constraints. The six actual constraints:</p>
+
+    <ol>
+      <li><strong>Client-Server:</strong> Separation of UI from data storage. Server doesn't know UI state.</li>
+      <li><strong>Stateless:</strong> Each request contains ALL information needed. Server holds no client session state.</li>
+      <li><strong>Cacheable:</strong> Responses must declare themselves cacheable or not (Cache-Control headers).</li>
+      <li><strong>Uniform Interface:</strong> Resources identified by URIs. Manipulated via representations. Self-descriptive messages. HATEOAS (links to related resources in response).</li>
+      <li><strong>Layered System:</strong> Client doesn't know if it's talking directly to server or a load balancer/proxy/CDN.</li>
+      <li><strong>Code on Demand (optional):</strong> Server can send executable code (JavaScript) to client.</li>
+    </ol>
+
+    <pre><code><span class="cm">// Well-designed REST API — resource-oriented, stateless, cacheable</span>
+
+<span class="cm">// Resources, not actions in URLs:</span>
+GET    /orders                    <span class="cm">← List orders (cacheable)</span>
+GET    /orders/123                <span class="cm">← Get specific order (cacheable)</span>
+POST   /orders                    <span class="cm">← Create order (not cacheable, not idempotent)</span>
+PUT    /orders/123                <span class="cm">← Replace order (idempotent)</span>
+PATCH  /orders/123                <span class="cm">← Partial update (may not be idempotent)</span>
+DELETE /orders/123                <span class="cm">← Delete order (idempotent)</span>
+
+<span class="cm">// Bad REST (RPC-style, ignores HTTP semantics):</span>
+POST /getUser                     <span class="cm">← Verb in URL, uses POST for read</span>
+GET  /updateOrderStatus?id=123    <span class="cm">← Mutation via GET (not cacheable!)</span>
+POST /order/cancel/123            <span class="cm">← Mixed verb + noun</span>
+
+<span class="cm">// HATEOAS — Hypermedia As The Engine Of Application State:</span>
+GET /orders/123
+Response: {
+  "id": 123,
+  "status": "pending",
+  "total": 99.99,
+  "_links": {
+    "self":    { "href": "/orders/123" },
+    "cancel":  { "href": "/orders/123/cancel", "method": "POST" },
+    "payment": { "href": "/orders/123/payment" },
+    "items":   { "href": "/orders/123/items" }
+  }
+}
+<span class="cm">// Client discovers actions from responses — decoupled from server implementation</span></code></pre>
+
+    <h3>gRPC — Remote Procedure Calls over HTTP/2</h3>
+    <p>gRPC (Google, 2015) is a high-performance RPC framework. It uses <strong>Protobuf</strong> for serialization and <strong>HTTP/2</strong> for transport. Every aspect is designed for efficiency and strong contracts:</p>
+
+    <h4>Protobuf Encoding — How Binary Serialization Works</h4>
+    <pre><code><span class="cm">// Service definition (contract-first in .proto file):</span>
+syntax = <span class="str">"proto3"</span>;
+
+service OrderService {
+  rpc GetOrder      (GetOrderRequest) returns (Order);                    <span class="cm">// Unary</span>
+  rpc ListOrders    (ListOrdersRequest) returns (stream Order);            <span class="cm">// Server stream</span>
+  rpc CreateOrders  (stream OrderRequest) returns (OrderSummary);          <span class="cm">// Client stream</span>
+  rpc SyncOrders    (stream OrderUpdate) returns (stream OrderStatus);     <span class="cm">// Bidirectional</span>
+}
+
+message Order {
+  int64  id        = 1;   <span class="cm">← field number (NOT value!)</span>
+  string customer  = 2;
+  double amount    = 3;
+  OrderStatus status = 4;
+  repeated OrderItem items = 5;
+}
+
+<span class="cm">// Protobuf binary encoding — TLV (Tag-Length-Value) format:</span>
+<span class="cm">// Field tag = (field_number &lt;&lt; 3) | wire_type</span>
+<span class="cm">// Wire types: 0=varint, 1=64bit, 2=length-delimited, 5=32bit</span>
+
+<span class="cm">// Encoding { id: 123, customer: "Alice", amount: 99.99 }:</span>
+<span class="cm">// id=123 (field 1, varint):   08 7B</span>
+<span class="cm">//   tag=0x08 = (1&lt;&lt;3)|0, value=0x7B=123</span>
+<span class="cm">// customer="Alice" (field 2, length-delimited): 12 05 41 6C 69 63 65</span>
+<span class="cm">//   tag=0x12 = (2&lt;&lt;3)|2, len=5, UTF-8 bytes of "Alice"</span>
+<span class="cm">// amount=99.99 (field 3, 64-bit double): 19 8F C2 F5 28 5C BF 58 40</span>
+<span class="cm">//   tag=0x19 = (3&lt;&lt;3)|1, 8-byte IEEE 754 double</span>
+
+<span class="cm">// Total: ~16 bytes vs JSON {"id":123,"customer":"Alice","amount":99.99} = 42 bytes</span>
+<span class="cm">// 2.6× smaller. Also ~5-10× faster to serialize/deserialize than JSON</span></code></pre>
+
+    <h4>gRPC Streaming — The Four Communication Patterns</h4>
+    <div class="diagram">
+<span class="hl">gRPC Communication Patterns</span>
+
+<span class="hl">1. Unary RPC</span> (standard request-response)
+Client ──GetOrder(id=123)──────────────────► Server
+       ◄──Order{id:123, ...}────────────────
+
+<span class="hl">2. Server Streaming</span> (live updates, large datasets)
+Client ──ListOrders(since=2024-01)─────────► Server
+       ◄──Order{id:1}─────────────────────
+       ◄──Order{id:2}─────────────────────
+       ◄──Order{id:3}─────────────────────  (continues streaming)
+       ◄──EOF──────────────────────────────
+
+<span class="hl">3. Client Streaming</span> (batch upload)
+Client ──OrderItem{...}────────────────────► Server
+       ──OrderItem{...}────────────────────►
+       ──OrderItem{...}────────────────────►
+       ──EOF──────────────────────────────►
+       ◄──Summary{total: 3, amount: 299}───
+
+<span class="hl">4. Bidirectional Streaming</span> (real-time sync, chat, game state)
+Client ──Update{x=1}───────────────────────► Server
+       ◄──Status{ok}──────────────────────
+       ──Update{y=2}───────────────────────►
+       ◄──Status{ok}──────────────────────
+       ──Update{z=3}───────────────────────►
+       ◄──Error{conflict}─────────────────   (truly async, full duplex over HTTP/2)
+    </div>
+
+    <h4>gRPC Interceptors — Middleware for RPC</h4>
+    <pre><code><span class="cm">// gRPC interceptors = middleware for all RPC calls</span>
+<span class="cm">// Applied to every incoming (server) or outgoing (client) call</span>
+
+<span class="cm">// Server-side interceptor (Go example):</span>
+<span class="kw">func</span> <span class="fn">authInterceptor</span>(ctx context.Context, req interface{},
+    info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
+
+  <span class="cm">// 1. Extract token from gRPC metadata (equivalent to HTTP headers)</span>
+  md, _ := metadata.<span class="fn">FromIncomingContext</span>(ctx)
+  token := md.<span class="fn">Get</span>(<span class="str">"authorization"</span>)[<span class="nm">0</span>]
+
+  <span class="cm">// 2. Validate JWT</span>
+  claims, err := <span class="fn">validateJWT</span>(token)
+  <span class="kw">if</span> err != nil {
+    <span class="kw">return nil</span>, status.<span class="fn">Error</span>(codes.Unauthenticated, <span class="str">"invalid token"</span>)
+  }
+
+  <span class="cm">// 3. Add claims to context for handler</span>
+  ctx = context.<span class="fn">WithValue</span>(ctx, <span class="str">"user"</span>, claims)
+
+  <span class="cm">// 4. Call actual handler</span>
+  <span class="kw">return</span> <span class="fn">handler</span>(ctx, req)
+}
+
+<span class="cm">// Chain multiple interceptors:</span>
+server := grpc.<span class="fn">NewServer</span>(
+  grpc.<span class="fn">ChainUnaryInterceptor</span>(
+    <span class="fn">loggingInterceptor</span>,      <span class="cm">// Log all requests</span>
+    <span class="fn">tracingInterceptor</span>,      <span class="cm">// Inject OpenTelemetry spans</span>
+    <span class="fn">authInterceptor</span>,         <span class="cm">// Validate JWT</span>
+    <span class="fn">rateLimitInterceptor</span>,    <span class="cm">// Apply rate limiting</span>
+    <span class="fn">recoveryInterceptor</span>,     <span class="cm">// Recover from panics → gRPC error</span>
+  ),
+)</code></pre>
+
+    <h3>REST vs gRPC — When to Choose Each</h3>
+
+    <table>
+      <tr><th>Dimension</th><th>REST</th><th>gRPC</th></tr>
+      <tr><td>Protocol</td><td>HTTP/1.1 or HTTP/2, text (JSON/XML)</td><td>HTTP/2 only, binary (Protobuf)</td></tr>
+      <tr><td>Payload size</td><td>Larger (JSON verbose)</td><td>2–10× smaller (binary encoding)</td></tr>
+      <tr><td>Serialization speed</td><td>~100µs (Jackson JSON)</td><td>~10µs (Protobuf) — 10× faster</td></tr>
+      <tr><td>Streaming</td><td>Server-sent events / WebSocket (bolted on)</td><td>Native 4-way streaming built-in</td></tr>
+      <tr><td>Contract</td><td>OpenAPI (optional, external)</td><td>.proto file (mandatory, source of truth)</td></tr>
+      <tr><td>Browser support</td><td>Native</td><td>Needs gRPC-Web proxy (Envoy)</td></tr>
+      <tr><td>Human readability</td><td>Easy (JSON in browser/curl)</td><td>Hard (binary — needs grpcurl/Postman)</td></tr>
+      <tr><td>Code generation</td><td>OpenAPI generators (inconsistent)</td><td>protoc generates idiomatic stubs in 10+ languages</td></tr>
+      <tr><td>Best for</td><td>Public APIs, browser clients, simple CRUD</td><td>Internal microservices, high-throughput, streaming</td></tr>
+      <tr><td>Examples</td><td>Stripe API, GitHub API, Twitter API</td><td>Google internal APIs, Kubernetes API, Uber, Netflix</td></tr>
+    </table>
+
+    <div class="callout success">
+      <strong>✅ Production Pattern: gRPC internally + REST externally</strong>
+      Use gRPC for all internal microservice communication (performance, streaming, strong contracts). Expose a REST/JSON API gateway externally (browser compatibility, developer experience, public documentation). The API gateway transcodes REST ↔ gRPC using grpc-gateway or Envoy's gRPC-JSON transcoder.
+    </div>
+
+  </div>
+</section>
+
+
+<!-- ═══════════════════════════════════════════════════
+     20. GRAPHQL VS REST
+═══════════════════════════════════════════════════ -->
+<section class="topic" id="graphql-rest">
+  <div class="topic-header">
+    <div class="num">20</div>
+    <div>
+      <h2>GraphQL vs REST</h2>
+      <p>Schema-first API design, resolver execution, N+1 problem, DataLoader batching, and Federation for distributed graphs</p>
+    </div>
+  </div>
+  <div class="topic-body">
+
+    <div class="tags">
+      <span class="tag">Schema / Type System</span><span class="tag">Resolver Chain</span><span class="tag">N+1 Problem</span>
+      <span class="tag">DataLoader</span><span class="tag">Persisted Queries</span><span class="tag">Apollo Federation</span>
+      <span class="tag">Subscriptions</span><span class="tag">Introspection</span>
+    </div>
+
+    <h3>GraphQL Core Concepts — How It Actually Works</h3>
+    <p>GraphQL is a <strong>query language for APIs</strong> and a <strong>runtime for executing those queries</strong>. Clients specify exactly what data they need; the server returns exactly that — no more, no less. This solves REST's over-fetching and under-fetching problems:</p>
+
+    <pre><code><span class="cm">// REST: Under-fetching — need 3 round trips for user + orders + products</span>
+GET /users/123                    <span class="cm">→ returns user (includes 40 unused fields)</span>
+GET /users/123/orders             <span class="cm">→ returns order IDs</span>
+GET /products/456,789,012         <span class="cm">→ returns products</span>
+
+<span class="cm">// GraphQL: Exactly the data needed, 1 round trip</span>
+query GetUserDashboard($userId: ID!) {
+  user(id: $userId) {             <span class="cm">← only the fields we ask for</span>
+    name
+    email
+    orders(last: 5) {             <span class="cm">← nested — no separate request</span>
+      id
+      total
+      status
+      items {
+        product { name, price }   <span class="cm">← deeply nested — still 1 request</span>
+        quantity
+      }
+    }
+  }
+}
+<span class="cm">// Response contains EXACTLY the fields requested — nothing more</span>
+<span class="cm">// Mobile client gets lean payload. Desktop client can request more fields.</span></code></pre>
+
+    <h3>GraphQL Schema — The Type System</h3>
+    <pre><code><span class="cm">// Schema Definition Language (SDL) — the contract</span>
+<span class="kw">type</span> <span class="cls">Query</span> {
+  user(id: ID!): User
+  orders(status: OrderStatus, limit: Int = 10): [Order!]!
+  product(id: ID!): Product
+}
+
+<span class="kw">type</span> <span class="cls">Mutation</span> {
+  createOrder(input: CreateOrderInput!): Order!
+  updateOrderStatus(id: ID!, status: OrderStatus!): Order!
+}
+
+<span class="kw">type</span> <span class="cls">Subscription</span> {
+  orderStatusChanged(orderId: ID!): Order!  <span class="cm">← Real-time via WebSocket</span>
+}
+
+<span class="kw">type</span> <span class="cls">User</span> {
+  id:     ID!          <span class="cm">← ! = non-nullable</span>
+  name:   String!
+  email:  String!
+  orders: [Order!]!    <span class="cm">← Relationship — resolved lazily</span>
+  role:   UserRole!
+}
+
+<span class="kw">enum</span> <span class="cls">UserRole</span> { ADMIN CUSTOMER VENDOR }
+
+<span class="kw">type</span> <span class="cls">Order</span> {
+  id:        ID!
+  total:     Float!
+  status:    OrderStatus!
+  customer:  User!        <span class="cm">← Circular reference — GraphQL handles this</span>
+  items:     [OrderItem!]!
+  createdAt: DateTime!
+}
+
+<span class="kw">interface</span> <span class="cls">Product</span> {      <span class="cm">← Interfaces for polymorphism</span>
+  id:    ID!
+  name:  String!
+  price: Float!
+}
+
+<span class="kw">type</span> <span class="cls">PhysicalProduct</span> <span class="kw">implements</span> <span class="cls">Product</span> {
+  id: ID!; name: String!; price: Float!
+  weight: Float!
+  dimensions: Dimensions!
+}
+
+<span class="kw">type</span> <span class="cls">DigitalProduct</span> <span class="kw">implements</span> <span class="cls">Product</span> {
+  id: ID!; name: String!; price: Float!
+  downloadUrl: String!
+  fileSize: Int!
+}</code></pre>
+
+    <h3>Resolver Execution — How GraphQL Processes a Query</h3>
+    <p>GraphQL resolves queries as a tree. Each field has a resolver function. The runtime traverses the query tree, calling resolvers depth-first, and assembles the result:</p>
+
+    <pre><code><span class="cm">// Resolver map (Apollo Server / graphql-js):</span>
+<span class="kw">const</span> resolvers = {
+  Query: {
+    <span class="cm">// Root resolver — gets initial data</span>
+    <span class="fn">user</span>: (parent, { id }, context, info) => {
+      <span class="cm">// parent = null (root query)</span>
+      <span class="cm">// id = query argument</span>
+      <span class="cm">// context = { db, currentUser, dataloaders }</span>
+      <span class="cm">// info = field info, query AST</span>
+      <span class="kw">return</span> context.db.<span class="fn">findUser</span>(id);
+    }
+  },
+
+  User: {
+    <span class="cm">// Field resolver — called for each User object returned</span>
+    <span class="fn">orders</span>: (user, args, context) => {
+      <span class="cm">// parent = User object from Query.user resolver</span>
+      <span class="kw">return</span> context.db.<span class="fn">findOrdersByUserId</span>(user.id, args);
+    },
+    <span class="cm">// If no resolver defined → default resolver: parent[fieldName]</span>
+    <span class="cm">// So User.name, User.email auto-resolve from the user object ✓</span>
+  },
+
+  Order: {
+    <span class="fn">items</span>: (order, args, context) => {
+      <span class="kw">return</span> context.db.<span class="fn">findItemsByOrderId</span>(order.id);
+    },
+    <span class="fn">customer</span>: (order, args, context) => {
+      <span class="cm">// ⚠️ N+1 PROBLEM! Called once per order → N DB queries for N orders</span>
+      <span class="kw">return</span> context.db.<span class="fn">findUser</span>(order.customerId);
+    }
+  }
+};
+
+<span class="cm">// Resolver execution order for:</span>
+<span class="cm">// { user { orders { items { product { name } } } } }</span>
+<span class="cm">// 1. Query.user() → returns User</span>
+<span class="cm">// 2. User.orders() → returns [Order, Order, Order]</span>
+<span class="cm">// 3. Order.items() × 3 → returns [[Item...], [Item...], [Item...]]</span>
+<span class="cm">// 4. Item.product() × N → returns [Product...]</span>
+<span class="cm">// Parallelism: siblings are resolved concurrently (Promise.all)</span></code></pre>
+
+    <h3>The N+1 Problem — GraphQL's Critical Performance Issue</h3>
+    <p>When a query returns a list of N items and each item requires a separate resolver call (e.g., fetching the author of each post), you get N+1 database queries: 1 to fetch the list + N individual lookups.</p>
+
+    <pre><code><span class="cm">// Query: { orders { customer { name } } }</span>
+<span class="cm">// 1 query: SELECT * FROM orders LIMIT 10          → 10 orders</span>
+<span class="cm">// 10 queries: SELECT * FROM users WHERE id = ?    → per-order user lookup!</span>
+<span class="cm">// Total: 11 DB queries for what should be 2</span>
+<span class="cm">// At scale: 1000 orders = 1001 DB queries → disaster</span>
+
+<span class="cm">// Solution: DataLoader (Facebook) — batches and caches per request</span>
+<span class="kw">const</span> DataLoader = require(<span class="str">'dataloader'</span>);
+
+<span class="cm">// Create per-request DataLoader (never share across requests!)</span>
+<span class="kw">function</span> <span class="fn">createLoaders</span>(db) {
+  <span class="kw">return</span> {
+    userLoader: <span class="kw">new</span> <span class="cls">DataLoader</span>(<span class="kw">async</span> (userIds) => {
+      <span class="cm">// Called ONCE with all accumulated IDs from a tick</span>
+      <span class="cm">// userIds = [1, 5, 7, 12, 43] — all orders' customer IDs</span>
+      <span class="kw">const</span> users = <span class="kw">await</span> db.<span class="fn">query</span>(
+        <span class="str">`SELECT * FROM users WHERE id = ANY($1)`</span>, [userIds]
+      );
+      <span class="cm">// DataLoader requires results in SAME ORDER as input keys!</span>
+      <span class="kw">return</span> userIds.<span class="fn">map</span>(id => users.<span class="fn">find</span>(u => u.id === id));
+    }, {
+      cache: <span class="kw">true</span>,    <span class="cm">// Same user ID in same request → returns cached</span>
+      maxBatchSize: <span class="nm">100</span> <span class="cm">// Max IDs per batch query</span>
+    })
+  };
+}
+
+<span class="cm">// Updated resolver — uses DataLoader instead of direct DB call:</span>
+Order: {
+  <span class="fn">customer</span>: (order, args, context) => {
+    <span class="cm">// context.loaders created fresh per request</span>
+    <span class="kw">return</span> context.loaders.userLoader.<span class="fn">load</span>(order.customerId);
+    <span class="cm">// DataLoader defers this call until end of current event loop tick</span>
+    <span class="cm">// Accumulates all customer IDs from all Order resolvers</span>
+    <span class="cm">// Fires ONE batch query: SELECT * FROM users WHERE id IN (1,5,7,12,43)</span>
+  }
+}
+<span class="cm">// Result: 11 queries → 2 queries! (1 orders + 1 batched users)</span></code></pre>
+
+    <h4>DataLoader Internals — The Batching Mechanism</h4>
+    <pre><code><span class="cm">// DataLoader uses microtask queue (Promise.then) for batching:</span>
+<span class="cm">// Resolver tick:</span>
+<span class="cm">//   order1.customer → loader.load(userId=1)  → queued</span>
+<span class="cm">//   order2.customer → loader.load(userId=5)  → queued</span>
+<span class="cm">//   order3.customer → loader.load(userId=7)  → queued</span>
+<span class="cm">// End of tick: loader fires batchFn([1, 5, 7]) → 1 DB query</span>
+<span class="cm">// Resolves all 3 promises with their respective results</span>
+
+<span class="cm">// Caching: if userId=5 appears again in same request:</span>
+loader.<span class="fn">load</span>(<span class="nm">5</span>)  <span class="cm">// Returns cached Promise immediately — no DB hit!</span>
+<span class="cm">// Cache is per-request (in context) — never persists across requests</span>
+<span class="cm">// Prevents serving stale data between requests</span></code></pre>
+
+    <h3>Apollo Federation — Distributed GraphQL Graph</h3>
+    <p>Federation allows multiple teams to own separate GraphQL services (subgraphs) that compose into a single unified schema. The Apollo Router (Rust-based) orchestrates query planning and execution across subgraphs:</p>
+
+    <div class="diagram">
+<span class="hl">Apollo Federation Architecture</span>
+
+Client ──Query──► Apollo Router (query planner)
+                       │
+          ┌────────────┼────────────────┐
+          ▼            ▼                ▼
+   Users Subgraph  Orders Subgraph  Products Subgraph
+   (Team Auth)     (Team Commerce)  (Team Catalog)
+   ┌──────────┐    ┌──────────────┐  ┌──────────────┐
+   │ User     │    │ Order        │  │ Product      │
+   │  id      │    │  id          │  │  id          │
+   │  name    │    │  total       │  │  name        │
+   │  email   │    │  status      │  │  price       │
+   └──────────┘    │  customer→User│  │  inventory   │
+                    │  items→Product│  └──────────────┘
+                    └──────────────┘
+
+Query: { orders { customer { name } items { product { price } } } }
+
+Router query plan:
+  1. Fetch orders from Orders subgraph
+  2. Extract customerIds from orders
+  3. Batch fetch users from Users subgraph (using @key directive)
+  4. Extract productIds from order items
+  5. Batch fetch products from Products subgraph
+  6. Merge results → single response to client
+    </div>
+
+    <pre><code><span class="cm">// Federation entity definition (@key = primary key for cross-service lookup)</span>
+
+<span class="cm">// Users Subgraph:</span>
+<span class="kw">type</span> <span class="cls">User</span> @key(fields: <span class="str">"id"</span>) {
+  id:    ID!
+  name:  String!
+  email: String!
+}
+
+<span class="cm">// Orders Subgraph extends User with order-specific data:</span>
+<span class="k

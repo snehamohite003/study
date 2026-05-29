@@ -1,0 +1,1341 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>System Design Deep Dive — Part 5 | Sharding, Specialized DBs, Consistency</title>
+  <style>
+    :root {
+      --primary: #0d1117;
+      --accent: #0f3460;
+      --highlight: #e94560;
+      --card-bg: #161b22;
+      --text: #e6edf3;
+      --subtext: #8b949e;
+      --code-bg: #010409;
+      --border: #30363d;
+      --tag-bg: #21262d;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+      background: var(--primary);
+      color: var(--text);
+      line-height: 1.85;
+    }
+
+    /* ── HEADER ── */
+    header {
+      background: linear-gradient(135deg, #0f3460 0%, #16213e 30%, #2d1b69 60%, #e94560 100%);
+      padding: 68px 40px;
+      text-align: center;
+    }
+    header h1 { font-size: 2.9rem; font-weight: 800; letter-spacing: -1px; }
+    header p  { font-size: 1.1rem; color: rgba(255,255,255,0.85); margin-top: 10px; }
+    .badge-row { display: flex; justify-content: center; gap: 10px; flex-wrap: wrap; margin-top: 16px; }
+    .badge {
+      display: inline-block;
+      background: rgba(255,255,255,0.15);
+      border: 1px solid rgba(255,255,255,0.3);
+      border-radius: 20px;
+      padding: 5px 16px;
+      font-size: 0.8rem;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+    }
+
+    /* ── TOC ── */
+    nav.toc {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      margin: 40px auto;
+      max-width: 960px;
+      padding: 34px 44px;
+    }
+    nav.toc h2 { color: var(--highlight); font-size: 1rem; margin-bottom: 18px;
+                 text-transform: uppercase; letter-spacing: 1.5px; }
+    nav.toc ol { padding-left: 22px; }
+    nav.toc li { margin: 10px 0; }
+    nav.toc a  { color: #58a6ff; text-decoration: none; font-size: 1rem; transition: color .2s; }
+    nav.toc a:hover { color: var(--highlight); }
+
+    /* ── MAIN ── */
+    main { max-width: 1060px; margin: 0 auto; padding: 20px 30px 100px; }
+
+    /* ── TOPIC CARD ── */
+    .topic {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      margin-bottom: 68px;
+      overflow: hidden;
+      box-shadow: 0 4px 40px rgba(0,0,0,.45);
+    }
+    .topic-header {
+      background: linear-gradient(100deg, var(--accent) 0%, #1a1a3e 100%);
+      padding: 34px 44px;
+      border-bottom: 2px solid var(--highlight);
+      display: flex;
+      align-items: center;
+      gap: 22px;
+    }
+    .topic-header .num {
+      background: var(--highlight);
+      color: white;
+      font-size: 1.35rem;
+      font-weight: 800;
+      width: 52px; height: 52px;
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0;
+    }
+    .topic-header h2 { font-size: 1.95rem; font-weight: 700; }
+    .topic-header p  { color: var(--subtext); font-size: 0.95rem; margin-top: 5px; }
+    .topic-body { padding: 40px 44px; }
+
+    /* ── HEADINGS ── */
+    .topic-body h3 {
+      color: #58a6ff; font-size: 1.25rem;
+      margin: 36px 0 14px;
+      padding-left: 14px;
+      border-left: 4px solid var(--highlight);
+    }
+    .topic-body h4 { color: #e3b341; font-size: 1.05rem; margin: 24px 0 10px; }
+    .topic-body h5 { color: #3fb950; font-size: 0.95rem; margin: 18px 0 8px; }
+    .topic-body p  { color: var(--text); margin-bottom: 14px; }
+    .topic-body ul,
+    .topic-body ol { padding-left: 24px; margin-bottom: 14px; }
+    .topic-body li { margin: 7px 0; color: var(--text); }
+    strong { color: #c9d1d9; }
+
+    /* ── CODE ── */
+    pre {
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 22px 26px;
+      overflow-x: auto;
+      margin: 14px 0 26px;
+      font-size: 0.865rem;
+      line-height: 1.68;
+    }
+    code { font-family: 'Fira Code','Cascadia Code','Consolas',monospace; color: #c9d1d9; }
+    pre code { color: #c9d1d9; }
+    .kw  { color: #ff79c6; }
+    .fn  { color: #50fa7b; }
+    .str { color: #f1fa8c; }
+    .cm  { color: #6272a4; font-style: italic; }
+    .nm  { color: #bd93f9; }
+    .cls { color: #8be9fd; }
+    .at  { color: #ffb86c; }
+    .op  { color: #ff79c6; }
+
+    /* ── CALLOUT ── */
+    .callout {
+      border-radius: 10px;
+      padding: 18px 22px;
+      margin: 18px 0;
+      border-left: 5px solid;
+      font-size: 0.95rem;
+    }
+    .callout.info    { background: #0c2d48; border-color: #58a6ff; }
+    .callout.warn    { background: #2d1f00; border-color: #e3b341; }
+    .callout.success { background: #0d2a0d; border-color: #3fb950; }
+    .callout.danger  { background: #2d0d0d; border-color: #f85149; }
+    .callout.purple  { background: #1a0d2e; border-color: #bc8cff; }
+    .callout.teal    { background: #0a2530; border-color: #39d0d8; }
+    .callout.orange  { background: #2d1500; border-color: #f0883e; }
+    .callout strong  { display: block; margin-bottom: 6px;
+                       font-size: 0.82rem; text-transform: uppercase; letter-spacing: .6px; }
+    .callout.info    strong { color: #58a6ff; }
+    .callout.warn    strong { color: #e3b341; }
+    .callout.success strong { color: #3fb950; }
+    .callout.danger  strong { color: #f85149; }
+    .callout.purple  strong { color: #bc8cff; }
+    .callout.teal    strong { color: #39d0d8; }
+    .callout.orange  strong { color: #f0883e; }
+
+    /* ── DIAGRAM ── */
+    .diagram {
+      background: #010409;
+      border: 1px dashed #444c56;
+      border-radius: 10px;
+      padding: 22px 28px;
+      margin: 16px 0 26px;
+      font-family: 'Fira Code','Consolas',monospace;
+      font-size: 0.82rem;
+      color: #8b949e;
+      white-space: pre;
+      overflow-x: auto;
+      line-height: 1.65;
+    }
+    .diagram .hl { color: #79c0ff; }
+    .diagram .ar { color: var(--highlight); }
+    .diagram .gr { color: #3fb950; }
+    .diagram .yw { color: #e3b341; }
+    .diagram .pk { color: #ff79c6; }
+    .diagram .wh { color: #e6edf3; }
+    .diagram .or { color: #f0883e; }
+
+    /* ── TABLE ── */
+    table { width: 100%; border-collapse: collapse; margin: 16px 0 28px; font-size: .9rem; }
+    th { background: #0f3460; color: #e6edf3; padding: 13px 16px;
+         text-align: left; font-size: .85rem; letter-spacing: .3px; }
+    td { padding: 11px 16px; border-bottom: 1px solid var(--border);
+         color: var(--text); vertical-align: top; }
+    tr:nth-child(even) td { background: rgba(255,255,255,.025); }
+    tr:hover td { background: rgba(88,166,255,.05); }
+
+    /* ── TAGS ── */
+    .tags { display: flex; flex-wrap: wrap; gap: 8px; margin: 14px 0 6px; }
+    .tag { background: var(--tag-bg); border: 1px solid var(--border);
+           border-radius: 20px; padding: 4px 14px; font-size: .78rem; color: #79c0ff; }
+
+    /* ── METRICS ── */
+    .metrics { display: grid; grid-template-columns: repeat(auto-fit,minmax(155px,1fr));
+               gap: 14px; margin: 18px 0 28px; }
+    .metric-card { background: var(--primary); border: 1px solid var(--border);
+                   border-radius: 10px; padding: 18px 14px; text-align: center; }
+    .metric-card .val { font-size: 1.5rem; font-weight: 700; color: var(--highlight); }
+    .metric-card .lbl { font-size: .74rem; color: var(--subtext); margin-top: 5px; line-height: 1.4; }
+
+    /* ── TWO-COL ── */
+    .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; margin: 16px 0 24px; }
+    .col-card { background: var(--primary); border: 1px solid var(--border);
+                border-radius: 10px; padding: 20px 22px; }
+    .col-card h5 { color: #58a6ff; margin-bottom: 10px; font-size: .95rem; }
+    .col-card ul { padding-left: 18px; }
+    .col-card li { font-size: .88rem; margin: 5px 0; color: var(--subtext); }
+
+    /* ── THREE-COL ── */
+    .three-col { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; margin: 16px 0 24px; }
+
+    /* ── DB CARD ── */
+    .db-section {
+      background: linear-gradient(135deg, #0f1923 0%, #0d1117 100%);
+      border: 1px solid #30363d;
+      border-radius: 14px;
+      margin: 28px 0;
+      overflow: hidden;
+    }
+    .db-section-header {
+      background: linear-gradient(90deg, #1a2744 0%, #0f1923 100%);
+      padding: 18px 28px;
+      border-bottom: 1px solid #30363d;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+    .db-icon {
+      width: 40px; height: 40px;
+      border-radius: 10px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 1.3rem;
+      flex-shrink: 0;
+    }
+    .db-section-header h4 { color: #e3b341; margin: 0; font-size: 1.1rem; }
+    .db-section-header p  { color: var(--subtext); font-size: 0.82rem; margin: 3px 0 0; }
+    .db-section-body { padding: 24px 28px; }
+    .db-section-body h5 { color: #58a6ff; margin: 18px 0 8px; font-size: 0.95rem; }
+    .db-section-body p  { color: var(--text); margin-bottom: 12px; font-size: 0.93rem; }
+    .db-section-body ul { padding-left: 20px; margin-bottom: 12px; }
+    .db-section-body li { margin: 6px 0; font-size: 0.88rem; color: var(--text); }
+
+    /* ── CONSISTENCY SPECTRUM ── */
+    .spectrum {
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 24px 28px;
+      margin: 18px 0 26px;
+      position: relative;
+    }
+    .spectrum-bar {
+      height: 12px;
+      border-radius: 6px;
+      background: linear-gradient(90deg, #3fb950 0%, #e3b341 50%, #f85149 100%);
+      margin: 16px 0;
+      position: relative;
+    }
+    .spectrum-labels {
+      display: flex;
+      justify-content: space-between;
+      font-size: 0.78rem;
+      color: var(--subtext);
+      font-family: 'Fira Code', monospace;
+    }
+
+    /* ── STEP LIST ── */
+    .steps { counter-reset: step; padding: 0; list-style: none; margin: 16px 0 26px; }
+    .steps li {
+      counter-increment: step;
+      position: relative;
+      padding: 13px 16px 13px 54px;
+      margin: 9px 0;
+      background: var(--primary);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      font-size: .93rem;
+    }
+    .steps li::before {
+      content: counter(step);
+      position: absolute; left: 14px; top: 50%; transform: translateY(-50%);
+      background: var(--highlight); color: white;
+      width: 28px; height: 28px; border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: .78rem; font-weight: 700;
+    }
+
+    /* ── FOOTER ── */
+    footer { text-align: center; padding: 34px; color: var(--subtext);
+             font-size: .83rem; border-top: 1px solid var(--border); }
+
+    @media print {
+      body { background: #fff; color: #111; }
+      pre, .diagram { background: #f6f8fa !important; color: #111 !important;
+                      border-color: #ccc !important; }
+      .topic { border-color: #ccc !important; page-break-inside: avoid; }
+      .topic-header { background: #1a1a2e !important; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ═══════════════════════════ HEADER ═══════════════════════════ -->
+<header>
+  <h1>⚙️ System Design Deep Dive — Part 5</h1>
+  <p>Sharding strategies, specialized databases internals, and consistency models in depth</p>
+  <div class="badge-row">
+    <span class="badge">9+ Years Experience</span>
+    <span class="badge">Advanced Level</span>
+    <span class="badge">Topics 24 – 26</span>
+    <span class="badge">_sonnet</span>
+  </div>
+</header>
+
+<!-- ═══════════════════════════ TOC ═══════════════════════════ -->
+<nav class="toc">
+  <h2>📚 Table of Contents</h2>
+  <ol start="24">
+    <li><a href="#sharding">Sharding — Strategies, Consistent Hashing, Resharding, Cross-Shard Ops, Hotspots</a></li>
+    <li><a href="#specialized-dbs">Specialized Databases — Time Series (InfluxDB), Cassandra, Elasticsearch, Neo4j (Graph)</a></li>
+    <li><a href="#consistency">Strong vs Eventual Consistency — Models, Linearizability, Session Guarantees, Real-World</a></li>
+  </ol>
+</nav>
+
+<main>
+
+<!-- ═══════════════════════════════════════════════════════════
+     24. SHARDING
+═══════════════════════════════════════════════════════════════ -->
+<section class="topic" id="sharding">
+  <div class="topic-header">
+    <div class="num">24</div>
+    <div>
+      <h2>Sharding</h2>
+      <p>Horizontal data partitioning — strategies, shard routing, resharding, cross-shard operations and hotspot elimination</p>
+    </div>
+  </div>
+  <div class="topic-body">
+
+    <div class="tags">
+      <span class="tag">Hash Sharding</span><span class="tag">Range Sharding</span>
+      <span class="tag">Consistent Hashing</span><span class="tag">Virtual Nodes</span>
+      <span class="tag">Resharding</span><span class="tag">Cross-Shard Joins</span>
+      <span class="tag">Hotspot Elimination</span><span class="tag">Directory-Based</span>
+    </div>
+
+    <h3>Why Sharding — When Vertical Scaling and Replication Aren't Enough</h3>
+    <p>Replication scales reads, but all writes still hit one primary. Vertical scaling has hardware ceilings. Sharding (horizontal partitioning) distributes both reads AND writes across multiple independent database nodes — each owning a subset of the data:</p>
+
+    <pre><code><span class="cm">// When to shard — triggering signals:</span>
+<span class="cm">// 1. Single DB write throughput ceiling (~50K writes/sec for PostgreSQL)</span>
+<span class="cm">// 2. Dataset exceeds single server storage (e.g., 20TB table)</span>
+<span class="cm">// 3. B+Tree height increase slows all queries (index > RAM → disk I/O)</span>
+<span class="cm">// 4. Lock contention on hot rows serializes writes</span>
+<span class="cm">// 5. VACUUM/maintenance takes too long for data volume</span>
+
+<span class="cm">// Sharding vocabulary:</span>
+<span class="cm">// Shard Key:    Column(s) used to determine which shard owns a row</span>
+<span class="cm">// Shard:        Independent database node owning a subset of rows</span>
+<span class="cm">// Shard Map:    Routing table: shard_key_range → shard endpoint</span>
+<span class="cm">// Logical Shard: Unit of data that can be moved between physical shards</span>
+<span class="cm">// Physical Shard: Actual database server/cluster hosting logical shards</span></code></pre>
+
+    <h3>Sharding Strategy 1 — Hash-Based Sharding</h3>
+    <p>Apply a hash function to the shard key; the result modulo N determines the shard. Guarantees uniform data distribution even if shard keys are skewed:</p>
+
+    <div class="diagram">
+<span class="hl">Hash Sharding — Naive modulo approach</span>
+
+shard = hash(user_id) % 4
+
+user_id=1001  → hash=7823481  → 7823481 % 4 = 1  → <span class="hl">Shard 1</span>
+user_id=1002  → hash=9134752  → 9134752 % 4 = 0  → <span class="hl">Shard 0</span>
+user_id=1003  → hash=4421109  → 4421109 % 4 = 1  → <span class="hl">Shard 1</span>
+user_id=1004  → hash=6782340  → 6782340 % 4 = 0  → <span class="hl">Shard 0</span>
+
+Shard 0: [DB0] users 1002, 1004, 1008, ...  ← ~25% of data
+Shard 1: [DB1] users 1001, 1003, 1007, ...  ← ~25% of data
+Shard 2: [DB2] users 1006, 1010, 1014, ...  ← ~25% of data
+Shard 3: [DB3] users 1005, 1009, 1013, ...  ← ~25% of data
+
+<span class="ar">PROBLEM: Adding Shard 4</span>
+shard = hash(user_id) % 5  ← N changes from 4 to 5
+user_id=1001  → 7823481 % 5 = 1  → still Shard 1 ✓
+user_id=1002  → 9134752 % 5 = 2  → now Shard 2!  ← was Shard 0
+<span class="ar">~80% of all rows must MOVE to new shards — catastrophic resharding!</span>
+    </div>
+
+    <h3>Consistent Hashing — Solving the Resharding Problem</h3>
+    <p>Consistent hashing maps both data keys and shard nodes onto a virtual ring. When nodes are added/removed, only the data between adjacent nodes on the ring needs to move — minimizing resharding impact:</p>
+
+    <div class="diagram">
+<span class="hl">Consistent Hash Ring (0 – 2³²)</span>
+
+                      0 / 2³²
+                         │
+              3,900,000,000  ──── 100,000,000
+             /                               \
+    3,400,000,000    <span class="hl">Ring (360° = 2³² values)</span>   400,000,000
+           |                                  |
+    2,900,000,000                         900,000,000
+             \                               /
+              2,400,000,000  ─── 1,900,000,000
+                         │
+                    1,400,000,000
+
+Nodes placed at hash(node_id) positions:
+  <span class="hl">Node A</span> at position  500,000,000
+  <span class="hl">Node B</span> at position 1,500,000,000
+  <span class="hl">Node C</span> at position 2,500,000,000
+  <span class="hl">Node D</span> at position 3,500,000,000
+
+Routing rule: walk CLOCKWISE from hash(key) → first node you hit
+
+key "user:1001" → hash=  700,000,000 → clockwise → <span class="gr">Node B (1,500,000,000)</span>
+key "user:1002" → hash=2,100,000,000 → clockwise → <span class="gr">Node C (2,500,000,000)</span>
+key "user:1003" → hash=3,800,000,000 → clockwise → <span class="gr">Node A (  500,000,000, wraps)</span>
+
+<span class="gr">Adding Node E at position 1,000,000,000:</span>
+  Only keys between Node A (500M) and Node E (1B) migrate:
+  → Move from Node B to Node E
+  → ~25% of Node B's data moves (1 shard worth, not everything!)
+  → All other nodes UNAFFECTED ✓
+    </div>
+
+    <h4>Virtual Nodes (vnodes) — Solving Uneven Distribution</h4>
+    <pre><code><span class="cm">// Problem with basic consistent hashing:</span>
+<span class="cm">// Hash ring positions are random → nodes may get unequal data shares</span>
+<span class="cm">// Removing a node dumps ALL its data onto ONE neighbor → hotspot</span>
+
+<span class="cm">// Solution: each physical node owns MULTIPLE virtual nodes on the ring</span>
+<span class="cm">// Cassandra default: 256 vnodes per physical node</span>
+
+Physical Node A (128GB RAM) → vnodes at positions: [23M, 180M, 445M, 712M, ...]
+Physical Node B (256GB RAM) → vnodes at positions: [91M, 234M, 511M, 890M, ...]
+<span class="cm">// Node B has more vnodes proportional to its capacity</span>
+
+<span class="cm">// Benefits:</span>
+<span class="cm">// 1. Even data distribution: more vnodes → closer to uniform</span>
+<span class="cm">// 2. Node failure: data spreads across MANY neighbors (all vnode successors)</span>
+<span class="cm">// 3. Heterogeneous hardware: powerful nodes get more vnodes</span>
+<span class="cm">// 4. Adding node: takes vnodes from MANY existing nodes → parallel data migration</span>
+
+<span class="cm">// Cassandra vnode routing (simplified):</span>
+<span class="kw">const</span> ring = <span class="kw">new</span> <span class="cls">SortedMap</span>(); <span class="cm">// position → node mapping</span>
+
+<span class="kw">function</span> <span class="fn">getNode</span>(key) {
+  <span class="kw">const</span> pos = murmur3Hash(key); <span class="cm">// Cassandra uses Murmur3</span>
+  <span class="cm">// Find first vnode position >= pos (ceiling)</span>
+  <span class="kw">const</span> entry = ring.<span class="fn">ceilingEntry</span>(pos) ?? ring.<span class="fn">firstEntry</span>(); <span class="cm">// wrap</span>
+  <span class="kw">return</span> entry.node;
+}
+
+<span class="cm">// Replication: walk ring clockwise, pick next RF unique physical nodes</span>
+<span class="kw">function</span> <span class="fn">getReplicaNodes</span>(key, replicationFactor) {
+  <span class="kw">const</span> nodes = <span class="kw">new</span> <span class="cls">Set</span>();
+  <span class="kw">let</span> pos = murmur3Hash(key);
+  <span class="kw">while</span> (nodes.size &lt; replicationFactor) {
+    <span class="kw">const</span> entry = ring.<span class="fn">ceilingEntry</span>(pos) ?? ring.<span class="fn">firstEntry</span>();
+    nodes.<span class="fn">add</span>(entry.physicalNode); <span class="cm">// deduplicate by physical node</span>
+    pos = entry.position + <span class="nm">1</span>;
+  }
+  <span class="kw">return</span> [...nodes];
+}</code></pre>
+
+    <h3>Sharding Strategy 2 — Range-Based Sharding</h3>
+    <pre><code><span class="cm">-- Range sharding: assign contiguous key ranges to shards</span>
+<span class="cm">-- Good for: range queries, time-series data, sorted access</span>
+
+<span class="cm">-- Shard map for orders table (sharded by created_at year):</span>
+Shard 0: created_at ∈ [2020-01-01, 2021-01-01)  → DB_2020
+Shard 1: created_at ∈ [2021-01-01, 2022-01-01)  → DB_2021
+Shard 2: created_at ∈ [2022-01-01, 2023-01-01)  → DB_2022
+Shard 3: created_at ∈ [2023-01-01, 2024-01-01)  → DB_2023
+Shard 4: created_at ∈ [2024-01-01, ∞)           → DB_2024 (current)
+
+<span class="cm">-- Query routing: date range → determine shard(s)</span>
+SELECT * FROM orders WHERE created_at BETWEEN '2023-06-01' AND '2023-12-31';
+<span class="cm">-- Routes to: DB_2023 only ← single shard query ✓</span>
+
+SELECT * FROM orders WHERE created_at BETWEEN '2022-11-01' AND '2023-03-31';
+<span class="cm">-- Routes to: DB_2022 AND DB_2023 ← two-shard scatter-gather</span>
+
+<span class="cm">-- PROBLEM: Hotspot on current shard</span>
+<span class="cm">-- ALL new orders go to DB_2024 → that shard gets 100% of write traffic!</span>
+<span class="cm">-- Historical shards: reads only. Current shard: reads + all writes.</span>
+<span class="cm">-- Fix: sub-shard current period by customer_id range OR hash within range</span></code></pre>
+
+    <h3>Sharding Strategy 3 — Directory-Based (Lookup Service)</h3>
+    <pre><code><span class="cm">// A dedicated lookup service maps shard key → shard endpoint</span>
+<span class="cm">// Most flexible — resharding is just updating the directory, not moving data</span>
+
+<span class="kw">class</span> <span class="cls">ShardDirectory</span> {
+  <span class="kw">async</span> <span class="fn">getShard</span>(tenantId) {
+    <span class="cm">// Check local cache first (avoid per-request lookups)</span>
+    <span class="kw">if</span> (<span class="kw">this</span>.cache.<span class="fn">has</span>(tenantId)) <span class="kw">return</span> <span class="kw">this</span>.cache.<span class="fn">get</span>(tenantId);
+
+    <span class="cm">// Query directory service (backed by Redis or ZooKeeper)</span>
+    <span class="kw">const</span> shard = <span class="kw">await</span> <span class="kw">this</span>.redis.<span class="fn">hget</span>(<span class="str">'shard_map'</span>, tenantId);
+    <span class="kw">this</span>.cache.<span class="fn">set</span>(tenantId, shard, { ttl: <span class="nm">300</span> }); <span class="cm">// cache 5 min</span>
+    <span class="kw">return</span> shard;
+  }
+
+  <span class="kw">async</span> <span class="fn">moveTenant</span>(tenantId, fromShard, toShard) {
+    <span class="cm">// Step 1: Dual-write to both shards</span>
+    <span class="kw">await</span> <span class="kw">this</span>.<span class="fn">enableDualWrite</span>(tenantId, fromShard, toShard);
+
+    <span class="cm">// Step 2: Copy historical data from → to shard</span>
+    <span class="kw">await</span> <span class="kw">this</span>.<span class="fn">copyData</span>(tenantId, fromShard, toShard);
+
+    <span class="cm">// Step 3: Verify data integrity</span>
+    <span class="kw">await</span> <span class="kw">this</span>.<span class="fn">verifyChecksum</span>(tenantId, fromShard, toShard);
+
+    <span class="cm">// Step 4: Atomically update directory</span>
+    <span class="kw">await</span> <span class="kw">this</span>.redis.<span class="fn">hset</span>(<span class="str">'shard_map'</span>, tenantId, toShard);
+
+    <span class="cm">// Step 5: Stop dual-write, disable old shard data</span>
+    <span class="kw">await</span> <span class="kw">this</span>.<span class="fn">disableDualWrite</span>(tenantId, fromShard);
+  }
+}
+
+<span class="cm">// Trade-offs:</span>
+<span class="cm">// ✓ Resharding = update directory (no key formula change)</span>
+<span class="cm">// ✓ Heterogeneous placement (tenant-aware, VIP customers on better hardware)</span>
+<span class="cm">// ✗ Directory is a single point of failure → must be highly available</span>
+<span class="cm">// ✗ Extra network hop for every request (mitigated by local cache)</span>
+<span class="cm">// Used by: Notion, Shopify (tenant-based sharding), Discord</span></code></pre>
+
+    <h3>Hotspot Elimination — The Celebrity Problem</h3>
+    <pre><code><span class="cm">// Hot key problem: one shard key receives disproportionate traffic</span>
+<span class="cm">// Example: Twitter celebrity with 100M followers posts a tweet</span>
+<span class="cm">// → All 100M follow requests hit the same shard (tweet_id shard key)</span>
+
+<span class="cm">// Solution 1: Key Salting — append random suffix to distribute reads</span>
+<span class="kw">function</span> <span class="fn">getHotKey</span>(userId, numSalts = <span class="nm">10</span>) {
+  <span class="kw">const</span> salt = Math.<span class="fn">floor</span>(Math.<span class="fn">random</span>() * numSalts);
+  <span class="kw">return</span> <span class="str">`user:${userId}:${salt}`</span>; <span class="cm">// Spread across 10 shards</span>
+}
+<span class="cm">// Write: update ALL 10 salted keys (fan-out write)</span>
+<span class="cm">// Read:  pick random salt → reads distributed across 10 shards</span>
+<span class="cm">// Cost: 10× write amplification. Worth it for extreme hot keys.</span>
+
+<span class="cm">// Solution 2: Dedicated shard for known hot tenants</span>
+<span class="kw">const</span> hotTenants = <span class="kw">new</span> <span class="cls">Set</span>([<span class="str">'twitter'</span>, <span class="str">'google'</span>, <span class="str">'meta'</span>]);
+<span class="kw">function</span> <span class="fn">getShard</span>(tenantId) {
+  <span class="kw">if</span> (hotTenants.<span class="fn">has</span>(tenantId)) <span class="kw">return</span> <span class="str">'dedicated-shard-vip'</span>; <span class="cm">// Own shard</span>
+  <span class="kw">return</span> <span class="str">`shard-${hash(tenantId) % NUM_SHARDS}`</span>;
+}
+
+<span class="cm">// Solution 3: Caching layer absorbs hot key reads</span>
+<span class="cm">// CDN/Redis caches celebrity's profile with high TTL</span>
+<span class="cm">// Shard only sees cache-miss traffic (~1%)</span>
+
+<span class="cm">// Solution 4: Read-local writes with CRDTs</span>
+<span class="cm">// For counters (likes, views): each shard maintains local counter</span>
+<span class="cm">// Periodically merge (G-Counter CRDT) for global count</span>
+<span class="cm">// No single shard is the write destination for counter updates</span></code></pre>
+
+    <h3>Cross-Shard Operations — The Hard Problems</h3>
+
+    <h4>Scatter-Gather Queries</h4>
+    <pre><code><span class="cm">// Query spans multiple shards → must query all and merge</span>
+<span class="kw">async function</span> <span class="fn">searchOrders</span>(filters) {
+  <span class="cm">// Determine which shards to query (if shard key not in filter → ALL shards)</span>
+  <span class="kw">const</span> targetShards = filters.customerId
+    ? [<span class="fn">getShardForCustomer</span>(filters.customerId)]  <span class="cm">// Single shard ✓</span>
+    : ALL_SHARDS;                                   <span class="cm">// Scatter-gather ✗</span>
+
+  <span class="cm">// Query all target shards in PARALLEL</span>
+  <span class="kw">const</span> results = <span class="kw">await</span> Promise.<span class="fn">all</span>(
+    targetShards.<span class="fn">map</span>(shard => shard.<span class="fn">query</span>(filters))
+  );
+
+  <span class="cm">// Gather: merge, deduplicate, sort, paginate in application memory</span>
+  <span class="kw">const</span> merged = results.<span class="fn">flat</span>().<span class="fn">sort</span>((a, b) => b.createdAt - a.createdAt);
+
+  <span class="cm">// PROBLEM with deep pagination across shards:</span>
+  <span class="cm">// SELECT * ORDER BY created_at LIMIT 10 OFFSET 9990</span>
+  <span class="cm">// Must fetch 10,000 rows from EACH shard → merge → take last 10</span>
+  <span class="cm">// N shards × 10,000 rows fetched = 10,000N rows for 10 results!</span>
+  <span class="cm">// Fix: cursor-based pagination using shard key monotonic values</span>
+  <span class="kw">return</span> merged.<span class="fn">slice</span>(<span class="nm">0</span>, filters.limit);
+}</code></pre>
+
+    <h4>Distributed Transactions Across Shards</h4>
+    <pre><code><span class="cm">// Moving money between users on different shards requires distributed transaction</span>
+
+<span class="cm">// Option 1: Two-Phase Commit (2PC)</span>
+<span class="cm">// Phase 1 (Prepare): Coordinator asks all shards to lock and prepare</span>
+<span class="cm">// Phase 2 (Commit):  If all ACK → commit all; else → abort all</span>
+<span class="cm">// Problem: blocking protocol — coordinator crash leaves shards locked forever</span>
+<span class="cm">// Problem: latency = 2 × max(shard_latency) × 2 network round trips</span>
+
+<span class="cm">// Option 2: Saga Pattern (preferred for microservices/sharded DBs)</span>
+<span class="cm">// Step 1: Debit shard A (local ACID transaction) → if fails, done</span>
+<span class="cm">// Step 2: Credit shard B (local ACID transaction) → if fails, compensate</span>
+<span class="cm">// Step 3: Compensating tx: re-credit shard A if step 2 failed</span>
+
+<span class="kw">async function</span> <span class="fn">transferFunds</span>(fromUserId, toUserId, amount) {
+  <span class="kw">const</span> fromShard = <span class="fn">getShard</span>(fromUserId);
+  <span class="kw">const</span> toShard   = <span class="fn">getShard</span>(toUserId);
+
+  <span class="cm">// Step 1: Reserve funds on source shard (idempotent with idempotency key)</span>
+  <span class="kw">const</span> txId = <span class="fn">uuid</span>();
+  <span class="kw">await</span> fromShard.<span class="fn">debit</span>({ userId: fromUserId, amount, txId });
+
+  <span class="kw">try</span> {
+    <span class="cm">// Step 2: Credit destination shard</span>
+    <span class="kw">await</span> toShard.<span class="fn">credit</span>({ userId: toUserId, amount, txId });
+  } <span class="kw">catch</span> (err) {
+    <span class="cm">// Step 3: Compensate — reverse debit (idempotent)</span>
+    <span class="kw">await</span> fromShard.<span class="fn">reverseDebit</span>({ txId });
+    <span class="kw">throw</span> err;
+  }
+}
+<span class="cm">// Design shard key to co-locate related data and minimize cross-shard ops</span>
+<span class="cm">// Instagram: shard by user_id so all a user's data is on one shard</span></code></pre>
+
+    <h3>Resharding — Live Migration Without Downtime</h3>
+    <div class="diagram">
+<span class="hl">Live Resharding (2 shards → 4 shards)</span>
+
+<span class="yw">Phase 1: Dual-Write (no downtime)</span>
+  App writes to OLD shards AND NEW shards simultaneously
+  Old Shard 0 (keys 0-499) → copies to New Shard 0 (0-249) + New Shard 1 (250-499)
+  Old Shard 1 (keys 500-999) → copies to New Shard 2 (500-749) + New Shard 3 (750-999)
+
+<span class="yw">Phase 2: Backfill (background)</span>
+  Stream historical data from old shards to new shards
+  CDC (Change Data Capture) or batch copy
+  Track progress with watermark LSN/offset
+
+<span class="yw">Phase 3: Verify</span>
+  Checksum comparison: old shard rows == new shard rows
+  Run shadow queries: same query on old + new, compare results
+
+<span class="yw">Phase 4: Cutover (seconds, not hours)</span>
+  Atomic update of shard routing table
+  Stop dual-write
+  Old shards become read-only (archive)
+  <span class="gr">← Zero downtime. Users see no interruption.</span>
+
+Used by: Stripe (live sharding), GitHub (Vitess), Notion (tenant migration)
+    </div>
+
+    <div class="metrics">
+      <div class="metric-card"><div class="val">~1/N</div><div class="lbl">Data Moved on Node Add (Consistent Hashing)</div></div>
+      <div class="metric-card"><div class="val">256</div><div class="lbl">Default Vnodes per Node (Cassandra)</div></div>
+      <div class="metric-card"><div class="val">O(1)</div><div class="lbl">Shard Lookup (Hash-based)</div></div>
+      <div class="metric-card"><div class="val">10×</div><div class="lbl">Write Amplification (Key Salting)</div></div>
+      <div class="metric-card"><div class="val">0</div><div class="lbl">Downtime with Dual-Write Resharding</div></div>
+    </div>
+
+  </div>
+</section>
+
+
+<!-- ═══════════════════════════════════════════════════════════
+     25. SPECIALIZED DATABASES
+═══════════════════════════════════════════════════════════════ -->
+<section class="topic" id="specialized-dbs">
+  <div class="topic-header">
+    <div class="num">25</div>
+    <div>
+      <h2>Specialized Databases</h2>
+      <p>Time Series (InfluxDB/TimescaleDB), Cassandra (Wide-Column), Elasticsearch (Inverted Index), Neo4j (Graph) — internals and when to use each</p>
+    </div>
+  </div>
+  <div class="topic-body">
+
+    <div class="tags">
+      <span class="tag">Time Series</span><span class="tag">TSM Tree</span><span class="tag">Cassandra SSTable</span>
+      <span class="tag">Wide-Column</span><span class="tag">Inverted Index</span><span class="tag">BM25 Scoring</span>
+      <span class="tag">Graph Traversal</span><span class="tag">Cypher</span><span class="tag">Index-Free Adjacency</span>
+    </div>
+
+    <!-- ─── TIME SERIES ─── -->
+    <div class="db-section">
+      <div class="db-section-header">
+        <div class="db-icon" style="background:#1a3a4a;">📈</div>
+        <div>
+          <h4>Time Series Databases — InfluxDB &amp; TimescaleDB</h4>
+          <p>Optimized for timestamped measurements: metrics, IoT sensors, financial ticks, monitoring</p>
+        </div>
+      </div>
+      <div class="db-section-body">
+
+        <h5>Why General Databases Fail for Time-Series</h5>
+        <p>Time-series data has unique characteristics that general-purpose databases handle poorly: extremely high ingest rate (millions of data points/second), almost exclusively append-only writes, queries always include a time range, and most data becomes cold (rarely queried) after a retention window:</p>
+
+        <pre><code><span class="cm">// Time-series data shape (Prometheus metrics):</span>
+<span class="cm">// (timestamp, metric_name, labels{}, value)</span>
+cpu_usage{host="web-01", region="us-east"} 73.4  @1705000001
+cpu_usage{host="web-01", region="us-east"} 74.1  @1705000061
+cpu_usage{host="web-02", region="us-east"} 41.2  @1705000001
+
+<span class="cm">// Problems with PostgreSQL for this data:</span>
+<span class="cm">// 1. Random inserts into B+Tree: millions/sec → constant page splits</span>
+<span class="cm">// 2. No automatic downsampling: 1yr × 1M metrics × 1/min = 525B rows</span>
+<span class="cm">// 3. No built-in compression for repetitive sequential data</span>
+<span class="cm">// 4. Aggregation (avg over 1hr window) requires full scan of raw data</span>
+<span class="cm">// 5. TTL/expiry: manual DELETE jobs → locks, bloat</span></code></pre>
+
+        <h5>InfluxDB TSM Storage Engine (Time-Structured Merge Tree)</h5>
+        <pre><code><span class="cm">// TSM = LSM-Tree variant optimized for time-series</span>
+<span class="cm">// Key insight: timestamp is always monotonically increasing</span>
+<span class="cm">// → No random inserts → sequential writes always → no page splits</span>
+
+<span class="cm">// Data model: Measurement + Tags (indexed) + Fields (values) + Timestamp</span>
+INSERT cpu_usage,host=web-01,region=us-east usage_idle=26.6,usage_user=73.4 1705000001000000000
+
+<span class="cm">// Storage layout per series key (host=web-01 cpu_usage):</span>
+<span class="cm">// Timestamps: [t1, t2, t3, ...] → delta-encoded → zigzag → Snappy compressed</span>
+<span class="cm">// Values:     [73.4, 74.1, 73.8, ...] → XOR compression (float deltas near 0)</span>
+
+<span class="cm">// XOR float compression (Gorilla compression, Facebook 2015):</span>
+v1 = 73.4  → IEEE754: 0100000101010011001100110011010
+v2 = 74.1  → IEEE754: 0100000101010100001100110011010
+XOR v1^v2  → 0000000000000111000000000000000  (only 3 bits differ!)
+<span class="cm">// Store only the XOR difference → 95%+ compression for slowly-changing metrics</span>
+
+<span class="cm">// Continuous Queries / Materialized Rollups:</span>
+<span class="cm">// Raw data: 1-second resolution, 30-day retention</span>
+<span class="cm">// 1-minute rollup: AVG/MAX/MIN per minute, 1-year retention</span>
+<span class="cm">// 1-hour rollup:   AVG/MAX/MIN per hour, 5-year retention</span>
+<span class="cm">// Query automatically routes to appropriate rollup resolution</span></code></pre>
+
+        <h5>TimescaleDB — Time-Series on PostgreSQL</h5>
+        <pre><code><span class="cm">-- TimescaleDB: PostgreSQL extension with automatic time partitioning</span>
+<span class="cm">-- Best of both worlds: familiar SQL + time-series optimizations</span>
+
+<span class="cm">-- Convert regular table to hypertable (automatic time-based chunks):</span>
+CREATE TABLE metrics (
+  time        TIMESTAMPTZ NOT NULL,
+  host        TEXT NOT NULL,
+  metric_name TEXT NOT NULL,
+  value       DOUBLE PRECISION
+);
+
+SELECT create_hypertable('metrics', 'time',
+  chunk_time_interval => INTERVAL '1 day'  <span class="cm">-- 1 chunk per day</span>
+);
+
+<span class="cm">-- Each chunk is a separate PostgreSQL table internally</span>
+<span class="cm">-- Recent chunks: hot, in memory (shared_buffers)</span>
+<span class="cm">-- Old chunks: cold, compressed on disk (90%+ size reduction)</span>
+
+<span class="cm">-- Enable compression for chunks older than 7 days:</span>
+ALTER TABLE metrics SET (
+  timescaledb.compress,
+  timescaledb.compress_segmentby = 'host, metric_name',
+  timescaledb.compress_orderby = 'time DESC'
+);
+SELECT add_compression_policy('metrics', INTERVAL '7 days');
+
+<span class="cm">-- Time-series specific functions:</span>
+SELECT
+  time_bucket('1 hour', time) AS hour,
+  host,
+  AVG(value)   AS avg_cpu,
+  MAX(value)   AS max_cpu,
+  MIN(value)   AS min_cpu,
+  last(value, time) AS latest_cpu  <span class="cm">← last value in window</span>
+FROM metrics
+WHERE metric_name = 'cpu_usage'
+  AND time > NOW() - INTERVAL '24 hours'
+GROUP BY hour, host
+ORDER BY hour DESC, host;
+
+<span class="cm">-- Query planner automatically prunes irrelevant chunks (chunk exclusion)</span>
+<span class="cm">-- WHERE time > NOW()-24h → only touches last 24 daily chunks, not all history</span></code></pre>
+
+      </div>
+    </div>
+
+    <!-- ─── CASSANDRA ─── -->
+    <div class="db-section">
+      <div class="db-section-header">
+        <div class="db-icon" style="background:#2a1f00;">🔵</div>
+        <div>
+          <h4>Apache Cassandra — Wide-Column Distributed Database</h4>
+          <p>Masterless AP system: linear write scalability, tunable consistency, multi-datacenter replication</p>
+        </div>
+      </div>
+      <div class="db-section-body">
+
+        <h5>Cassandra Data Model — Partition Key + Clustering Columns</h5>
+        <pre><code><span class="cm">-- Cassandra data model is query-driven (design tables around query patterns)</span>
+<span class="cm">-- Unlike relational: NO joins, NO foreign keys, NO subqueries</span>
+
+<span class="cm">-- Table: user timeline (ordered messages per user)</span>
+CREATE TABLE user_timeline (
+  user_id    UUID,
+  created_at TIMEUUID,          <span class="cm">-- Time-based UUID (monotonic ordering)</span>
+  message_id UUID,
+  content    TEXT,
+  author_id  UUID,
+  PRIMARY KEY (user_id, created_at)  <span class="cm">-- (partition_key, clustering_column)</span>
+) WITH CLUSTERING ORDER BY (created_at DESC)
+  AND compaction = {'class': 'TimeWindowCompactionStrategy',
+                    'compaction_window_size': 1,
+                    'compaction_window_unit': 'DAYS'};
+
+<span class="cm">-- user_id = PARTITION KEY: determines which shard/node owns this partition</span>
+<span class="cm">-- created_at = CLUSTERING COLUMN: sort order WITHIN the partition</span>
+<span class="cm">-- All rows with same user_id stored TOGETHER on the same node (co-located)</span>
+<span class="cm">-- → Range queries on created_at within a user are sequential reads (fast!)</span>
+
+<span class="cm">-- Efficient query (uses partition key):</span>
+SELECT * FROM user_timeline
+WHERE user_id = ? AND created_at > ? LIMIT 20;
+<span class="cm">-- Single node lookup → sorted sequential read → O(1) routing + O(log n) range</span>
+
+<span class="cm">-- Inefficient query (no partition key → full cluster scan):</span>
+SELECT * FROM user_timeline WHERE author_id = ?; <span class="cm">← ALLOW FILTERING required</span>
+<span class="cm">-- Fix: create a separate table user_timeline_by_author with author_id as partition key</span>
+<span class="cm">-- Cassandra pattern: one table per query pattern!</span></code></pre>
+
+        <h5>Cassandra Write Path — How Data Gets to Disk</h5>
+        <div class="diagram">
+<span class="hl">Cassandra Write Path</span>
+
+Client ──Write──► Coordinator Node (any node, determined by client)
+                        │
+              Token routing: hash(partition_key) → find replica nodes
+                        │
+          ┌─────────────┼──────────────┐
+          ▼             ▼              ▼
+      Replica 1     Replica 2      Replica 3   (RF=3)
+      ┌─────────────────────────────────────┐
+      │ 1. Append to CommitLog (sequential) │  ← Durability (like WAL)
+      │ 2. Write to MemTable (in-memory)    │  ← Fast in-memory write
+      │    (sorted by clustering column)    │
+      └─────────────────────────────────────┘
+      Each replica responds ACK
+                        │
+      Coordinator waits for W ACKs (W = write consistency level)
+      W=ONE: return after 1 ACK  (fast, risk data loss if node crashes)
+      W=QUORUM: return after 2 ACKs (RF=3) → balanced
+      W=ALL: return after 3 ACKs (slow, maximum durability)
+
+Background:
+  MemTable full → flush to SSTable (immutable sorted file on disk)
+  Multiple SSTables → periodic Compaction → merged sorted SSTable
+  <span class="yw">Tombstones</span>: deletes written as tombstone markers, removed during compaction
+        </div>
+
+        <h5>Cassandra Read Path — Why Reads Are More Complex</h5>
+        <pre><code><span class="cm">// Cassandra read is more expensive than write (must reconcile multiple SSTables)</span>
+<span class="cm">// Read path (per replica):</span>
+<span class="cm">// 1. Check Row Cache (optional, entire partition cached)</span>
+<span class="cm">// 2. Check MemTable (most recent data)</span>
+<span class="cm">// 3. Check Key Cache (maps partition key → SSTable offset)</span>
+<span class="cm">// 4. Check Bloom Filter of each SSTable ("might this key be in this file?")</span>
+<span class="cm">// 5. Check SSTable index (partition → offset within file)</span>
+<span class="cm">// 6. Read SSTable data pages</span>
+<span class="cm">// Merge results from all SSTables (newer timestamp wins)</span>
+
+<span class="cm">// Read Repair: coordinator compares responses from R replicas</span>
+<span class="cm">// If replicas disagree → send most recent to stale replicas (background)</span>
+<span class="cm">// Ensures eventual consistency converges faster</span>
+
+<span class="cm">// Hinted Handoff: what happens when a replica is DOWN during write</span>
+<span class="cm">// Coordinator stores the write as a "hint" locally</span>
+<span class="cm">// When downed replica comes back → coordinator replays hints</span>
+<span class="cm">// Hint TTL: max_hint_window (default 3h) — beyond this, full repair needed</span>
+<span class="cm">// nodetool repair: manual full synchronization (run weekly)</span></code></pre>
+
+      </div>
+    </div>
+
+    <!-- ─── ELASTICSEARCH ─── -->
+    <div class="db-section">
+      <div class="db-section-header">
+        <div class="db-icon" style="background:#1a2a1a;">🔍</div>
+        <div>
+          <h4>Elasticsearch — Distributed Inverted Index</h4>
+          <p>Full-text search, log analytics, and document store built on Lucene's inverted index</p>
+        </div>
+      </div>
+      <div class="db-section-body">
+
+        <h5>Inverted Index — The Core Data Structure</h5>
+        <pre><code><span class="cm">// Inverted index: maps terms → list of documents containing that term</span>
+<span class="cm">// (opposite of a database's forward index: document → its fields)</span>
+
+<span class="cm">// Example documents:</span>
+Doc 1: "The quick brown fox jumps over the lazy dog"
+Doc 2: "The fox is quick and the dog is lazy"
+Doc 3: "Quick brown foxes are not lazy"
+
+<span class="cm">// Inverted index (after tokenization, lowercasing, stop word removal):</span>
+Term       → Posting List (doc_id, freq, positions)
+"quick"    → [(1, 1, [2]),  (2, 1, [4]),   (3, 1, [1])]
+"brown"    → [(1, 1, [3]),  (3, 1, [2])]
+"fox"      → [(1, 1, [4]),  (2, 1, [2])]
+"lazy"     → [(1, 1, [9]),  (2, 1, [8]),   (3, 1, [4])]
+"dog"      → [(1, 1, [10]), (2, 1, [7])]
+"jump"     → [(1, 1, [5])]  <span class="cm">← "jumps" stemmed to "jump"</span>
+
+<span class="cm">// Query "quick fox":</span>
+<span class="cm">// 1. Look up "quick" → posting list: [1, 2, 3]</span>
+<span class="cm">// 2. Look up "fox"   → posting list: [1, 2]</span>
+<span class="cm">// 3. Intersect (AND) → [1, 2]</span>
+<span class="cm">// 4. Score each doc using BM25</span>
+<span class="cm">// 5. Return sorted by score</span></code></pre>
+
+        <h5>BM25 Scoring — How Elasticsearch Ranks Results</h5>
+        <pre><code><span class="cm">// BM25 (Best Match 25) — the industry-standard ranking formula</span>
+<span class="cm">// Replaces classic TF-IDF (still used by older engines)</span>
+
+<span class="cm">// BM25 formula for term t in document d:</span>
+<span class="cm">//                 IDF(t) × TF(t,d) × (k1 + 1)</span>
+<span class="cm">// score(t,d) = ─────────────────────────────────────────────</span>
+<span class="cm">//              TF(t,d) + k1 × (1 - b + b × |d|/avgdl)</span>
+
+<span class="cm">// Components:</span>
+<span class="cm">// IDF(t) = log(1 + (N - df + 0.5) / (df + 0.5))</span>
+<span class="cm">//   N = total documents, df = docs containing term t</span>
+<span class="cm">//   Rare terms score higher (discriminative terms matter more)</span>
+
+<span class="cm">// TF(t,d) = frequency of term t in document d</span>
+<span class="cm">//   BM25 applies saturation: 5 occurrences not 5× better than 1</span>
+<span class="cm">//   k1 controls saturation (default 1.2)</span>
+
+<span class="cm">// |d| = document length, avgdl = average doc length across corpus</span>
+<span class="cm">// b = length normalization (default 0.75)</span>
+<span class="cm">//   Longer docs don't unfairly score higher just by repeating terms more</span>
+
+<span class="cm">// Practical tuning:</span>
+PUT /my-index/_settings {
+  "similarity": {
+    "my_bm25": {
+      "type": "BM25",
+      "k1": 1.5,    <span class="cm">// Higher k1: term frequency matters more</span>
+      "b": 0.5      <span class="cm">// Lower b: less length normalization penalty</span>
+    }
+  }
+}</code></pre>
+
+        <h5>Elasticsearch Cluster Architecture — Shards, Replicas, Routing</h5>
+        <pre><code><span class="cm">// Elasticsearch index = collection of Lucene shards</span>
+<span class="cm">// Each shard is a full Lucene instance with its own inverted index</span>
+
+PUT /orders
+{
+  "settings": {
+    "number_of_shards":   <span class="nm">5</span>,   <span class="cm">// Primary shards (set at creation, cannot change)</span>
+    "number_of_replicas": <span class="nm">1</span>    <span class="cm">// Replica per primary (can change)</span>
+  }
+}
+<span class="cm">// Total shards in cluster: 5 primary + 5 replica = 10 Lucene instances</span>
+<span class="cm">// Primary and its replica never on same node (HA)</span>
+
+<span class="cm">// Document routing: which shard owns this doc?</span>
+shard = hash(doc_id) % num_primary_shards
+<span class="cm">// WHY you cannot change shard count after creation:
+// Changing num_shards changes routing formula → existing docs unreachable!</span>
+
+<span class="cm">// Lucene Segment internals (within each shard):</span>
+<span class="cm">// Each index operation creates a new in-memory buffer (256MB default)</span>
+<span class="cm">// Refresh (default every 1s): flush buffer to new immutable Lucene segment</span>
+<span class="cm">// Segment = immutable inverted index file on disk</span>
+<span class="cm">// Merge: background process merges small segments into larger ones</span>
+<span class="cm">//   (like LSM compaction) — reduces per-query segment count</span>
+
+<span class="cm">// Query execution across cluster:</span>
+<span class="cm">// 1. Client → any node (coordinating node)</span>
+<span class="cm">// 2. Coordinating node broadcasts query to all 5 primary (or replica) shards</span>
+<span class="cm">// 3. Each shard: search local Lucene index, return top-K doc IDs + scores</span>
+<span class="cm">// 4. Coordinating node: merge 5×K results, sort by score, take top K</span>
+<span class="cm">// 5. Fetch phase: retrieve full _source for top K doc IDs</span>
+<span class="cm">// → Deep pagination expensive: page 1000 × size 10 = fetch 10,010 from each shard!</span>
+<span class="cm">// Fix: use search_after (cursor) or scroll API for deep pagination</span></code></pre>
+
+      </div>
+    </div>
+
+    <!-- ─── NEO4J ─── -->
+    <div class="db-section">
+      <div class="db-section-header">
+        <div class="db-icon" style="background:#1a002a;">🕸️</div>
+        <div>
+          <h4>Neo4j — Native Graph Database</h4>
+          <p>Nodes, relationships, properties — index-free adjacency for O(1) relationship traversal</p>
+        </div>
+      </div>
+      <div class="db-section-body">
+
+        <h5>Graph Data Model — When to Choose It</h5>
+        <p>Graph databases excel when the <strong>relationships between entities</strong> are as important as the entities themselves, and when queries traverse multiple levels of relationships. The data model: <strong>Nodes</strong> (entities) → <strong>Relationships</strong> (directed, typed edges) → <strong>Properties</strong> (on both nodes and relationships):</p>
+
+        <pre><code><span class="cm">// Use cases where graphs outperform relational DBs:</span>
+<span class="cm">// Social networks: friends-of-friends, influence propagation</span>
+<span class="cm">// Fraud detection: circular transaction patterns, shared identity</span>
+<span class="cm">// Recommendation: "users who bought X also bought Y"</span>
+<span class="cm">// Knowledge graphs: entity relationships, ontologies</span>
+<span class="cm">// Network topology: infrastructure dependencies, impact analysis</span>
+<span class="cm">// Access control: hierarchical permissions, role inheritance</span>
+
+<span class="cm">// Cypher Query Language — SQL for graphs</span>
+
+<span class="cm">// Create nodes and relationships:</span>
+CREATE (alice:Person {name: 'Alice', age: 30})
+CREATE (bob:Person   {name: 'Bob',   age: 25})
+CREATE (carol:Person {name: 'Carol', age: 35})
+CREATE (alice)-[:KNOWS {since: 2020}]->(bob)
+CREATE (bob)-[:KNOWS   {since: 2022}]->(carol)
+CREATE (alice)-[:WORKS_AT]->(acme:Company {name: 'Acme Corp'})
+
+<span class="cm">// Find Alice's friends:</span>
+MATCH (alice:Person {name:'Alice'})-[:KNOWS]->(friend:Person)
+RETURN friend.name, friend.age
+
+<span class="cm">// Friends of friends (2 hops):</span>
+MATCH (alice:Person {name:'Alice'})-[:KNOWS*2]->(fof:Person)
+WHERE NOT (alice)-[:KNOWS]->(fof)  <span class="cm">-- exclude direct friends</span>
+RETURN DISTINCT fof.name
+
+<span class="cm">// Variable-length path (up to 6 hops — "six degrees of separation"):</span>
+MATCH path = shortestPath(
+  (alice:Person {name:'Alice'})-[:KNOWS*1..6]-(target:Person {name:'Dave'})
+)
+RETURN path, length(path) AS degrees
+
+<span class="cm">// Fraud detection: find circular money flows</span>
+MATCH cycle = (account)-[:TRANSFERRED_TO*3..5]->(account)
+WHERE ALL(tx IN relationships(cycle) WHERE tx.amount > 10000)
+RETURN cycle LIMIT 10</code></pre>
+
+        <h5>Index-Free Adjacency — The Core Performance Advantage</h5>
+        <pre><code><span class="cm">// Relational DB: finding neighbors requires index lookup + join</span>
+<span class="cm">// SELECT * FROM friendships WHERE user_id = 42</span>
+<span class="cm">// → B+Tree lookup: O(log n) where n = ALL friendships in DB</span>
+<span class="cm">// For 5-hop traversal: O(log n) × 5 hops × fan-out at each hop</span>
+<span class="cm">// Gets SLOWER as database grows (global index scale)</span>
+
+<span class="cm">// Neo4j: each node stores DIRECT POINTER to its relationship list</span>
+<span class="cm">// Node record (on disk):</span>
+NodeRecord {
+  id:              42,
+  labels:          [Person],
+  properties:      ptr → {name: "Alice", age: 30},
+  first_rel_ptr:   ptr → RelationshipRecord #1001  <span class="cm">← direct pointer!</span>
+}
+
+<span class="cm">// RelationshipRecord #1001 (doubly linked list of relationships):</span>
+RelRecord {
+  start_node:      42 (Alice),
+  end_node:        99 (Bob),
+  type:            KNOWS,
+  properties:      ptr → {since: 2020},
+  next_rel_start:  ptr → RelRecord #1005,  <span class="cm">← Alice's next relationship</span>
+  next_rel_end:    ptr → RelRecord #2008,  <span class="cm">← Bob's next relationship</span>
+}
+
+<span class="cm">// Traversal: follow pointer chain — NO index lookup needed!</span>
+<span class="cm">// Alice's friends: node[42].first_rel → rel[1001] → rel[1005] → rel[1009]...</span>
+<span class="cm">// Cost: O(degree) — proportional to node's connections, NOT database size!</span>
+<span class="cm">// 5-hop traversal stays fast regardless of total graph size → true O(1) per hop</span>
+
+<span class="cm">// When graph DB wins: query touches small local neighborhood</span>
+<span class="cm">// When graph DB loses: global aggregations (COUNT all nodes, average degree)</span>
+<span class="cm">// → Use graph for traversal queries, relational for analytics</span></code></pre>
+
+        <h5>Neo4j Storage Architecture</h5>
+        <pre><code><span class="cm">// Neo4j stores in fixed-size record files (enables O(1) pointer arithmetic):</span>
+<span class="cm">// neostore.nodestore.db        → 15 bytes per node record</span>
+<span class="cm">// neostore.relationshipstore  → 34 bytes per relationship record</span>
+<span class="cm">// neostore.propertystore      → variable-size property chains</span>
+<span class="cm">// neostore.labeltokenstore    → label names</span>
+
+<span class="cm">// Node lookup by ID: O(1)</span>
+<span class="cm">// offset = node_id × 15 bytes</span>
+<span class="cm">// seek(offset) in nodestore file → read 15 bytes → done</span>
+<span class="cm">// No index needed for ID lookup — file offset IS the index!</span>
+
+<span class="cm">// Neo4j 5.x: block format storage (replaces fixed-size records)</span>
+<span class="cm">// Stores variable-length data more efficiently</span>
+<span class="cm">// Better compression, improved cache utilization</span>
+
+<span class="cm">// Page Cache (equivalent to PostgreSQL shared_buffers):</span>
+<span class="cm">// Neo4j stores graph in page cache — keep "hot" subgraph in RAM</span>
+<span class="cm">// Well-tuned: frequently traversed neighborhoods stay in cache</span>
+<span class="cm">// Rule of thumb: page_cache_size = 50-70% of available RAM</span>
+<span class="cm">// Monitor: CALL dbms.queryJmx('org.neo4j:instance=kernel#0,name=Page cache')</span></code></pre>
+
+      </div>
+    </div>
+
+    <h3>Choosing the Right Database — Decision Framework</h3>
+    <table>
+      <tr><th>Database Type</th><th>Choose When</th><th>Avoid When</th><th>Examples</th></tr>
+      <tr><td><strong>Relational (RDBMS)</strong></td><td>Complex joins, ACID transactions, structured schema, reporting</td><td>Massive write throughput, flexible schema, huge datasets</td><td>PostgreSQL, MySQL, Aurora</td></tr>
+      <tr><td><strong>Time Series</strong></td><td>Metrics, IoT, financial ticks, monitoring — timestamp is always in query</td><td>Complex relationships, ad-hoc queries, transactional updates</td><td>InfluxDB, TimescaleDB, Prometheus</td></tr>
+      <tr><td><strong>Wide-Column (Cassandra)</strong></td><td>Massive write throughput, multi-region, known query patterns, IoT</td><td>Ad-hoc queries, joins, strong consistency, aggregations</td><td>Cassandra, ScyllaDB, HBase</td></tr>
+      <tr><td><strong>Search (Elasticsearch)</strong></td><td>Full-text search, log analytics, faceted search, ranking</td><td>Primary data store, ACID transactions, real-time writes</td><td>Elasticsearch, OpenSearch, Solr</td></tr>
+      <tr><td><strong>Graph (Neo4j)</strong></td><td>Multi-hop relationship traversal, fraud detection, recommendations, social</td><td>Global aggregations, tabular reporting, simple key lookups</td><td>Neo4j, Amazon Neptune, TigerGraph</td></tr>
+      <tr><td><strong>Document (MongoDB)</strong></td><td>Flexible schema, hierarchical data, rapid development</td><td>Complex joins, strong consistency requirements</td><td>MongoDB, CouchDB, Firestore</td></tr>
+      <tr><td><strong>Key-Value (Redis)</strong></td><td>Caching, sessions, rate limiting, pub/sub, leaderboards</td><td>Complex queries, large values, persistent primary store</td><td>Redis, DynamoDB, etcd</td></tr>
+    </table>
+
+  </div>
+</section>
+
+
+<!-- ═══════════════════════════════════════════════════════════
+     26. STRONG VS EVENTUAL CONSISTENCY
+═══════════════════════════════════════════════════════════════ -->
+<section class="topic" id="consistency">
+  <div class="topic-header">
+    <div class="num">26</div>
+    <div>
+      <h2>Strong vs Eventual Consistency</h2>
+      <p>The full consistency spectrum — linearizability, causal, session guarantees, convergence and real-world system choices</p>
+    </div>
+  </div>
+  <div class="topic-body">
+
+    <div class="tags">
+      <span class="tag">Linearizability</span><span class="tag">Sequential Consistency</span>
+      <span class="tag">Causal Consistency</span><span class="tag">Eventual Consistency</span>
+      <span class="tag">Read-Your-Writes</span><span class="tag">Monotonic Reads</span>
+      <span class="tag">Conflict Resolution</span><span class="tag">Vector Clocks</span>
+    </div>
+
+    <h3>The Consistency Spectrum — From Strongest to Weakest</h3>
+    <p>Consistency is not binary. There is a rich spectrum of consistency models between "every read sees the latest write" and "reads may return anything." Stronger consistency = higher latency + lower availability. Weaker consistency = lower latency + higher availability:</p>
+
+    <div class="spectrum">
+      <div class="spectrum-labels">
+        <span style="color:#3fb950">← Stronger (More Correct)</span>
+        <span style="color:#f85149">Weaker (More Available) →</span>
+      </div>
+      <div class="spectrum-bar"></div>
+      <div class="spectrum-labels">
+        <span>Linearizability</span>
+        <span>Sequential</span>
+        <span>Causal</span>
+        <span>Session (RYW)</span>
+        <span>Eventual</span>
+      </div>
+    </div>
+
+    <h3>Linearizability (Strong Consistency) — The Gold Standard</h3>
+    <p>Linearizability is the strongest consistency model for distributed systems. It guarantees that operations appear to execute atomically at some single point in real time, and all observers see them in that same real-time order. A linearizable system behaves as if there is only one copy of the data:</p>
+
+    <pre><code><span class="cm">// Linearizability test: can we find a valid serialization?</span>
+<span class="cm">// Each operation has an INVOKE time and a RETURN time</span>
+<span class="cm">// A linearization point must exist BETWEEN invoke and return for each op</span>
+
+Timeline:
+           t0    t1    t2    t3    t4    t5
+Client A: [write x=1  ]
+Client B:       [read x] → returns 1              <span class="cm">← VALID (after A's write)</span>
+Client C:              [read x] → returns 0       <span class="cm">← INVALID! write completed at t1</span>
+                                                  <span class="cm">  C's read started at t3 → must see 1</span>
+
+<span class="cm">// Linearizability requires:</span>
+<span class="cm">// 1. If operation A completes before operation B starts:</span>
+<span class="cm">//    B must see A's effects</span>
+<span class="cm">// 2. Concurrent operations can be ordered either way</span>
+<span class="cm">//    but ALL clients must see them in the SAME order</span>
+
+<span class="cm">// HOW linearizability is achieved:</span>
+<span class="cm">// Raft/Paxos: only leader serves reads (stale leader detected via term/lease)</span>
+<span class="cm">// etcd: LinearizableRead = read goes through Raft log (confirm leadership first)</span>
+<span class="cm">// DynamoDB strong reads: quorum read (R + W > N)</span>
+<span class="cm">// Spanner: TrueTime API — physical clock bounds ensure real-time ordering</span>
+
+<span class="cm">// Linearizability vs Serializability (ACID):</span>
+<span class="cm">// Serializability: transactions execute as if SOME serial order (not necessarily real-time)</span>
+<span class="cm">// Linearizability: single-object, respects real-time ordering</span>
+<span class="cm">// Strict Serializability = both (Spanner, CockroachDB)</span>
+<span class="cm">//   = transactions execute in REAL-TIME order → the holy grail</span></code></pre>
+
+    <h4>Cost of Linearizability — Why It's Not Free</h4>
+    <pre><code><span class="cm">// Scenario: 3 Raft nodes, leader in US-EAST, followers in US-WEST and EU</span>
+<span class="cm">// Client in EU reads from EU follower → stale data!</span>
+<span class="cm">// To be linearizable: EU client must read from leader (US-EAST) → +100ms RTT</span>
+<span class="cm">// OR: EU client must wait for leader to confirm it's still leader before local read</span>
+
+<span class="cm">// Linearizable read from etcd (goes through Raft):</span>
+resp, _ := client.Get(ctx, "key",
+  clientv3.WithSerializable())   <span class="cm">// FAST: read from local follower (stale allowed)</span>
+resp, _ := client.Get(ctx, "key") <span class="cm">// DEFAULT: linearizable (goes through leader)</span>
+
+<span class="cm">// Network partition impact on linearizable systems:</span>
+<span class="cm">// Minority partition: REFUSES all reads and writes (no quorum)</span>
+<span class="cm">// Majority partition: continues normally</span>
+<span class="cm">// Users on minority partition see service UNAVAILABLE during partition</span>
+<span class="cm">// → CAP: CP system sacrifices A for C</span></code></pre>
+
+    <h3>Sequential Consistency — Weaker but More Available</h3>
+    <pre><code><span class="cm">// Sequential consistency: all operations appear in SOME sequential order</span>
+<span class="cm">// consistent with each process's own order, but NOT necessarily real-time order</span>
+
+<span class="cm">// Valid under sequential consistency (NOT valid under linearizability):</span>
+Client A: write(x, 1) at t=0
+Client B: write(x, 2) at t=1
+Client C: read(x) → returns 2  at t=2
+Client D: read(x) → returns 1  at t=2  <span class="cm">← Still valid! Sees different order than C</span>
+<span class="cm">// C and D see different values for the same key at the same time</span>
+<span class="cm">// Would be INVALID under linearizability (both should see 2 after t=1)</span>
+<span class="cm">// But sequential: each client sees ops in some consistent sequential order</span>
+
+<span class="cm">// Used by: CPU memory models (x86 TSO approximates sequential consistency)</span>
+<span class="cm">// Most single-leader databases (MySQL binlog replication) have sequential</span>
+<span class="cm">// consistency within a single replica's view</span></code></pre>
+
+    <h3>Causal Consistency — Causally Related Ops Are Ordered</h3>
+    <p>Causal consistency preserves the order of causally related operations (if A caused B, all nodes see A before B), but allows concurrent operations to be seen in different orders by different nodes. This is the strongest model that can be achieved while maintaining availability during partitions:</p>
+
+    <pre><code><span class="cm">// Causal dependency tracking with Vector Clocks:</span>
+<span class="cm">// Each process maintains a vector clock V[0..n-1]</span>
+<span class="cm">// On local event: V[self]++</span>
+<span class="cm">// On send: attach current V to message</span>
+<span class="cm">// On receive: V[i] = max(V[i], msg.V[i]) for all i; V[self]++</span>
+
+<span class="cm">// Example: blog comment thread</span>
+Alice posts: "Nice article!"              <span class="cm">VC_Alice=[1,0,0]</span>
+Bob replies to Alice: "I agree!"          <span class="cm">VC_Bob=[1,1,0] (saw Alice's post)</span>
+Carol replies to Alice: "Disagree!"       <span class="cm">VC_Carol=[1,0,1] (saw Alice's post)</span>
+Dave replies to Bob: "Why agree?"        <span class="cm">VC_Dave=[1,1,0,1] (saw Bob's reply)</span>
+
+<span class="cm">// Causal consistency guarantees:</span>
+<span class="cm">// Any node that serves Bob's reply MUST have already applied Alice's post</span>
+<span class="cm">// Any node that serves Dave's reply MUST have applied Bob's + Alice's</span>
+<span class="cm">// Carol's and Bob's replies are CONCURRENT — can appear in any order</span>
+
+<span class="cm">// COPS (Clusters of Order-Preserving Servers) — causal consistency protocol:</span>
+<span class="cm">// Used by Facebook TAO (social graph), MongoDB sessions</span>
+<span class="cm">// Write annotated with causal dependencies</span>
+<span class="cm">// Remote DC checks: "have I applied all this write's dependencies?"</span>
+<span class="cm">// If not: wait for dependencies before making write visible</span>
+<span class="cm">// Avoids showing Bob's "I agree" before Alice's post that he's agreeing with!</span></code></pre>
+
+    <h3>Session Consistency Guarantees — Practical Strong Enough</h3>
+    <p>For most applications, full linearizability is overkill. Session-level guarantees provide the right balance — strong guarantees within a user's session, weaker globally:</p>
+
+    <table>
+      <tr><th>Guarantee</th><th>Definition</th><th>Implementation</th><th>Violated By</th></tr>
+      <tr><td><strong>Read-Your-Writes</strong></td><td>After writing, you always read back your own write</td><td>Route post-write reads to same replica for N seconds, or use LSN token</td><td>Writing to primary, reading from lagging replica</td></tr>
+      <tr><td><strong>Monotonic Reads</strong></td><td>Once you read a value, you never read an older value</td><td>Sticky session to same replica; track read LSN per client</td><td>Load balancer switching user between replicas with different lag</td></tr>
+      <tr><td><strong>Monotonic Writes</strong></td><td>Writes from one client are applied in order</td><td>Per-client sequence numbers; leader serializes writes from same client</td><td>Multi-master where writes reach different masters out-of-order</td></tr>
+      <tr><td><strong>Writes-Follow-Reads</strong></td><td>Writes are ordered after reads that preceded them causally</td><td>Attach read timestamp to subsequent writes; ensure write applied after</td><td>Async multi-master with no causal tracking</td></tr>
+    </table>
+
+    <pre><code><span class="cm">// Read-Your-Writes — LSN Token approach (AWS Aurora, CockroachDB):</span>
+
+<span class="kw">async function</span> <span class="fn">createPost</span>(userId, content) {
+  <span class="cm">// Write to primary</span>
+  <span class="kw">const</span> result = <span class="kw">await</span> primary.<span class="fn">insert</span>({ userId, content });
+
+  <span class="cm">// Primary returns its current log sequence number</span>
+  <span class="kw">const</span> lsn = result.lsn; <span class="cm">// e.g., "0/18B3210"</span>
+
+  <span class="cm">// Store LSN in user's session/cookie</span>
+  session.<span class="fn">set</span>(<span class="str">'last_write_lsn'</span>, lsn);
+
+  <span class="kw">return</span> result;
+}
+
+<span class="kw">async function</span> <span class="fn">getMyPosts</span>(userId, session) {
+  <span class="kw">const</span> requiredLsn = session.<span class="fn">get</span>(<span class="str">'last_write_lsn'</span>);
+
+  <span class="cm">// Ask read replica: "are you at least at this LSN?"</span>
+  <span class="kw">const</span> replicaLsn = <span class="kw">await</span> replica.<span class="fn">query</span>(<span class="str">'SELECT pg_last_wal_replay_lsn()'</span>);
+
+  <span class="kw">if</span> (replicaLsn >= requiredLsn) {
+    <span class="kw">return</span> replica.<span class="fn">query</span>(<span class="str">'SELECT * FROM posts WHERE user_id=$1'</span>, [userId]);
+  } <span class="kw">else</span> {
+    <span class="cm">// Replica not caught up → read from primary OR wait</span>
+    <span class="kw">return</span> primary.<span class="fn">query</span>(<span class="str">'SELECT * FROM posts WHERE user_id=$1'</span>, [userId]);
+  }
+}</code></pre>
+
+    <h3>Eventual Consistency — How Convergence Actually Works</h3>
+    <p>Eventual consistency guarantees that if no new updates are made, all replicas will <em>eventually</em> converge to the same value. The key word is "eventually" — there is no bound on how long convergence takes. Two important properties distinguish well-designed eventually consistent systems:</p>
+
+    <pre><code><span class="cm">// Convergence requires a conflict resolution strategy:</span>
+
+<span class="cm">// 1. Last-Write-Wins (LWW) — simplest, most dangerous</span>
+<span class="cm">// Each write has a timestamp. On conflict: highest timestamp wins.</span>
+<span class="cm">// PROBLEM: Clock skew (NTP typically ±100ms) means "last" isn't accurate</span>
+<span class="cm">// PROBLEM: Silent data loss — winning write obliterates losing write</span>
+<span class="cm">// Cassandra default: LWW with client-provided timestamps</span>
+<span class="cm">// Safe use: immutable events (sensor readings — latest IS correct)</span>
+
+<span class="cm">// 2. Multi-Version Concurrency + Application Resolution</span>
+<span class="cm">// DynamoDB: on conflict, store ALL concurrent versions</span>
+<span class="cm">// Application reads ALL versions and decides which is correct</span>
+DynamoDB.get({
+  TableName: 'cart',
+  Key: { userId: '42' },
+  ConsistentRead: false  <span class="cm">// may return multiple versions</span>
+})
+<span class="cm">// Response may include: { Items: [{value: [bookA, bookB]}, {value: [bookA, bookC]}] }</span>
+<span class="cm">// Shopping cart merge: UNION of all versions = [bookA, bookB, bookC]</span>
+<span class="cm">// Amazon Dynamo paper: cart merge = union (never lose items)</span>
+
+<span class="cm">// 3. CRDTs (Conflict-free Replicated Data Types) — mathematical convergence</span>
+<span class="cm">// No conflict resolution needed — merge function is provably correct</span>
+
+<span class="cm">// G-Counter (Grow-only): distributed unique ID counter</span>
+<span class="kw">class</span> <span class="cls">GCounter</span> {
+  <span class="kw">constructor</span>(nodeId, n) {
+    <span class="kw">this</span>.id = nodeId;
+    <span class="kw">this</span>.counts = <span class="kw">new</span> Array(n).<span class="fn">fill</span>(<span class="nm">0</span>);
+  }
+  <span class="fn">increment</span>() { <span class="kw">this</span>.counts[<span class="kw">this</span>.id]++; }
+  <span class="fn">value</span>() { <span class="kw">return</span> <span class="kw">this</span>.counts.<span class="fn">reduce</span>((a,b) => a+b, <span class="nm">0</span>); }
+  <span class="fn">merge</span>(other) {
+    <span class="kw">this</span>.counts = <span class="kw">this</span>.counts.<span class="fn">map</span>((v,i) => Math.<span class="fn">max</span>(v, other.counts[i]));
+  }
+  <span class="cm">// merge is: commutative, associative, idempotent</span>
+  <span class="cm">// → Order doesn't matter, duplicate merges are safe → always converges!</span>
+}
+
+<span class="cm">// LWW-Register CRDT (safe version with HLC):</span>
+<span class="kw">class</span> <span class="cls">LWWRegister</span> {
+  <span class="fn">set</span>(value, hlcTimestamp) {
+    <span class="kw">if</span> (hlcTimestamp > <span class="kw">this</span>.timestamp) {
+      <span class="kw">this</span>.value = value;
+      <span class="kw">this</span>.timestamp = hlcTimestamp;
+    }
+  }
+  <span class="fn">merge</span>(other) { <span class="kw">this</span>.<span class="fn">set</span>(other.value, other.timestamp); }
+}</code></pre>
+
+    <h3>Real-World Consistency Choices — What Systems Actually Use</h3>
+
+    <table>
+      <tr><th>System</th><th>Default Consistency</th><th>Why This Choice</th><th>Override Available?</th></tr>
+      <tr><td><strong>PostgreSQL (single node)</strong></td><td>Serializable (Repeatable Read default)</td><td>Single node = no network partition</td><td>Yes — SET TRANSACTION ISOLATION LEVEL</td></tr>
+      <tr><td><strong>PostgreSQL (streaming replication reads)</strong></td><td>Eventual (async lag)</td><td>Replica may lag by ms-seconds</td><td>Yes — hot_standby_feedback, remote_apply</td></tr>
+      <tr><td><strong>DynamoDB</strong></td><td>Eventual</td><td>Maximum availability, low latency</td><td>Yes — ConsistentRead=true (linearizable, 2× cost)</td></tr>
+      <tr><td><strong>Cassandra</strong></td><td>Eventual (ONE)</td><td>Write performance, multi-region</td><td>Yes — QUORUM, ALL (tunable per operation)</td></tr>
+      <tr><td><strong>MongoDB (replica set reads)</strong></td><td>Eventual (

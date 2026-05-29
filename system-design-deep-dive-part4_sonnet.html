@@ -1,0 +1,1204 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>System Design Deep Dive — Part 4 | Indexing, ACID, Replication</title>
+  <style>
+    :root {
+      --primary: #0d1117;
+      --accent: #0f3460;
+      --highlight: #e94560;
+      --card-bg: #161b22;
+      --text: #e6edf3;
+      --subtext: #8b949e;
+      --code-bg: #010409;
+      --border: #30363d;
+      --tag-bg: #21262d;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+      background: var(--primary);
+      color: var(--text);
+      line-height: 1.85;
+    }
+
+    /* ── HEADER ── */
+    header {
+      background: linear-gradient(135deg, #0f3460 0%, #16213e 35%, #1a472a 65%, #e94560 100%);
+      padding: 68px 40px;
+      text-align: center;
+    }
+    header h1 { font-size: 2.9rem; font-weight: 800; letter-spacing: -1px; }
+    header p  { font-size: 1.1rem; color: rgba(255,255,255,0.85); margin-top: 10px; }
+    .badge-row { display: flex; justify-content: center; gap: 10px; flex-wrap: wrap; margin-top: 16px; }
+    .badge {
+      display: inline-block;
+      background: rgba(255,255,255,0.15);
+      border: 1px solid rgba(255,255,255,0.3);
+      border-radius: 20px;
+      padding: 5px 16px;
+      font-size: 0.8rem;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+    }
+
+    /* ── TOC ── */
+    nav.toc {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      margin: 40px auto;
+      max-width: 940px;
+      padding: 34px 44px;
+    }
+    nav.toc h2 { color: var(--highlight); font-size: 1rem; margin-bottom: 18px;
+                 text-transform: uppercase; letter-spacing: 1.5px; }
+    nav.toc ol { padding-left: 22px; }
+    nav.toc li { margin: 10px 0; }
+    nav.toc a  { color: #58a6ff; text-decoration: none; font-size: 1rem; transition: color .2s; }
+    nav.toc a:hover { color: var(--highlight); }
+
+    /* ── MAIN ── */
+    main { max-width: 1040px; margin: 0 auto; padding: 20px 30px 100px; }
+
+    /* ── TOPIC CARD ── */
+    .topic {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      margin-bottom: 68px;
+      overflow: hidden;
+      box-shadow: 0 4px 40px rgba(0,0,0,.45);
+    }
+    .topic-header {
+      background: linear-gradient(100deg, var(--accent) 0%, #1a1a3e 100%);
+      padding: 34px 44px;
+      border-bottom: 2px solid var(--highlight);
+      display: flex;
+      align-items: center;
+      gap: 22px;
+    }
+    .topic-header .num {
+      background: var(--highlight);
+      color: white;
+      font-size: 1.35rem;
+      font-weight: 800;
+      width: 52px; height: 52px;
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0;
+    }
+    .topic-header h2 { font-size: 1.95rem; font-weight: 700; }
+    .topic-header p  { color: var(--subtext); font-size: 0.95rem; margin-top: 5px; }
+    .topic-body { padding: 40px 44px; }
+
+    /* ── HEADINGS ── */
+    .topic-body h3 {
+      color: #58a6ff; font-size: 1.25rem;
+      margin: 36px 0 14px;
+      padding-left: 14px;
+      border-left: 4px solid var(--highlight);
+    }
+    .topic-body h4 { color: #e3b341; font-size: 1.03rem; margin: 24px 0 10px; }
+    .topic-body p  { color: var(--text); margin-bottom: 14px; }
+    .topic-body ul,
+    .topic-body ol { padding-left: 24px; margin-bottom: 14px; }
+    .topic-body li { margin: 7px 0; color: var(--text); }
+    strong { color: #c9d1d9; }
+
+    /* ── CODE ── */
+    pre {
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 22px 26px;
+      overflow-x: auto;
+      margin: 14px 0 26px;
+      font-size: 0.865rem;
+      line-height: 1.68;
+    }
+    code { font-family: 'Fira Code','Cascadia Code','Consolas',monospace; color: #c9d1d9; }
+    pre code { color: #c9d1d9; }
+    .kw  { color: #ff79c6; }
+    .fn  { color: #50fa7b; }
+    .str { color: #f1fa8c; }
+    .cm  { color: #6272a4; font-style: italic; }
+    .nm  { color: #bd93f9; }
+    .cls { color: #8be9fd; }
+    .at  { color: #ffb86c; }
+    .op  { color: #ff79c6; }
+
+    /* ── CALLOUT ── */
+    .callout {
+      border-radius: 10px;
+      padding: 18px 22px;
+      margin: 18px 0;
+      border-left: 5px solid;
+      font-size: 0.95rem;
+    }
+    .callout.info    { background: #0c2d48; border-color: #58a6ff; }
+    .callout.warn    { background: #2d1f00; border-color: #e3b341; }
+    .callout.success { background: #0d2a0d; border-color: #3fb950; }
+    .callout.danger  { background: #2d0d0d; border-color: #f85149; }
+    .callout.purple  { background: #1a0d2e; border-color: #bc8cff; }
+    .callout.teal    { background: #0a2530; border-color: #39d0d8; }
+    .callout strong  { display: block; margin-bottom: 6px;
+                       font-size: 0.82rem; text-transform: uppercase; letter-spacing: .6px; }
+    .callout.info    strong { color: #58a6ff; }
+    .callout.warn    strong { color: #e3b341; }
+    .callout.success strong { color: #3fb950; }
+    .callout.danger  strong { color: #f85149; }
+    .callout.purple  strong { color: #bc8cff; }
+    .callout.teal    strong { color: #39d0d8; }
+
+    /* ── DIAGRAM ── */
+    .diagram {
+      background: #010409;
+      border: 1px dashed #444c56;
+      border-radius: 10px;
+      padding: 22px 28px;
+      margin: 16px 0 26px;
+      font-family: 'Fira Code','Consolas',monospace;
+      font-size: 0.82rem;
+      color: #8b949e;
+      white-space: pre;
+      overflow-x: auto;
+      line-height: 1.65;
+    }
+    .diagram .hl { color: #79c0ff; }
+    .diagram .ar { color: var(--highlight); }
+    .diagram .gr { color: #3fb950; }
+    .diagram .yw { color: #e3b341; }
+    .diagram .pk { color: #ff79c6; }
+    .diagram .wh { color: #e6edf3; }
+
+    /* ── TABLE ── */
+    table { width: 100%; border-collapse: collapse; margin: 16px 0 28px; font-size: .9rem; }
+    th { background: #0f3460; color: #e6edf3; padding: 13px 16px;
+         text-align: left; font-size: .85rem; letter-spacing: .3px; }
+    td { padding: 11px 16px; border-bottom: 1px solid var(--border);
+         color: var(--text); vertical-align: top; }
+    tr:nth-child(even) td { background: rgba(255,255,255,.025); }
+    tr:hover td { background: rgba(88,166,255,.05); }
+
+    /* ── TAGS ── */
+    .tags { display: flex; flex-wrap: wrap; gap: 8px; margin: 14px 0 6px; }
+    .tag { background: var(--tag-bg); border: 1px solid var(--border);
+           border-radius: 20px; padding: 4px 14px; font-size: .78rem; color: #79c0ff; }
+
+    /* ── METRICS ── */
+    .metrics { display: grid; grid-template-columns: repeat(auto-fit,minmax(155px,1fr));
+               gap: 14px; margin: 18px 0 28px; }
+    .metric-card { background: var(--primary); border: 1px solid var(--border);
+                   border-radius: 10px; padding: 18px 14px; text-align: center; }
+    .metric-card .val { font-size: 1.5rem; font-weight: 700; color: var(--highlight); }
+    .metric-card .lbl { font-size: .74rem; color: var(--subtext); margin-top: 5px; line-height: 1.4; }
+
+    /* ── TWO-COL ── */
+    .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; margin: 16px 0 24px; }
+    .col-card { background: var(--primary); border: 1px solid var(--border);
+                border-radius: 10px; padding: 20px 22px; }
+    .col-card h5 { color: #58a6ff; margin-bottom: 10px; font-size: .95rem; }
+    .col-card ul { padding-left: 18px; }
+    .col-card li { font-size: .88rem; margin: 5px 0; color: var(--subtext); }
+
+    /* ── THREE-COL ── */
+    .three-col { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; margin: 16px 0 24px; }
+
+    /* ── STEP LIST ── */
+    .steps { counter-reset: step; padding: 0; list-style: none; margin: 16px 0 26px; }
+    .steps li {
+      counter-increment: step;
+      position: relative;
+      padding: 13px 16px 13px 54px;
+      margin: 9px 0;
+      background: var(--primary);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      font-size: .93rem;
+    }
+    .steps li::before {
+      content: counter(step);
+      position: absolute; left: 14px; top: 50%; transform: translateY(-50%);
+      background: var(--highlight); color: white;
+      width: 28px; height: 28px; border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: .78rem; font-weight: 700;
+    }
+
+    /* ── HIGHLIGHT BOX ── */
+    .highlight-box {
+      background: linear-gradient(135deg, #0f3460 0%, #1a1a3e 100%);
+      border: 1px solid #58a6ff;
+      border-radius: 12px;
+      padding: 22px 26px;
+      margin: 18px 0 26px;
+    }
+    .highlight-box h5 { color: #58a6ff; font-size: 1rem; margin-bottom: 12px; }
+
+    /* ── FOOTER ── */
+    footer { text-align: center; padding: 34px; color: var(--subtext);
+             font-size: .83rem; border-top: 1px solid var(--border); }
+
+    @media print {
+      body { background: #fff; color: #111; }
+      pre, .diagram { background: #f6f8fa !important; color: #111 !important;
+                      border-color: #ccc !important; }
+      .topic { border-color: #ccc !important; page-break-inside: avoid; }
+      .topic-header { background: #1a1a2e !important; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ══════════════════════════════════ HEADER ══════════════════════════════════ -->
+<header>
+  <h1>⚙️ System Design Deep Dive — Part 4</h1>
+  <p>Indexing internals, ACID guarantees, and Database Replication mechanisms</p>
+  <div class="badge-row">
+    <span class="badge">9+ Years Experience</span>
+    <span class="badge">Advanced Level</span>
+    <span class="badge">Topics 21 – 23</span>
+    <span class="badge">_sonnet</span>
+  </div>
+</header>
+
+<!-- ══════════════════════════════════ TOC ══════════════════════════════════ -->
+<nav class="toc">
+  <h2>📚 Table of Contents</h2>
+  <ol start="21">
+    <li><a href="#indexing">Indexing — B-Tree, B+Tree, Hash, LSM-Tree, Composite, Covering, Partial Indexes</a></li>
+    <li><a href="#acid">ACID Properties — Atomicity, Consistency, Isolation, Durability &amp; MVCC Internals</a></li>
+    <li><a href="#replication">Database Replication — WAL, Sync vs Async, Replication Lag, Multi-Master, CRDT</a></li>
+  </ol>
+</nav>
+
+<main>
+
+<!-- ═══════════════════════════════════════════════════════════════════
+     21. INDEXING
+═══════════════════════════════════════════════════════════════════ -->
+<section class="topic" id="indexing">
+  <div class="topic-header">
+    <div class="num">21</div>
+    <div>
+      <h2>Indexing</h2>
+      <p>How databases find data in O(log n) instead of O(n) — B+Tree, Hash, LSM-Tree, and advanced index types</p>
+    </div>
+  </div>
+  <div class="topic-body">
+
+    <div class="tags">
+      <span class="tag">B+Tree</span><span class="tag">Hash Index</span><span class="tag">LSM-Tree</span>
+      <span class="tag">Composite Index</span><span class="tag">Covering Index</span><span class="tag">Partial Index</span>
+      <span class="tag">Index-Only Scan</span><span class="tag">Cardinality</span><span class="tag">Write Amplification</span>
+    </div>
+
+    <h3>Why Indexes Exist — The Full Table Scan Problem</h3>
+    <p>Without an index, every query must scan every row of a table to find matching records. For a table with 100 million rows, even a simple <code>WHERE user_id = 42</code> requires reading every row. An index transforms this O(n) scan into an O(log n) tree traversal or O(1) hash lookup:</p>
+
+    <pre><code><span class="cm">-- No index: full sequential scan (100M rows read)</span>
+EXPLAIN SELECT * FROM orders WHERE customer_id = 12345;
+<span class="cm">-- Seq Scan on orders  (cost=0.00..2100000.00 rows=847 width=128)</span>
+<span class="cm">--                      ^^^^^^^^^^^^ reads ALL 100M rows</span>
+
+<span class="cm">-- With B+Tree index on customer_id:</span>
+CREATE INDEX idx_orders_customer ON orders(customer_id);
+EXPLAIN SELECT * FROM orders WHERE customer_id = 12345;
+<span class="cm">-- Index Scan using idx_orders_customer  (cost=0.56..3247.89 rows=847 width=128)</span>
+<span class="cm">--                                        ^^^^ traverses ~26 B+Tree levels (log₂ 100M)</span>
+<span class="cm">--                                        then reads only the 847 matching rows</span>
+
+<span class="cm">-- Performance: 2,100,000 → 3,247 cost units = ~646x faster</span>
+<span class="cm">-- In practice: seconds → milliseconds</span></code></pre>
+
+    <h3>B-Tree vs B+Tree — The Standard Database Index Structure</h3>
+    <p>Almost every relational database (PostgreSQL, MySQL InnoDB, Oracle, SQL Server) uses a <strong>B+Tree</strong> as its primary index structure. Understanding the internal layout is critical for query optimization:</p>
+
+    <div class="diagram">
+<span class="hl">B+Tree Structure (order=4, max 3 keys per node)</span>
+
+                        <span class="hl">Root Node (Internal)</span>
+                    ┌───────────────────────┐
+                    │     30    │    70      │
+                    └─────┬─────┴──────┬────┘
+            ┌─────────────┘            └──────────────┐
+     <span class="hl">Internal Node</span>                          <span class="hl">Internal Node</span>
+    ┌─────────────────┐                  ┌────────────────────┐
+    │  10  │  20      │                  │  50  │  60  │  70  │
+    └──┬───┴────┬─────┘                  └──┬───┴──┬───┴──┬───┘
+       │        │                           │      │      │
+  <span class="hl">Leaf Nodes</span> (contain ACTUAL DATA, linked as doubly linked list)
+  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐
+  │1│2│3│...│←→│10│15│20 │←→│30│35│40 │←→│50│55│60 │←→│70│80│90 │
+  └──────────┘ └──────────┘ └──────────┘ └──────────┘ └──────────┘
+       ↑                                                      ↑
+  <span class="gr">Each leaf node contains: key + pointer to actual row (heap tuple)</span>
+  <span class="yw">Leaf nodes linked</span> → enables efficient range scans without returning to root!
+
+<span class="hl">Key properties vs plain B-Tree:</span>
+  B-Tree:  internal nodes store BOTH keys AND data → less fan-out
+  B+Tree:  internal nodes store ONLY keys → higher fan-out → shallower tree
+  B+Tree:  ALL data in leaf level → consistent O(log n) for all lookups
+  B+Tree:  leaf linked list → range scans are sequential reads (fast I/O)
+    </div>
+
+    <h4>B+Tree Height and I/O Cost Analysis</h4>
+    <pre><code><span class="cm">// Why B+Trees are shallow (minimizing disk I/O):</span>
+<span class="cm">// Page size = 16KB (PostgreSQL default)</span>
+<span class="cm">// Key size = 8 bytes (bigint), pointer = 6 bytes → ~1000 keys per internal node</span>
+
+<span class="cm">// Tree height for different table sizes:</span>
+Height = ceil(log₁₀₀₀(num_rows))
+
+rows = 1,000          → height = 1  (root IS the leaf)
+rows = 1,000,000      → height = 2  (root → leaf)
+rows = 1,000,000,000  → height = 3  (root → internal → leaf)
+rows = 10^12          → height = 4  (root → 2 internal levels → leaf)
+
+<span class="cm">// Even 1 TRILLION rows: only 4 I/O operations to find any row!</span>
+<span class="cm">// Compare: hash index = 1 I/O (but no range scan)</span>
+<span class="cm">// Compare: full scan = 10^12 I/Os</span>
+
+<span class="cm">// Real PostgreSQL: root + 2 levels typically cached in shared_buffers</span>
+<span class="cm">// Effective I/O cost for most queries: 1 disk read (only leaf fetch)</span>
+
+<span class="cm">// Write cost: insert into B+Tree</span>
+<span class="cm">// 1. Read root page (likely cached)</span>
+<span class="cm">// 2. Traverse to leaf (cached internal pages)</span>
+<span class="cm">// 3. Insert into leaf (1 write)</span>
+<span class="cm">// 4. If leaf full → SPLIT: write 2 new leaves + update parent (cascade up)</span>
+<span class="cm">// Splits are O(log n) in worst case — amortized O(1) in practice</span></code></pre>
+
+    <h4>Page Splits and Fragmentation</h4>
+    <pre><code><span class="cm">-- PostgreSQL: monitor index bloat from frequent splits</span>
+SELECT
+  indexname,
+  pg_size_pretty(pg_relation_size(indexrelid)) AS index_size,
+  idx_scan, idx_tup_read, idx_tup_fetch,
+  <span class="cm">-- Bloat estimation</span>
+  round(100 * (1 - (SELECT reltuples FROM pg_class WHERE oid = indexrelid)
+    / NULLIF(idx_tup_read, 0))::numeric, 2) AS bloat_ratio
+FROM pg_stat_user_indexes
+ORDER BY pg_relation_size(indexrelid) DESC;
+
+<span class="cm">-- Fix fragmentation:</span>
+REINDEX INDEX CONCURRENTLY idx_orders_customer;
+<span class="cm">-- Or in PostgreSQL 12+: REINDEX CONCURRENTLY (no table lock!)</span>
+
+<span class="cm">-- Use UUID v7 (time-ordered) instead of random UUID v4 for primary keys!</span>
+<span class="cm">-- Random UUID v4: inserts anywhere in B+Tree → constant page splits → fragmentation</span>
+<span class="cm">-- UUID v7: always inserts at rightmost leaf → minimal splits (like SERIAL/BIGSERIAL)</span></code></pre>
+
+    <h3>Hash Indexes — O(1) Equality Lookups</h3>
+    <pre><code><span class="cm">// Hash index: hash(key) → bucket → pointer to row</span>
+<span class="cm">// Perfect for: equality (=), membership (IN)</span>
+<span class="cm">// Useless for: range queries (<, >, BETWEEN, LIKE 'prefix%')</span>
+
+<span class="cm">// PostgreSQL hash index:</span>
+CREATE INDEX idx_users_email_hash ON users USING hash(email);
+<span class="cm">-- Best for: WHERE email = 'alice@example.com'</span>
+<span class="cm">-- Useless for: WHERE email LIKE 'alice%'</span>
+<span class="cm">-- Useless for: ORDER BY email</span>
+
+<span class="cm">// Internal structure (PostgreSQL hash index):</span>
+<span class="cm">// Primary pages: fixed array of bucket pages</span>
+<span class="cm">// Overflow pages: chained when bucket overflows</span>
+<span class="cm">// Bitmap pages: track which overflow pages are free</span>
+
+<span class="cm">// Collision handling: open addressing or chaining</span>
+<span class="cm">// Load factor target: ~75% — beyond this, performance degrades</span>
+<span class="cm">// Resize: double bucket count, rehash all entries (expensive!)</span>
+
+<span class="cm">// Memory hash indexes (Redis, Memcached):</span>
+<span class="cm">// Entire structure fits in RAM → true O(1) amortized</span>
+<span class="cm">// Disk hash indexes: O(1) I/Os only if no overflow chain</span></code></pre>
+
+    <h3>LSM-Tree (Log-Structured Merge-Tree) — Write-Optimized Indexing</h3>
+    <p>Used by RocksDB, LevelDB, Cassandra, ScyllaDB, HBase, ClickHouse. Designed for write-heavy workloads where B+Tree's random writes cause I/O bottlenecks:</p>
+
+    <div class="diagram">
+<span class="hl">LSM-Tree Architecture</span>
+
+<span class="yw">WRITES always go to MemTable (in-memory sorted structure)</span>
+
+Write ──────────────────────────────────────────►
+                 ┌─────────────────────────────┐
+                 │   WAL (Write-Ahead Log)      │ ← Durability: written first
+                 │   /data/wal/000001.log       │   Sequential disk write (fast)
+                 └──────────────┬──────────────┘
+                                │ (also written)
+                 ┌──────────────▼──────────────┐
+                 │   MemTable (Red-Black Tree   │ ← In-memory sorted tree
+                 │   or Skip List, ~64MB)       │   O(log n) inserts
+                 └──────────────┬──────────────┘
+                                │ When full: flush to disk
+                 ┌──────────────▼──────────────┐
+  <span class="hl">Level 0</span>         │  SSTable (Sorted String Table)│ ← Immutable sorted file
+                 │  L0: 0001.sst  0002.sst      │   Each file: bloom filter + index
+                 └──────────────┬──────────────┘
+                                │ Compaction (background)
+                 ┌──────────────▼──────────────┐
+  <span class="hl">Level 1</span>         │  L1: larger sorted runs       │ ← Merged, deduplicated
+                 └──────────────┬──────────────┘
+                                │ Further compaction
+  <span class="hl">Level 2+</span>       │  L2, L3... (exponentially     │ ← Older, larger, sorted data
+                 │  larger at each level)        │
+                 └─────────────────────────────┘
+
+<span class="gr">Write path: WAL + MemTable insert = 2 sequential writes → very fast</span>
+<span class="ar">Read path: MemTable → L0 → L1 → ... → Ln = multiple I/Os → slower</span>
+    </div>
+
+    <pre><code><span class="cm">// SSTable (Sorted String Table) internal layout:</span>
+<span class="cm">// ┌─────────────────────────────────────────────┐</span>
+<span class="cm">// │ Data Blocks (compressed key-value pairs)     │</span>
+<span class="cm">// │ Index Block (first key per data block)       │</span>
+<span class="cm">// │ Bloom Filter (probabilistic key existence)   │</span>
+<span class="cm">// │ Metadata (compression type, stats)           │</span>
+<span class="cm">// │ Footer (offsets to index + bloom filter)     │</span>
+<span class="cm">// └─────────────────────────────────────────────┘</span>
+
+<span class="cm">// Bloom Filter — critical for read performance:</span>
+<span class="cm">// Before reading an SSTable, check bloom filter:</span>
+<span class="cm">// "Is key 'user:42' possibly in this file?"</span>
+<span class="cm">// False positive: ~1% chance (configurable)</span>
+<span class="cm">// False negative: NEVER (if bloom says NO → definitely not in file)</span>
+<span class="cm">// Result: skip ~99% of SSTables on read — massive I/O reduction!</span>
+
+<span class="cm">// Compaction — merging SSTables (tiered vs leveled strategy):</span>
+
+<span class="cm">// Leveled Compaction (RocksDB default, Cassandra optional):</span>
+<span class="cm">// Each level has size limit. When exceeded, pick one file, merge with</span>
+<span class="cm">// ALL overlapping files in next level. Result: better read performance.</span>
+<span class="cm">// Write amplification: ~10-30x (data written many times during compaction)</span>
+
+<span class="cm">// Tiered Compaction (Cassandra default, STCS):</span>
+<span class="cm">// When 4 same-size SSTables accumulate, merge into one larger SSTable.</span>
+<span class="cm">// Better write throughput. Worse read performance (more files to check).</span>
+<span class="cm">// Write amplification: ~4-5x</span></code></pre>
+
+    <h3>Composite (Multi-Column) Indexes — The Column Order Rule</h3>
+    <p>The order of columns in a composite index is <strong>critical</strong>. The index is ordered by the first column, then the second within equal first-column values, etc. This governs which queries can use the index:</p>
+
+    <pre><code><span class="cm">-- Table: orders(id, customer_id, status, created_at, total)</span>
+CREATE INDEX idx_composite ON orders(customer_id, status, created_at);
+
+<span class="cm">-- USES the index (matches leftmost prefix rule):</span>
+WHERE customer_id = 5                            <span class="cm">← uses customer_id prefix ✓</span>
+WHERE customer_id = 5 AND status = 'pending'     <span class="cm">← uses customer_id + status ✓</span>
+WHERE customer_id = 5 AND status = 'pending'     <span class="cm">←</span>
+  AND created_at > '2024-01-01'                  <span class="cm">← uses all 3 columns ✓</span>
+
+<span class="cm">-- DOES NOT USE the index efficiently:</span>
+WHERE status = 'pending'                         <span class="cm">← skips customer_id → full scan ✗</span>
+WHERE created_at > '2024-01-01'                  <span class="cm">← skips first 2 columns ✗</span>
+WHERE customer_id = 5 AND created_at > '2024-01-01'
+<span class="cm">-- ↑ Uses customer_id prefix, but cannot use created_at</span>
+<span class="cm">--   (status is skipped — breaks the index chain)</span>
+<span class="cm">--   Filter on created_at applied AFTER index scan for customer_id=5</span>
+
+<span class="cm">-- RULE: Put equality conditions first, range conditions last</span>
+<span class="cm">-- RULE: Highest cardinality column FIRST for best selectivity</span>
+<span class="cm">-- WRONG order: (status, customer_id) — status has 5 values, customer_id has millions</span>
+<span class="cm">-- RIGHT order: (customer_id, status)  — prune by millions first, then by 5 values</span></code></pre>
+
+    <h3>Covering Index — Index-Only Scans</h3>
+    <p>A covering index includes all columns needed by a query, so the database never touches the main table (heap). Eliminates the second I/O hop from index → heap:</p>
+
+    <pre><code><span class="cm">-- Query that accesses both index and heap (two I/O hops):</span>
+SELECT total, created_at FROM orders WHERE customer_id = 5;
+<span class="cm">-- Step 1: B+Tree lookup on customer_id → get row pointers</span>
+<span class="cm">-- Step 2: Fetch EACH row from heap pages (random I/O!) to get total, created_at</span>
+<span class="cm">-- If 10,000 matching rows → 10,000 random heap reads → SLOW</span>
+
+<span class="cm">-- Covering index: include all needed columns</span>
+CREATE INDEX idx_covering ON orders(customer_id) INCLUDE (total, created_at);
+<span class="cm">-- PostgreSQL INCLUDE syntax: extra columns stored in leaf, not part of key</span>
+<span class="cm">-- MySQL: just add to index: (customer_id, total, created_at)</span>
+
+<span class="cm">-- Now query can do INDEX-ONLY SCAN:</span>
+EXPLAIN SELECT total, created_at FROM orders WHERE customer_id = 5;
+<span class="cm">-- Index Only Scan using idx_covering ← NO heap access!</span>
+<span class="cm">-- All data comes from index leaf nodes → sequential reads → FAST</span>
+
+<span class="cm">-- Cost: larger index (more disk space, slower writes)</span>
+<span class="cm">-- Benefit: reads become pure index scans</span>
+<span class="cm">-- Ideal for: frequently queried columns on high-read tables</span></code></pre>
+
+    <h3>Partial Indexes — Index Only What You Query</h3>
+    <pre><code><span class="cm">-- Full index on status column: all 100M rows</span>
+CREATE INDEX idx_status ON orders(status);
+<span class="cm">-- But 99% of orders are 'completed' — never queried!</span>
+<span class="cm">-- 99% of index space wasted. Index updates slow every write.</span>
+
+<span class="cm">-- Partial index: only index rows matching WHERE clause</span>
+CREATE INDEX idx_pending_orders ON orders(created_at)
+WHERE status IN ('pending', 'processing');
+<span class="cm">-- Only 1% of rows indexed → 100x smaller index → faster everything</span>
+
+<span class="cm">-- Query MUST include the partial index condition to use it:</span>
+SELECT * FROM orders WHERE status = 'pending' AND created_at > NOW() - INTERVAL '7 days';
+<span class="cm">-- ✓ Planner uses partial index (condition matches WHERE clause)</span>
+
+SELECT * FROM orders WHERE created_at > NOW() - INTERVAL '7 days';
+<span class="cm">-- ✗ Cannot use partial index (might include completed orders)</span>
+
+<span class="cm">-- Real-world partial index examples:</span>
+<span class="cm">-- Unique partial index: enforce unique email only for active users</span>
+CREATE UNIQUE INDEX idx_unique_active_email ON users(email)
+WHERE deleted_at IS NULL;
+<span class="cm">-- Two deleted users can have same email. Active users must have unique email.</span>
+
+<span class="cm">-- Partial index for soft-deletes (never query deleted rows):</span>
+CREATE INDEX idx_active_orders ON orders(customer_id, created_at)
+WHERE deleted_at IS NULL;
+<span class="cm">-- All queries with WHERE deleted_at IS NULL get tiny, fast index</span></code></pre>
+
+    <h3>Index Types Comparison</h3>
+    <table>
+      <tr><th>Index Type</th><th>Structure</th><th>Point Lookup</th><th>Range Scan</th><th>Sort</th><th>Best Use Case</th></tr>
+      <tr><td><strong>B+Tree</strong></td><td>Balanced tree, sorted leaves</td><td>O(log n)</td><td>✅ Excellent</td><td>✅ Free</td><td>General purpose — default choice</td></tr>
+      <tr><td><strong>Hash</strong></td><td>Hash table</td><td>O(1)</td><td>❌ None</td><td>❌ None</td><td>Equality-only lookups (=, IN)</td></tr>
+      <tr><td><strong>GiST</strong></td><td>Generalized Search Tree</td><td>O(log n)</td><td>✅ Geometric</td><td>Depends</td><td>Geospatial, full-text, ranges</td></tr>
+      <tr><td><strong>GIN</strong></td><td>Inverted index</td><td>O(log n)</td><td>✅ Array/JSON</td><td>❌</td><td>Full-text search, JSONB, arrays</td></tr>
+      <tr><td><strong>BRIN</strong></td><td>Block Range</td><td>O(n/range)</td><td>✅ Sequential</td><td>✅ If ordered</td><td>Huge append-only tables (logs, time-series)</td></tr>
+      <tr><td><strong>Bitmap</strong></td><td>Bit arrays per value</td><td>O(1)</td><td>✅ AND/OR ops</td><td>❌</td><td>Low-cardinality columns (status, country)</td></tr>
+    </table>
+
+    <div class="callout warn">
+      <strong>⚠️ Index Anti-Patterns — What Slows Systems Down</strong>
+      <strong>1. Too many indexes:</strong> Every write must update ALL indexes. 20 indexes on a table = 20× write overhead.<br/>
+      <strong>2. Indexing low-cardinality columns alone:</strong> <code>INDEX(gender)</code> with 2 values — query planner often prefers full scan (50% selectivity is useless).<br/>
+      <strong>3. Functions on indexed columns:</strong> <code>WHERE UPPER(email) = 'ALICE@...'</code> cannot use index on <code>email</code>. Use functional index: <code>CREATE INDEX ON users(UPPER(email))</code>.<br/>
+      <strong>4. Leading wildcard LIKE:</strong> <code>WHERE name LIKE '%alice%'</code> cannot use B+Tree. Use <code>pg_trgm</code> GIN index for substring search.
+    </div>
+
+    <div class="metrics">
+      <div class="metric-card"><div class="val">O(log n)</div><div class="lbl">B+Tree Lookup Complexity</div></div>
+      <div class="metric-card"><div class="val">3–4</div><div class="lbl">B+Tree Height for Billions of Rows</div></div>
+      <div class="metric-card"><div class="val">~1000</div><div class="lbl">Keys per B+Tree Internal Node (16KB page)</div></div>
+      <div class="metric-card"><div class="val">10–30×</div><div class="lbl">LSM-Tree Write Amplification</div></div>
+      <div class="metric-card"><div class="val">~1%</div><div class="lbl">Bloom Filter False Positive Rate</div></div>
+    </div>
+
+  </div>
+</section>
+
+
+<!-- ═══════════════════════════════════════════════════════════════════
+     22. ACID PROPERTIES
+═══════════════════════════════════════════════════════════════════ -->
+<section class="topic" id="acid">
+  <div class="topic-header">
+    <div class="num">22</div>
+    <div>
+      <h2>ACID Properties</h2>
+      <p>Atomicity, Consistency, Isolation, Durability — the guarantees that make databases trustworthy, and MVCC internals</p>
+    </div>
+  </div>
+  <div class="topic-body">
+
+    <div class="tags">
+      <span class="tag">Atomicity</span><span class="tag">Consistency</span><span class="tag">Isolation</span>
+      <span class="tag">Durability</span><span class="tag">MVCC</span><span class="tag">WAL</span>
+      <span class="tag">Isolation Levels</span><span class="tag">Phantom Reads</span><span class="tag">Serializable</span>
+    </div>
+
+    <h3>ACID — What Each Letter Actually Means Internally</h3>
+
+    <h4>A — Atomicity: All or Nothing</h4>
+    <p>A transaction is treated as a single indivisible unit. Either ALL operations within it succeed and are committed, or NONE of them take effect. If the database crashes mid-transaction, the partial work is completely rolled back on recovery.</p>
+
+    <pre><code><span class="cm">-- Classic example: bank transfer (must be atomic)</span>
+BEGIN;
+  UPDATE accounts SET balance = balance - 500 WHERE id = 1;  <span class="cm">← debit Alice</span>
+  UPDATE accounts SET balance = balance + 500 WHERE id = 2;  <span class="cm">← credit Bob</span>
+COMMIT;
+
+<span class="cm">-- If crash occurs between the two UPDATEs:</span>
+<span class="cm">-- Without atomicity: Alice loses $500, Bob gets nothing (money destroyed!)</span>
+<span class="cm">-- With atomicity:    WAL detects uncommitted transaction → rolls back on restart</span>
+
+<span class="cm">-- HOW it works internally — Undo Log (InnoDB) / Rollback Segment:</span>
+<span class="cm">// Before executing "balance = balance - 500":</span>
+<span class="cm">// Write UNDO record: "account 1 had balance=1000 before this change"</span>
+<span class="cm">// Apply change: balance = 500</span>
+<span class="cm">// If ROLLBACK or crash: read undo log → restore balance = 1000</span>
+<span class="cm">// Undo log stored in rollback segment (InnoDB) or pg_undo (PostgreSQL 14+)</span></code></pre>
+
+    <h4>C — Consistency: Database Invariants Always Hold</h4>
+    <p>Consistency in ACID means that a transaction brings the database from one <em>valid state</em> to another valid state. This is primarily enforced by application logic and database constraints (NOT NULL, UNIQUE, CHECK, FOREIGN KEY). Note: this is different from CAP's "Consistency" (which means linearizability).</p>
+
+    <pre><code><span class="cm">-- Database-enforced consistency constraints:</span>
+CREATE TABLE orders (
+  id          BIGSERIAL PRIMARY KEY,
+  customer_id BIGINT NOT NULL REFERENCES customers(id),  <span class="cm">← FK: no orphan orders</span>
+  total       DECIMAL(10,2) CHECK (total > 0),           <span class="cm">← CHECK: no negative totals</span>
+  status      VARCHAR(20) NOT NULL DEFAULT 'pending'
+                CHECK (status IN ('pending','processing','completed','cancelled'))
+);
+
+<span class="cm">-- Transaction that violates consistency is rejected entirely:</span>
+BEGIN;
+  INSERT INTO orders(customer_id, total) VALUES (99999, -50.00);
+  <span class="cm">-- ERROR: new row violates check constraint "orders_total_check"</span>
+  <span class="cm">-- OR: ERROR: insert or update on table "orders" violates foreign key</span>
+  <span class="cm">-- Entire transaction rolled back. Database stays in consistent state.</span>
+ROLLBACK; <span class="cm">-- (happens automatically on error)</span>
+
+<span class="cm">-- Application-level consistency (enforced in transaction):</span>
+BEGIN;
+  <span class="cm">-- Business rule: order total must equal sum of line items</span>
+  <span class="kw">DO</span> $$
+  <span class="kw">DECLARE</span> calculated_total DECIMAL;
+  <span class="kw">BEGIN</span>
+    SELECT SUM(quantity * unit_price) INTO calculated_total
+    FROM order_items WHERE order_id = 123;
+
+    <span class="kw">IF</span> calculated_total != (SELECT total FROM orders WHERE id = 123) <span class="kw">THEN</span>
+      RAISE EXCEPTION 'Order total inconsistency detected';
+    END IF;
+  END $$;
+COMMIT;</code></pre>
+
+    <h4>I — Isolation: Concurrent Transactions Don't Interfere</h4>
+    <p>Isolation ensures that concurrent transactions execute as if they were run sequentially. The SQL standard defines four isolation levels with different trade-offs between correctness and performance:</p>
+
+    <table>
+      <tr><th>Isolation Level</th><th>Dirty Read</th><th>Non-Repeatable Read</th><th>Phantom Read</th><th>Write Skew</th></tr>
+      <tr><td><strong>Read Uncommitted</strong></td><td>✅ Possible</td><td>✅ Possible</td><td>✅ Possible</td><td>✅ Possible</td></tr>
+      <tr><td><strong>Read Committed</strong></td><td>❌ Prevented</td><td>✅ Possible</td><td>✅ Possible</td><td>✅ Possible</td></tr>
+      <tr><td><strong>Repeatable Read</strong></td><td>❌ Prevented</td><td>❌ Prevented</td><td>✅ Possible*</td><td>✅ Possible</td></tr>
+      <tr><td><strong>Serializable</strong></td><td>❌ Prevented</td><td>❌ Prevented</td><td>❌ Prevented</td><td>❌ Prevented</td></tr>
+    </table>
+    <p><em>*PostgreSQL's Repeatable Read also prevents phantom reads via MVCC snapshot — unlike MySQL InnoDB which needs gap locks.</em></p>
+
+    <pre><code><span class="cm">// Anomalies illustrated:</span>
+
+<span class="cm">// Dirty Read: T2 reads T1's uncommitted data</span>
+T1: UPDATE accounts SET balance = 0 WHERE id = 1;    <span class="cm">← not committed yet</span>
+T2: SELECT balance FROM accounts WHERE id = 1;        <span class="cm">← reads 0 (dirty!)</span>
+T1: ROLLBACK;                                          <span class="cm">← T2 used invalid data!</span>
+
+<span class="cm">// Non-Repeatable Read: same query returns different data within one transaction</span>
+T1: SELECT balance FROM accounts WHERE id = 1;   <span class="cm">← returns 1000</span>
+T2: UPDATE accounts SET balance = 500 WHERE id = 1; COMMIT;
+T1: SELECT balance FROM accounts WHERE id = 1;   <span class="cm">← returns 500 (changed!)</span>
+
+<span class="cm">// Phantom Read: query returns different SET of rows</span>
+T1: SELECT COUNT(*) FROM orders WHERE status='pending';  <span class="cm">← returns 10</span>
+T2: INSERT INTO orders(status) VALUES('pending'); COMMIT;
+T1: SELECT COUNT(*) FROM orders WHERE status='pending';  <span class="cm">← returns 11 (phantom!)</span>
+
+<span class="cm">// Write Skew: each transaction reads data, makes decision, writes different data</span>
+<span class="cm">// Doctor on-call example:</span>
+T1 (Dr. Alice): SELECT COUNT(*) FROM oncall WHERE on_duty=true; <span class="cm">→ 2 doctors</span>
+T2 (Dr. Bob):   SELECT COUNT(*) FROM oncall WHERE on_duty=true; <span class="cm">→ 2 doctors</span>
+T1: UPDATE oncall SET on_duty=false WHERE doctor='Alice';  <span class="cm">← goes off duty</span>
+T2: UPDATE oncall SET on_duty=false WHERE doctor='Bob';    <span class="cm">← goes off duty</span>
+<span class="cm">// Both committed. Now 0 doctors on duty. Business rule violated!</span>
+<span class="cm">// Fix: Serializable isolation or explicit SELECT FOR UPDATE</span></code></pre>
+
+    <h3>MVCC (Multi-Version Concurrency Control) — The Heart of Isolation</h3>
+    <p>MVCC allows reads to not block writes and writes to not block reads by maintaining <strong>multiple versions of each row</strong>. Readers see a consistent snapshot of the database at transaction start time, regardless of concurrent modifications:</p>
+
+    <pre><code><span class="cm">// PostgreSQL MVCC — every row has hidden system columns:</span>
+<span class="cm">// xmin: transaction ID that created this row version</span>
+<span class="cm">// xmax: transaction ID that deleted/updated this row (0 = still visible)</span>
+<span class="cm">// ctid: physical location (page, offset)</span>
+
+<span class="cm">-- See MVCC internals:</span>
+SELECT xmin, xmax, ctid, * FROM accounts WHERE id = 1;
+<span class="cm">--  xmin | xmax |  ctid  | id | balance</span>
+<span class="cm">-- ------+------+--------+----+---------</span>
+<span class="cm">--  1001 |    0 | (0,1)  |  1 |    1000   ← Current version (xmax=0 means live)</span>
+
+<span class="cm">-- Transaction T2 (xid=1050) updates balance:</span>
+UPDATE accounts SET balance = 500 WHERE id = 1;
+
+<span class="cm">-- Now table has TWO versions of the same logical row:</span>
+<span class="cm">--  xmin | xmax |  ctid  | id | balance</span>
+<span class="cm">-- ------+------+--------+----+---------</span>
+<span class="cm">--  1001 | 1050 | (0,1)  |  1 |    1000   ← Old version (xmax=1050, will be vacuumed)</span>
+<span class="cm">--  1050 |    0 | (0,5)  |  1 |     500   ← New version (xmax=0, currently active)</span>
+
+<span class="cm">-- Transaction T3 (xid=1030, started BEFORE T2 committed):</span>
+SELECT balance FROM accounts WHERE id = 1;
+<span class="cm">-- Sees xmin=1001 version (1001 &lt; 1030 &lt; 1050) → returns 1000</span>
+<span class="cm">-- T3's snapshot: "I can see rows created by transactions &lt; 1030</span>
+<span class="cm">--                and not deleted by transactions &lt; 1030"</span>
+
+<span class="cm">-- Transaction T4 (xid=1060, started AFTER T2 committed):</span>
+SELECT balance FROM accounts WHERE id = 1;
+<span class="cm">-- Sees xmin=1050 version (1050 &lt; 1060) → returns 500</span></code></pre>
+
+    <h4>MVCC Snapshot — How Transactions See the World</h4>
+    <pre><code><span class="cm">// PostgreSQL snapshot structure:</span>
+Snapshot = {
+  xmin: 1030,           // Oldest active transaction at snapshot time
+  xmax: 1055,           // Next transaction ID that will be assigned
+  xip_list: [1035, 1042, 1048]  // Active (in-progress) txns at snapshot time
+}
+
+<span class="cm">// Row version visibility rules (simplified):</span>
+<span class="kw">function</span> <span class="fn">isVisible</span>(row, snapshot) {
+  <span class="cm">// Row not yet created when snapshot taken:</span>
+  <span class="kw">if</span> (row.xmin >= snapshot.xmax) <span class="kw">return false</span>;
+  <span class="cm">// Row created by still-in-progress transaction:</span>
+  <span class="kw">if</span> (snapshot.xip_list.<span class="fn">includes</span>(row.xmin)) <span class="kw">return false</span>;
+  <span class="cm">// Row created by aborted transaction:</span>
+  <span class="kw">if</span> (<span class="fn">isAborted</span>(row.xmin)) <span class="kw">return false</span>;
+
+  <span class="cm">// Row deleted/updated check:</span>
+  <span class="kw">if</span> (row.xmax === <span class="nm">0</span>) <span class="kw">return true</span>;                         <span class="cm">// Not deleted</span>
+  <span class="kw">if</span> (row.xmax >= snapshot.xmax) <span class="kw">return true</span>;               <span class="cm">// Deleted after snapshot</span>
+  <span class="kw">if</span> (snapshot.xip_list.<span class="fn">includes</span>(row.xmax)) <span class="kw">return true</span>;   <span class="cm">// Deleter still in progress</span>
+  <span class="kw">if</span> (<span class="fn">isAborted</span>(row.xmax)) <span class="kw">return true</span>;                    <span class="cm">// Deleter aborted</span>
+
+  <span class="kw">return false</span>; <span class="cm">// Deleted by committed transaction before snapshot</span>
+}</code></pre>
+
+    <h4>VACUUM — Cleaning Up Dead MVCC Versions</h4>
+    <pre><code><span class="cm">// Dead row versions accumulate over time (UPDATE creates new version + marks old dead)</span>
+<span class="cm">// VACUUM reclaims space from dead versions no longer needed by any snapshot</span>
+
+<span class="cm">// PostgreSQL autovacuum monitors:</span>
+SELECT
+  relname,
+  n_dead_tup,          <span class="cm">-- Dead tuple count</span>
+  n_live_tup,          <span class="cm">-- Live tuple count</span>
+  round(n_dead_tup::numeric / NULLIF(n_live_tup + n_dead_tup, 0) * 100, 2) AS dead_pct,
+  last_autovacuum,
+  last_autoanalyze
+FROM pg_stat_user_tables
+ORDER BY n_dead_tup DESC;
+
+<span class="cm">-- Transaction ID Wraparound — the ultimate VACUUM deadline:</span>
+<span class="cm">-- PostgreSQL uses 32-bit transaction IDs (4 billion values)</span>
+<span class="cm">-- After 2 billion txns, IDs "wrap around" — old data appears to be in the FUTURE!</span>
+<span class="cm">-- VACUUM FREEZE marks old rows with special "frozen" xmin (always visible)</span>
+<span class="cm">-- Emergency VACUUM if age(datfrozenxid) > 2 billion → DB goes read-only!</span>
+<span class="cm">-- Monitor: SELECT datname, age(datfrozenxid) FROM pg_database ORDER BY 2 DESC;</span></code></pre>
+
+    <h4>D — Durability: Committed Data Survives Crashes</h4>
+    <pre><code><span class="cm">// Write-Ahead Log (WAL) / Redo Log — the durability mechanism</span>
+<span class="cm">// Golden rule: WAL record must be flushed to disk BEFORE the data page</span>
+
+<span class="cm">// PostgreSQL WAL flow for a single UPDATE:</span>
+<span class="cm">// 1. Begin transaction</span>
+<span class="cm">// 2. Fetch data page into shared_buffers (RAM)</span>
+<span class="cm">// 3. Apply change to in-memory page (dirty page)</span>
+<span class="cm">// 4. Write WAL record to WAL buffer (in RAM):</span>
+<span class="cm">//    { lsn: 0/16B3210, xid: 1050, op: UPDATE, relation: accounts,</span>
+<span class="cm">//      tuple: (0,1), old_values: {balance:1000}, new_values: {balance:500} }</span>
+<span class="cm">// 5. COMMIT:</span>
+<span class="cm">//    a. Write COMMIT WAL record</span>
+<span class="cm">//    b. fsync() WAL to disk  ← CRITICAL: this is the durability guarantee</span>
+<span class="cm">//    c. Return success to client</span>
+<span class="cm">// 6. Background: checkpointer eventually writes dirty page to disk</span>
+
+<span class="cm">// Crash recovery:</span>
+<span class="cm">// On restart, find last checkpoint in pg_control</span>
+<span class="cm">// Replay WAL records from checkpoint forward (REDO phase)</span>
+<span class="cm">// Any uncommitted transactions → rolled back using undo information</span>
+
+<span class="cm">// synchronous_commit settings (durability vs performance trade-off):</span>
+synchronous_commit = on          <span class="cm">← fsync WAL → guaranteed durable (default)</span>
+synchronous_commit = remote_write <span class="cm">← WAL sent to standby + OS buffer (not fsync'd)</span>
+synchronous_commit = local       <span class="cm">← only local WAL fsync (standby async)</span>
+synchronous_commit = off         <span class="cm">← no fsync → risk up to 200ms data loss on crash!</span>
+<span class="cm">// off mode: ~3× faster writes. Risk: crash may lose last 200ms of commits.</span>
+<span class="cm">// OK for: logging, analytics. NOT OK for: financial transactions.</span></code></pre>
+
+    <h3>Serializable Snapshot Isolation (SSI) — PostgreSQL's Implementation</h3>
+    <pre><code><span class="cm">// Serializable in PostgreSQL uses SSI (not 2-Phase Locking like MySQL InnoDB)</span>
+<span class="cm">// SSI allows more concurrency than 2PL while providing full serializability</span>
+
+<span class="cm">// SSI tracks "read-write anti-dependencies" (rw-antidependencies):</span>
+<span class="cm">// If T1 reads data that T2 later writes, AND T2 reads data T1 later writes</span>
+<span class="cm">// → Dangerous cycle → one transaction must be aborted (serialization failure)</span>
+
+SET default_transaction_isolation = 'serializable';
+
+<span class="cm">-- Back to doctor on-call example:</span>
+<span class="cm">-- T1 reads oncall → creates rw-antidependency with T2's later write</span>
+<span class="cm">-- T2 reads oncall → creates rw-antidependency with T1's later write</span>
+<span class="cm">-- SSI detects cycle → aborts one transaction with:</span>
+<span class="cm">-- ERROR: could not serialize access due to read/write dependencies among transactions</span>
+<span class="cm">-- Application must retry the aborted transaction</span>
+
+<span class="cm">-- Performance impact: ~10-15% overhead vs Repeatable Read</span>
+<span class="cm">-- Much better than 2PL which holds locks for entire transaction duration</span></code></pre>
+
+  </div>
+</section>
+
+
+<!-- ═══════════════════════════════════════════════════════════════════
+     23. DATABASE REPLICATION
+═══════════════════════════════════════════════════════════════════ -->
+<section class="topic" id="replication">
+  <div class="topic-header">
+    <div class="num">23</div>
+    <div>
+      <h2>Database Replication</h2>
+      <p>WAL-based replication, synchronous vs asynchronous, replication lag, multi-master conflicts, and global distribution</p>
+    </div>
+  </div>
+  <div class="topic-body">
+
+    <div class="tags">
+      <span class="tag">WAL Shipping</span><span class="tag">Logical Replication</span><span class="tag">Streaming Replication</span>
+      <span class="tag">Replication Lag</span><span class="tag">Sync vs Async</span><span class="tag">Multi-Master</span>
+      <span class="tag">Read-Your-Writes</span><span class="tag">Semi-Sync</span><span class="tag">GTID</span>
+    </div>
+
+    <h3>Why Replication — The Three Pillars</h3>
+    <div class="three-col">
+      <div class="col-card">
+        <h5>🛡️ High Availability</h5>
+        <ul>
+          <li>Primary fails → replica promoted in seconds</li>
+          <li>Eliminates single point of failure</li>
+          <li>Enables zero-downtime maintenance</li>
+          <li>Cross-AZ for hardware failure protection</li>
+        </ul>
+      </div>
+      <div class="col-card">
+        <h5>📈 Read Scalability</h5>
+        <ul>
+          <li>Fan out reads across N replicas</li>
+          <li>N× read throughput without sharding</li>
+          <li>Analytical queries on replica (no impact on primary)</li>
+          <li>Geographic read replicas for low latency</li>
+        </ul>
+      </div>
+      <div class="col-card">
+        <h5>💾 Durability</h5>
+        <ul>
+          <li>Data exists on multiple physical machines</li>
+          <li>Survive disk corruption, datacenter fire</li>
+          <li>Point-in-time recovery from WAL archive</li>
+          <li>Cross-region backup with async replication</li>
+        </ul>
+      </div>
+    </div>
+
+    <h3>WAL-Based Replication — How PostgreSQL Does It</h3>
+    <p>PostgreSQL's streaming replication sends WAL (Write-Ahead Log) records from primary to replicas in real time. Replicas apply these records to stay in sync — they are essentially replaying the primary's transaction log:</p>
+
+    <div class="diagram">
+<span class="hl">PostgreSQL Streaming Replication — Full Architecture</span>
+
+                         <span class="hl">Primary</span>
+┌────────────────────────────────────────────────────────────┐
+│  Client → BEGIN/UPDATE/COMMIT                              │
+│  WAL Writer → WAL Buffer → WAL Segment Files (/pg_wal/)   │
+│               (/pg_wal/000000010000000000000001, etc.)     │
+└────────────────────────┬───────────────────────────────────┘
+                          │ WAL records streamed (TCP, COPY protocol)
+                          │ walsender process on primary
+                          │
+          ┌───────────────┴────────────────────┐
+          │                                    │
+   <span class="hl">Replica 1 (Sync)</span>                   <span class="hl">Replica 2 (Async)</span>
+┌──────────────────────┐           ┌──────────────────────┐
+│ walreceiver process  │           │ walreceiver process  │
+│ Receives WAL records │           │ Receives WAL records │
+│ Writes to WAL files  │           │ Writes to WAL files  │
+│ startup process:     │           │ startup process:     │
+│   Apply WAL records  │           │   Apply WAL records  │
+│   Update data pages  │           │   Update data pages  │
+│ Sends ACK to primary │           │ ACK after applying   │
+│ (before applying!)   │           │ (may lag 100ms-min)  │
+└──────────────────────┘           └──────────────────────┘
+
+Primary COMMIT waits for Sync Replica 1 ACK before returning to client
+Primary does NOT wait for Async Replica 2 ACK
+<span class="gr">→ Sync: no data loss on primary failure. Slower commit.</span>
+<span class="yw">→ Async: potential data loss on primary failure. Faster commit.</span>
+    </div>
+
+    <h4>Replication Modes — The Durability vs. Latency Spectrum</h4>
+    <pre><code><span class="cm">-- PostgreSQL synchronous_standby_names configurations:</span>
+
+<span class="cm">-- 1. Fully Asynchronous (default)</span>
+synchronous_standby_names = ''
+<span class="cm">-- Primary commits immediately. Replica applies independently.</span>
+<span class="cm">-- Risk: primary crash can lose last N WAL records not yet sent to replica</span>
+<span class="cm">-- Typical lag: 10ms–seconds depending on network and replica load</span>
+
+<span class="cm">-- 2. Synchronous — wait for ONE replica to ACK WAL write (not apply)</span>
+synchronous_standby_names = 'replica1'
+<span class="cm">-- Primary waits until replica1 has written WAL to its disk (not applied!)</span>
+<span class="cm">-- Guarantees: WAL on at least 2 machines → safe against single disk failure</span>
+<span class="cm">-- Does NOT guarantee: data applied (replica could crash after WAL write)</span>
+<span class="cm">-- Added latency: 1 RTT to replica (e.g., same DC: +0.2ms, cross-AZ: +2ms)</span>
+
+<span class="cm">-- 3. Remote Apply — wait for replica to APPLY (visible to queries)</span>
+synchronous_standby_names = 'FIRST 1 (replica1, replica2)'
+<span class="cm">-- application_name = 'replica1' with recovery_target_action = 'remote_apply'</span>
+<span class="cm">-- Guarantees: data is QUERYABLE on replica before primary confirms commit</span>
+<span class="cm">-- Use case: read-your-writes after writing to primary, reading from replica</span>
+<span class="cm">-- Added latency: 1 RTT + replica apply time (~1–5ms)</span>
+
+<span class="cm">-- 4. Quorum Synchronous (PostgreSQL 10+)</span>
+synchronous_standby_names = 'ANY 2 (replica1, replica2, replica3)'
+<span class="cm">-- Wait for any 2 of 3 replicas to ACK. Tolerates 1 replica failure.</span>
+<span class="cm">-- Best balance of durability and availability</span></code></pre>
+
+    <h3>Replication Lag — Causes, Measurement, and Mitigation</h3>
+    <pre><code><span class="cm">-- Measure replication lag in PostgreSQL:</span>
+<span class="cm">-- On PRIMARY:</span>
+SELECT
+  application_name,
+  state,
+  sent_lsn,
+  write_lsn,
+  flush_lsn,
+  replay_lsn,
+  write_lag,        <span class="cm">-- Time for replica to write WAL to disk</span>
+  flush_lag,        <span class="cm">-- Time for replica to flush WAL to disk</span>
+  replay_lag,       <span class="cm">-- Time for replica to apply WAL (data visible)</span>
+  sync_state        <span class="cm">-- sync / async / potential / quorum</span>
+FROM pg_stat_replication;
+
+<span class="cm">-- On REPLICA:</span>
+SELECT
+  now() - pg_last_xact_replay_timestamp() AS replication_delay,
+  pg_is_in_recovery()                      AS is_replica,
+  pg_last_wal_receive_lsn()                AS received_lsn,
+  pg_last_wal_replay_lsn()                 AS replayed_lsn;
+
+<span class="cm">-- Causes of replication lag:</span>
+<span class="cm">// 1. Network bandwidth: WAL stream saturates NIC (large bulk loads)</span>
+<span class="cm">// 2. Replica I/O bound: replica disk can't keep up with WAL apply rate</span>
+<span class="cm">// 3. Long-running queries on replica: hot standby conflicts</span>
+<span class="cm">//    (replica must wait for standby_conflict_resolution timeout)</span>
+<span class="cm">// 4. Large transactions: WAL for one txn can be GBs</span>
+<span class="cm">// 5. Replica doing expensive index builds or autovacuum</span>
+
+<span class="cm">// Mitigation strategies:</span>
+<span class="cm">// - Dedicated replica NIC / network path</span>
+<span class="cm">// - Faster replica disks (NVMe > SSD > HDD)</span>
+<span class="cm">// - max_standby_streaming_delay: how long replica waits before canceling conflicting queries</span>
+<span class="cm">// - hot_standby_feedback = on: replica tells primary what XIDs are active → prevents conflicts</span>
+<span class="cm">// - Streaming replication slots: ensure primary retains WAL until replica catches up</span>
+<span class="cm">// DANGER: replication slots without monitoring → WAL accumulates → disk full!</span></code></pre>
+
+    <h3>MySQL Binlog Replication — GTID-Based</h3>
+    <pre><code><span class="cm">-- MySQL replication uses Binary Log (binlog) instead of WAL</span>
+<span class="cm">-- Three binlog formats:</span>
+
+<span class="cm">-- 1. Statement-Based Replication (SBR):</span>
+<span class="cm">-- Logs SQL statements. Compact. But non-deterministic functions (NOW(), RAND())</span>
+<span class="cm">-- produce different results on replica!</span>
+<span class="cm">-- DELETE FROM orders WHERE created_at < NOW() - INTERVAL 30 DAY</span>
+<span class="cm">-- → Different rows deleted if NOW() differs by even 1 second!</span>
+
+<span class="cm">-- 2. Row-Based Replication (RBR) — default since MySQL 5.7:</span>
+<span class="cm">-- Logs actual row changes (before + after image). Deterministic.</span>
+<span class="cm">-- Large updates produce large binlogs (UPDATE of 1M rows = 1M row images)</span>
+
+<span class="cm">-- 3. Mixed: uses SBR for most statements, switches to RBR for unsafe ones</span>
+
+<span class="cm">-- GTID (Global Transaction Identifier) — MySQL 5.6+:</span>
+<span class="cm">-- Each transaction gets unique GTID: server_uuid:transaction_seq</span>
+<span class="cm">-- Example: 3E11FA47-71CA-11E1-9E33-C80AA9429562:23</span>
+
+<span class="cm">-- Benefits of GTID:</span>
+<span class="cm">// - Automatic failover: new primary knows exactly which GTIDs each replica has</span>
+<span class="cm">// - No binlog file + position needed: replicas auto-detect where to start</span>
+<span class="cm">// - Circular replication detection: replica ignores its own GTIDs</span>
+
+<span class="cm">-- GTID-based replication setup:</span>
+CHANGE REPLICATION SOURCE TO
+  SOURCE_HOST='primary.db.internal',
+  SOURCE_PORT=3306,
+  SOURCE_AUTO_POSITION=1,     <span class="cm">← GTID auto-positioning (no file/pos needed!)</span>
+  SOURCE_SSL=1,
+  SOURCE_CONNECT_RETRY=10;
+
+START REPLICA;
+SHOW REPLICA STATUS\G          <span class="cm">← shows Seconds_Behind_Source (lag metric)</span></code></pre>
+
+    <h3>Logical Replication — Fine-Grained Change Streaming</h3>
+    <p>Physical replication (WAL shipping) replicates the entire database at the byte level. Logical replication decodes WAL into logical operations (INSERT/UPDATE/DELETE on specific tables), enabling selective replication and heterogeneous targets:</p>
+
+    <pre><code><span class="cm">-- PostgreSQL Logical Replication — publisher/subscriber model:</span>
+
+<span class="cm">-- On SOURCE database (publisher):</span>
+ALTER SYSTEM SET wal_level = logical;  <span class="cm">← Required: logical > replica > minimal</span>
+
+CREATE PUBLICATION my_pub
+  FOR TABLE orders, customers, products;
+<span class="cm">-- OR: FOR ALL TABLES (entire database)</span>
+<span class="cm">-- OR: FOR TABLE orders WHERE (status != 'archived')  ← row filter (PG 15+)</span>
+
+<span class="cm">-- On TARGET database (subscriber):</span>
+CREATE SUBSCRIPTION my_sub
+  CONNECTION 'host=source.db port=5432 dbname=myapp user=replicator password=secret'
+  PUBLICATION my_pub
+  WITH (
+    copy_data = true,          <span class="cm">← Initial data sync (snapshot)</span>
+    synchronous_commit = off   <span class="cm">← Subscriber doesn't need to ack each WAL</span>
+  );
+
+<span class="cm">-- Use cases for logical replication:</span>
+<span class="cm">// 1. Zero-downtime major version upgrade: PG 15 → PG 16 with logical rep</span>
+<span class="cm">// 2. Selective table replication: replicate only orders table to analytics DB</span>
+<span class="cm">// 3. Cross-database-engine: PostgreSQL → Kafka (Debezium CDC) → Elasticsearch</span>
+<span class="cm">// 4. Multi-tenant: replicate tenant A's data to their dedicated database</span>
+<span class="cm">// 5. Geographic distribution: replicate EU tables to EU database only</span>
+
+<span class="cm">-- Change Data Capture (CDC) with Debezium (Kafka Connector):</span>
+<span class="cm">// Debezium reads PostgreSQL logical replication slot</span>
+<span class="cm">// Converts WAL records to Kafka messages (Avro or JSON):</span>
+{
+  "op": "u",                    <span class="cm">// u=update, c=create, d=delete, r=read(snapshot)</span>
+  "ts_ms": 1705000000000,
+  "before": { "id": 123, "balance": 1000 },
+  "after":  { "id": 123, "balance": 500  },
+  "source": { "table": "accounts", "lsn": 23457890, "txId": 1050 }
+}</code></pre>
+
+    <h3>Multi-Master Replication — Conflict Detection and Resolution</h3>
+    <p>Multi-master (active-active) allows writes to multiple nodes simultaneously, enabling geographic write distribution. The critical challenge: the same row can be concurrently modified on two nodes — conflicts must be detected and resolved:</p>
+
+    <div class="diagram">
+<span class="hl">Multi-Master Conflict Scenario</span>
+
+Node A (US-EAST)                    Node B (EU-WEST)
+     │                                    │
+T1: UPDATE products SET price=99         T2: UPDATE products SET price=89
+    WHERE id=42                               WHERE id=42
+     │                                    │
+     │── replication ──────────────────►  │
+     │  ◄─────────────────── replication──│
+     │                                    │
+Both nodes detect CONFLICT for product id=42
+Conflict: {node_a: price=99, node_b: price=89, same_xid_epoch}
+
+<span class="yw">Resolution strategies:</span>
+1. Last-Write-Wins (LWW): compare timestamps → higher wins
+   Risk: clock skew means wrong version wins
+2. Application-defined: custom resolver function called on conflict
+3. CRDT: data type designed to always merge correctly (counter, set)
+4. Human review: conflict logged, manual resolution queue
+    </div>
+
+    <pre><code><span class="cm">// Conflict resolution implementations:</span>
+
+<span class="cm">// 1. Last-Write-Wins with Hybrid Logical Clocks (HLC)</span>
+<span class="cm">// HLC = max(physical_time, logical_time) — monotonic even with clock skew</span>
+<span class="kw">class</span> <span class="cls">HLC</span> {
+  <span class="fn">tick</span>() {
+    <span class="kw">const</span> physical = Date.<span class="fn">now</span>();
+    <span class="kw">this</span>.l = Math.<span class="fn">max</span>(physical, <span class="kw">this</span>.l + <span class="nm">1</span>); <span class="cm">// Ensure monotonic</span>
+    <span class="kw">this</span>.c = (<span class="kw">this</span>.l === physical) ? <span class="nm">0</span> : <span class="kw">this</span>.c + <span class="nm">1</span>;
+    <span class="kw">return</span> { l: <span class="kw">this</span>.l, c: <span class="kw">this</span>.c }; <span class="cm">// (physical_ts, logical_counter)</span>
+  }
+  <span class="fn">receive</span>(msg_ts) {
+    <span class="kw">this</span>.l = Math.<span class="fn">max</span>(<span class="kw">this</span>.l, msg_ts.l, Date.<span class="fn">now</span>());
+    <span class="kw">this</span>.c = (<span class="kw">this</span>.l === msg_ts.l) ? msg_ts.c + <span class="nm">1</span> : <span class="nm">0</span>;
+  }
+}
+
+<span class="cm">// 2. Conflict-free Replicated Data Types (CRDTs)</span>
+<span class="cm">// OR-Set (Observed-Remove Set) — concurrent add/remove of same element</span>
+<span class="kw">class</span> <span class="cls">ORSet</span> {
+  <span class="cm">// Each add gives element a unique tag</span>
+  <span class="cm">// Remove: mark specific tags as removed</span>
+  <span class="cm">// Concurrent add(x) on A + remove(x) on B:</span>
+  <span class="cm">// B removes tags it knows about. A's new tags survive. → x remains.</span>
+  <span class="cm">// "Add wins" semantics — predictable, conflict-free</span>
+}
+
+<span class="cm">// 3. Operational Transform (Google Docs approach)</span>
+<span class="cm">// Each operation aware of concurrent operations</span>
+<span class="cm">// Transform operation against concurrent ops before applying</span>
+<span class="cm">// Insert(pos=5, char='a') concurrent with Delete(pos=3):</span>
+<span class="cm">// Transform Insert → Insert(pos=4, char='a') after accounting for deletion</span></code></pre>
+
+    <h3>Read-Your-Writes Consistency — Routing Strategies</h3>
+    <p>With async replication, a user writes to the primary and immediately reads from a replica — but the replica hasn't caught up yet. The user sees their own write disappear. Solutions:</p>
+
+    <pre><code><span class="cm">// Strategy 1: Route reads to primary for 1 second after write</span>
+<span class="kw">async function</span> <span class="fn">getUser</span>(userId, context) {
+  <span class="kw">const</span> lastWriteTime = context.<span class="fn">getLastWriteTime</span>(userId);
+  <span class="kw">const</span> useReplica = !lastWriteTime ||
+                     (Date.<span class="fn">now</span>() - lastWriteTime) > <span class="nm">1000</span>; <span class="cm">// 1s buffer</span>
+
+  <span class="kw">return</span> useReplica
+    ? replicaPool.<span class="fn">query</span>(<span class="str">'SELECT * FROM users WHERE id=$1'</span>, [userId])
+    : primary.<span class="fn">query</span>(<span class="str">'SELECT * FROM users WHERE id=$1'</span>, [userId]);
+}
+
+<span class="cm">// Strategy 2: Send client a "read token" (LSN) after write</span>
+<span class="cm">// Client includes token in subsequent reads</span>
+<span class="cm">// Replica refuses to serve read if its LSN < token (waits or redirects)</span>
+<span class="cm">// AWS Aurora PostgreSQL implements this as "read-your-writes" option</span>
+
+<span class="cm">-- PostgreSQL: route read to specific replica only if it's caught up</span>
+<span class="cm">-- After write, server returns current WAL LSN:</span>
+SELECT pg_current_wal_lsn();  <span class="cm">-- Returns '0/16B3210'</span>
+
+<span class="cm">-- Client sends LSN with next read request</span>
+<span class="cm">-- Replica checks if it has applied at least this LSN:</span>
+SELECT pg_last_wal_replay_lsn() >= '0/16B3210'::pg_lsn;
+<span class="cm">-- If false: wait or redirect to primary</span>
+
+<span class="cm">// Strategy 3: Monotonic reads — sticky sessions to same replica</span>
+<span class="cm">// User always routed to same replica via session cookie or consistent hash(user_id)</span>
+<span class="cm">// Replica lag affects all users equally but no backwards-in-time reads within session</span></code></pre>
+
+    <h3>Replication Topologies — Choosing the Right Architecture</h3>
+
+    <table>
+      <tr><th>Topology</th><th>Structure</th><th>Pros</th><th>Cons</th><th>Use Case</th></tr>
+      <tr><td><strong>Single Primary + Async Replicas</strong></td><td>1 writer, N readers</td><td>Simple, fast writes, easy failover</td><td>Replication lag, potential data loss on crash</td><td>Most web applications</td></tr>
+      <tr><td><strong>Single Primary + Sync Replica</strong></td><td>1 writer, 1+ sync readers</td><td>Zero data loss on primary failure</td><td>Write latency = network RTT to replica</td><td>Financial systems, payments</td></tr>
+      <tr><td><strong>Cascading Replication</strong></td><td>Primary → Replica1 → Replica2</td><td>Primary not overloaded by many replicas</td><td>Replica2 lag = Primary→R1 + R1→R2 lag</td><td>Many read replicas, analytics</td></tr>
+      <tr><td><strong>Multi-Primary (Active-Active)</strong></td><td>N writers, all replicate to each other</td><td>Write anywhere, geographic distribution</td><td>Conflict resolution complexity</td><td>Global apps, multi-region writes</td></tr>
+      <tr><td><strong>Galera Cluster (MySQL)</strong></td><td>Multi-primary with synchronous certification</td><td>No conflicts (serialized via certification), automatic failover</td><td>Write scalability limited (all nodes certify), network latency added to every write</td><td>HA MySQL with multi-master</td></tr>
+    </table>
+
+    <div class="callout success">
+      <strong>✅ Production Replication Checklist</strong>
+      <strong>1. Monitor replication lag:</strong> Alert if lag > 30 seconds (PagerDuty). Dashboard with per-replica lag trend.<br/>
+      <strong>2. Replication slot hygiene:</strong> Slots prevent WAL deletion. Unused slots fill disk. Set max_slot_wal_keep_size.<br/>
+      <strong>3. Test failover regularly:</strong> Monthly automated failover drill. Measure actual RTO vs. target.<br/>
+      <strong>4. Read routing in app:</strong> Never read from replica for write-then-read within same request. Use primary or implement LSN-based routing.<br/>
+      <strong>5. Replica configuration:</strong> hot_standby_feedback=on prevents replica query cancellations. max_standby_streaming_delay=30s prevents indefinite blocking.<br/>
+      <strong>6. Connection pooling:</strong> PgBouncer per-node. Separate pools for primary (writes) and replicas (reads). Never pool mix primary + replica.
+    </div>
+
+    <div class="metrics">
+      <div class="metric-card"><div class="val">&lt;5ms</div><div class="lbl">Typical Same-AZ Async Lag</div></div>
+      <div class="metric-card"><div class="val">&lt;30s</div><div class="lbl">Acceptable Lag Threshold Alert</div></div>
+      <div class="metric-card"><div class="val">RPO=0</div><div class="lbl">Synchronous Replication Data Loss</div></div>
+      <div class="metric-card"><div class="val">~1RTT</div><div class="lbl">Sync Replication Added Latency</div></div>
+      <div class="metric-card"><div class="val">N×</div><div class="lbl">Read Throughput with N Replicas</div></div>
+    </div>
+
+  </div>
+</section>
+
+</main>
+
+<!-- ══════════════════════════════════ FOOTER ══════════════════════════════════ -->
+<footer>
+  <p>System Design Deep Dive · Part 4 · Advanced Reference Document · <strong>_sonnet</strong></p>
+  <p style="margin-top:6px; font-size:0.78rem;">Topic 21: Indexing · Topic 22: ACID Properties · Topic 23: Database Replication</p>
+  <p style="margin-top:6px; font-size:0.75rem; color:#444c56;">
+    B+Tree · Hash · LSM-Tree · Composite · Covering · Partial Index ·
+    Atomicity · MVCC · WAL · Isolation Levels · SSI ·
+    Streaming Replication · Logical Replication · GTID · Multi-Master · Read-Your-Writes
+  </p>
+</footer>
+
+</body>
+</html>

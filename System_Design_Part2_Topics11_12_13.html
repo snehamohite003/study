@@ -1,0 +1,1545 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>System Design Deep Dive - CDN, Caching, TCP vs UDP</title>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; line-height: 1.8; max-width: 1100px; margin: 0 auto; padding: 40px; background: #f8f9fa; color: #2c3e50; }
+        h1 { text-align: center; color: #1a252f; border-bottom: 3px solid #3498db; padding-bottom: 15px; font-size: 2.2em; }
+        h2 { color: #2980b9; border-left: 5px solid #3498db; padding-left: 15px; margin-top: 50px; font-size: 1.8em; }
+        h3 { color: #34495e; margin-top: 30px; font-size: 1.4em; }
+        h4 { color: #555; margin-top: 20px; font-size: 1.1em; }
+        .section { background: #fff; padding: 30px; border-radius: 8px; margin: 20px 0; box-shadow: 0 2px 10px rgba(0,0,0,0.08); }
+        code { background: #ecf0f1; padding: 2px 8px; border-radius: 4px; font-family: 'Courier New', monospace; font-size: 0.9em; }
+        pre { background: #2c3e50; color: #ecf0f1; padding: 20px; border-radius: 6px; overflow-x: auto; font-size: 0.9em; line-height: 1.5; }
+        .example { background: #eaf6ff; border-left: 4px solid #3498db; padding: 15px 20px; margin: 15px 0; border-radius: 0 6px 6px 0; }
+        .important { background: #fef9e7; border-left: 4px solid #f39c12; padding: 15px 20px; margin: 15px 0; border-radius: 0 6px 6px 0; }
+        .diagram { background: #f4f6f9; border: 1px solid #ddd; padding: 20px; margin: 15px 0; border-radius: 6px; font-family: 'Courier New', monospace; white-space: pre; overflow-x: auto; font-size: 0.85em; }
+        table { width: 100%; border-collapse: collapse; margin: 15px 0; }
+        th, td { border: 1px solid #ddd; padding: 12px; text-align: left; }
+        th { background: #3498db; color: white; }
+        tr:nth-child(even) { background: #f2f2f2; }
+        .toc { background: #fff; padding: 25px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.08); }
+        .toc a { text-decoration: none; color: #2980b9; display: block; padding: 5px 0; }
+    </style>
+</head>
+<body>
+
+<h1>System Design Deep Dive – Part 2</h1>
+<p style="text-align:center; font-size:1.1em; color:#555;">Topics 11–13: CDN, Caching &amp; TCP vs UDP</p>
+
+<div class="toc">
+    <h3>Table of Contents</h3>
+    <a href="#cdn">11. CDN (Content Delivery Network) &amp; CDN Caching</a>
+    <a href="#caching">12. Caching – Concepts, Cache Warming, Cache Invalidation</a>
+    <a href="#tcp-udp">13. TCP vs UDP</a>
+</div>
+
+<!-- ==================== 11. CDN ==================== -->
+<h2 id="cdn">11. CDN (Content Delivery Network) &amp; CDN Caching</h2>
+<div class="section">
+
+    <h3>11.1 What a CDN Actually Is</h3>
+    <p>A CDN is a geographically distributed network of proxy servers and data centers that serves content from the location physically closest to the user, reducing latency from hundreds of milliseconds to single-digit milliseconds.</p>
+
+    <div class="diagram">
+Without CDN:
+User (Tokyo) ─── 200ms RTT ───→ Origin Server (Virginia, USA)
+Every single request crosses the Pacific Ocean and back.
+
+With CDN:
+User (Tokyo) ─── 5ms RTT ───→ CDN Edge PoP (Tokyo)
+                                    │
+                               Cache HIT? → Serve immediately (5ms total!)
+                               Cache MISS? → Fetch from origin, cache, serve
+                                    │
+                               ┌────┴────────────────────────┐
+                               │ CDN Internal Tier Hierarchy  │
+                               │                              │
+                               │ Edge (Tokyo) → miss          │
+                               │   ↓                          │
+                               │ Regional (Singapore) → miss  │
+                               │   ↓                          │
+                               │ Origin Shield (US-West) → miss│
+                               │   ↓                          │
+                               │ Origin Server (Virginia)     │
+                               └──────────────────────────────┘
+    </div>
+
+    <h3>11.2 CDN Architecture – Internal Components</h3>
+
+    <h4>11.2.1 Points of Presence (PoPs)</h4>
+    <p>A PoP is a physical data center containing CDN edge servers. Major CDNs have 200-300+ PoPs globally.</p>
+    <div class="diagram">
+Inside a CDN PoP:
+┌─────────────────────────────────────────────────────────┐
+│  CDN PoP - Tokyo                                         │
+│                                                          │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐    │
+│  │ Edge Server │  │ Edge Server │  │ Edge Server │    │
+│  │  (cache +   │  │  (cache +   │  │  (cache +   │    │
+│  │  proxy)     │  │  proxy)     │  │  proxy)     │    │
+│  │ 1TB SSD     │  │ 1TB SSD     │  │ 1TB SSD     │    │
+│  │ 256GB RAM   │  │ 256GB RAM   │  │ 256GB RAM   │    │
+│  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘    │
+│         └────────────┬────┴────────────────┘            │
+│                      │                                   │
+│  ┌───────────────────┴──────────────────────────────┐   │
+│  │  L4 Load Balancer (ECMP / Maglev hashing)        │   │
+│  └───────────────────┬──────────────────────────────┘   │
+│                      │                                   │
+│  ┌───────────────────┴──────────────────────────────┐   │
+│  │  Border Routers (BGP Anycast announcements)       │   │
+│  └───────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────┘
+         │
+    ISP Peering / IXP (Internet Exchange Point)
+         │
+    User's ISP → User
+    </pre>
+    </div>
+
+    <h4>11.2.2 Anycast Routing – How Users Reach Nearest PoP</h4>
+    <pre>
+// All CDN PoPs advertise the SAME IP address via BGP
+// Example: Cloudflare's IP 104.16.123.96 is announced from 300+ locations
+
+// How it works:
+// 1. CDN configures same IP range (e.g., 104.16.0.0/12) on edge servers in EVERY PoP
+// 2. Each PoP's border router announces this prefix to upstream ISPs via BGP
+// 3. Internet routing tables have 300+ paths to reach 104.16.123.96
+// 4. Routers choose shortest AS-path (typically = geographically closest)
+// 5. User's packets naturally route to nearest PoP
+
+// DNS resolution:
+// www.example.com → CNAME → cdn.example.net → A 104.16.123.96
+// This SINGLE IP serves users globally (no GeoDNS needed!)
+
+// Failover advantage over DNS-based routing:
+// DNS failover: Dependent on TTL expiry (60s-3600s propagation)
+// Anycast failover: BGP route withdrawal → traffic moves in SECONDS
+//   PoP goes down → BGP withdraws → next-closest PoP absorbs traffic
+    </pre>
+
+    <h3>11.3 CDN Caching – Deep Internals</h3>
+
+    <h4>11.3.1 Cache Storage Architecture</h4>
+    <div class="diagram">
+Edge Server Cache Hierarchy (inside one server):
+┌─────────────────────────────────────────────────────────┐
+│  Hot Object Cache (RAM) - ~256GB                         │
+│  • Stores most frequently accessed objects               │
+│  • Hash table with LRU eviction                          │
+│  • Access time: ~100 nanoseconds                         │
+│  • Hit rate: handles 80%+ of requests from RAM alone     │
+├─────────────────────────────────────────────────────────┤
+│  Warm Object Cache (NVMe SSD) - ~2-8TB                   │
+│  • Stores less frequently accessed but cached objects    │
+│  • Access time: ~100 microseconds                        │
+│  • Content-addressable: filename = hash(cache_key)       │
+│  • Async promotion to RAM on repeated access             │
+├─────────────────────────────────────────────────────────┤
+│  Miss → Fetch from upstream tier or origin               │
+│  • Store response in SSD + promote hot items to RAM      │
+└─────────────────────────────────────────────────────────┘
+    </div>
+
+    <h4>11.3.2 Cache Key – What Uniquely Identifies a Cached Object</h4>
+    <pre>
+// Default cache key components:
+cache_key = hash(
+    HTTP_method,          // GET (POST almost never cached)
+    scheme,               // https
+    host_header,          // "www.example.com"
+    URI_path,             // "/images/hero.jpg"
+    query_string,         // "?width=800&quality=80"
+)
+
+// Problem: Query parameter ORDER changes cache key!
+//   /page?a=1&b=2  vs  /page?b=2&a=1  → two cache entries for same content!
+// Solution: CDN normalizes by sorting query params alphabetically
+
+// Advanced cache key customization:
+// Include specific headers (different cached variant per device type):
+Vary: Accept-Encoding, User-Agent
+
+// Example: CDN stores multiple variants of same URL:
+// /style.css + Accept-Encoding: gzip    → cached gzip version
+// /style.css + Accept-Encoding: br      → cached brotli version  
+// /style.css + Accept-Encoding: identity → uncompressed version
+
+// Cache key for personalized content (usually NOT cached):
+// /api/feed?user=123 → unique per user → no cache benefit
+// Solution: Edge-Side Includes (ESI) or fragment caching
+    </pre>
+
+    <h4>11.3.3 Cache-Control Directives (Origin → CDN → Browser)</h4>
+    <table>
+        <tr><th>Directive</th><th>Meaning</th><th>Applies To</th><th>Use Case</th></tr>
+        <tr><td><code>public</code></td><td>Any cache (CDN, proxy, browser) may store</td><td>CDN + Browser</td><td>Static assets, public API responses</td></tr>
+        <tr><td><code>private</code></td><td>Only browser may cache (NOT CDN/proxy)</td><td>Browser only</td><td>Personalized content, authenticated responses</td></tr>
+        <tr><td><code>max-age=N</code></td><td>Fresh for N seconds (browser + CDN unless s-maxage)</td><td>Both</td><td>General TTL control</td></tr>
+        <tr><td><code>s-maxage=N</code></td><td>Fresh for N seconds in shared caches (CDN). Overrides max-age for CDN.</td><td>CDN only</td><td>CDN caches 1 hour, browser caches 5 min</td></tr>
+        <tr><td><code>no-cache</code></td><td>Cache it BUT must revalidate with origin before serving (confusing name!)</td><td>Both</td><td>Content that changes unpredictably</td></tr>
+        <tr><td><code>no-store</code></td><td>Do NOT cache at all. Do NOT store on disk.</td><td>Both</td><td>Sensitive data (banking, health records)</td></tr>
+        <tr><td><code>immutable</code></td><td>Never changes. Don't even revalidate on refresh.</td><td>Both</td><td>Versioned assets (app.a3b2c1.js)</td></tr>
+        <tr><td><code>stale-while-revalidate=N</code></td><td>Serve stale for N seconds while fetching fresh copy in background</td><td>Both</td><td>Always-fast responses, eventual freshness</td></tr>
+        <tr><td><code>stale-if-error=N</code></td><td>If origin is down, serve stale for N seconds</td><td>Both</td><td>Availability during origin outage</td></tr>
+    </table>
+
+    <pre>
+// Real-world header combinations:
+
+// Versioned static asset (hash in filename = never changes):
+Cache-Control: public, max-age=31536000, immutable
+// /assets/app.8f3a2b.js → cached forever, never revalidated
+// When code changes: filename changes → new cache entry
+
+// API response (changes occasionally):
+Cache-Control: public, s-maxage=3600, max-age=60, stale-while-revalidate=86400
+// CDN caches for 1 hour
+// Browser caches for 1 minute
+// After CDN TTL expires: serve stale instantly, revalidate in background
+// User NEVER waits for origin (stale-while-revalidate magic)
+
+// Personalized response:
+Cache-Control: private, max-age=0, no-cache
+// CDN MUST NOT cache (contains user-specific data)
+// Browser revalidates every time (but can use conditional request)
+
+// During origin outage:
+Cache-Control: public, max-age=300, stale-if-error=86400
+// Normal: fresh for 5 minutes
+// If origin returns 5xx or is unreachable: serve stale for up to 24 hours
+// Availability > freshness
+    </pre>
+
+    <h4>11.3.4 Cache Revalidation – Conditional Requests</h4>
+    <div class="diagram">
+ETag-Based Revalidation:
+
+Initial request:
+CDN → Origin: GET /api/products
+Origin → CDN: 200 OK
+               ETag: "w/5d8c72a3"
+               Content-Length: 45000
+               [45KB JSON body]
+CDN stores: { url: /api/products, etag: "w/5d8c72a3", body: [...], expires: T+3600 }
+
+After TTL expires (T+3601), next request:
+CDN → Origin: GET /api/products
+               If-None-Match: "w/5d8c72a3"
+
+Case 1 - Content unchanged:
+Origin → CDN: 304 Not Modified    ← NO BODY (saves 45KB bandwidth!)
+               ETag: "w/5d8c72a3"
+CDN: Refreshes TTL, serves cached body. Cost: ~200 bytes vs 45,000 bytes.
+
+Case 2 - Content changed:
+Origin → CDN: 200 OK
+               ETag: "w/9e4f81b2"   ← New ETag
+               [new 47KB body]
+CDN: Replaces cached entry.
+
+Last-Modified Based (alternative):
+CDN → Origin: GET /style.css
+               If-Modified-Since: Wed, 28 May 2025 10:30:00 GMT
+Origin → CDN: 304 Not Modified (or 200 with new content)
+    </div>
+
+    <h3>11.4 CDN Cache Invalidation / Purging</h3>
+    <pre>
+// When content changes, stale cached copies must be removed from ALL PoPs:
+
+// Method 1: Purge by exact URL
+POST https://api.cdn.com/zones/abc123/purge_cache
+{
+    "files": [
+        "https://example.com/api/products/42",
+        "https://example.com/images/product-42.jpg"
+    ]
+}
+// Propagates to all 300+ PoPs in < 150ms (Cloudflare)
+// < 1 second for most CDNs
+
+// Method 2: Purge by Cache-Tag / Surrogate-Key
+// Origin adds header: Surrogate-Key: product-42 category-electronics homepage
+// Purge ALL objects tagged with "product-42":
+POST /purge
+{ "tags": ["product-42"] }
+// This purges: product page, product image, category listing, homepage
+// MUCH more practical than listing every URL individually
+
+// Method 3: Purge everything (nuclear option)
+POST /purge_all
+// Entire cache cleared. Origin will get hammered. Use rarely.
+
+// Method 4: Soft purge / Instant stale
+// Mark objects as stale (not deleted). Next request triggers revalidation.
+// stale-while-revalidate serves old content instantly while updating.
+// No thundering herd problem (unlike hard purge).
+
+// Method 5: Versioned URLs (best practice for static assets)
+// /assets/app.js?v=1  → /assets/app.js?v=2 (new URL = new cache entry)
+// Better: /assets/app.8f3a2b.js → /assets/app.c4d5e6.js
+// Old version stays cached (doesn't hurt). New version is simply new key.
+// NO PURGE NEEDED. This is the gold standard.
+    </pre>
+
+    <h3>11.5 CDN Cache Hit Ratio – The Key Metric</h3>
+    <pre>
+// Cache Hit Ratio = (requests served from cache) / (total requests)
+//
+// Target: > 90% for static content, > 60% for dynamic APIs
+//
+// Factors that DESTROY hit ratio:
+// 1. Query string variations: /page?utm_source=x&utm_medium=y (thousands of combos!)
+//    Fix: Configure CDN to IGNORE marketing query params for cache key
+//
+// 2. Cookies in request: CDN defaults to not caching when Cookie header present
+//    Fix: Strip unnecessary cookies at edge; use Cache-Control: public explicitly
+//
+// 3. Low TTL: TTL of 10 seconds on content that changes hourly
+//    Fix: Increase TTL + use stale-while-revalidate + purge on change
+//
+// 4. Long-tail content: Millions of unique URLs each accessed once/day
+//    Fix: Origin shield (collapses all edge misses to single upstream request)
+//
+// 5. Personalized responses: /feed?user=123 → unique per user
+//    Fix: Split page into static shell (cached) + dynamic fragments (AJAX)
+
+// Origin Shield effect on hit ratio:
+// Without shield: 300 PoPs × cache miss = 300 requests to origin (thundering herd)
+// With shield: 300 PoPs miss → 1 shield server fetches → caches → 299 PoPs get from shield
+// Origin sees: 1 request instead of 300!
+    </pre>
+
+    <h3>11.6 CDN for Dynamic Content</h3>
+    <div class="example">
+        <strong>Modern CDNs cache more than just static files:</strong>
+        <ul>
+            <li><strong>API acceleration:</strong> Cache GET /api/products for 60s. 99% of requests served from edge. Purge on product update.</li>
+            <li><strong>Edge computing (Cloudflare Workers, Lambda@Edge):</strong> Run code AT the edge. Personalize cached pages, A/B test, authenticate, transform responses — all in < 5ms.</li>
+            <li><strong>Dynamic content assembly:</strong> Cache page shell + fragments separately. Assemble at edge using ESI (Edge Side Includes):
+                <pre>
+&lt;html&gt;
+&lt;body&gt;
+  &lt;esi:include src="/header?user=123" ttl="0" /&gt;  &lt;!-- personalized, not cached --&gt;
+  &lt;esi:include src="/products/featured" ttl="3600" /&gt;  &lt;!-- cached 1hr --&gt;
+  &lt;esi:include src="/footer" ttl="86400" /&gt;  &lt;!-- cached 1 day --&gt;
+&lt;/body&gt;
+&lt;/html&gt;
+                </pre>
+            </li>
+            <li><strong>WebSocket passthrough:</strong> CDN terminates TLS but passes WebSocket connections through to origin (no caching but still benefits from proximity for initial handshake).</li>
+        </ul>
+    </div>
+
+    <h3>11.7 CDN Security Features</h3>
+    <ul>
+        <li><strong>DDoS Mitigation:</strong> CDN absorbs attack traffic across 300+ PoPs. Single PoP handles 10+ Tbps. Origin never sees attack traffic.</li>
+        <li><strong>WAF (Web Application Firewall):</strong> Inspect requests at edge. Block SQL injection, XSS, path traversal before reaching origin.</li>
+        <li><strong>Bot Management:</strong> Identify/block automated scrapers using behavioral analysis, JavaScript challenges, CAPTCHAs.</li>
+        <li><strong>TLS Termination:</strong> CDN handles expensive TLS handshakes at edge. Origin receives plain HTTP over private connection.</li>
+        <li><strong>Origin Cloaking:</strong> Origin IP is hidden. All traffic must pass through CDN. Direct-to-origin attacks impossible.</li>
+    </ul>
+
+    <h3>11.8 Pull vs Push CDN</h3>
+    <table>
+        <tr><th>Type</th><th>How Content Gets to Edge</th><th>Pros</th><th>Cons</th></tr>
+        <tr>
+            <td><strong>Pull (Origin Pull)</strong></td>
+            <td>Edge fetches from origin on first request (cache miss). Subsequent requests served from cache.</td>
+            <td>No upfront work. Only caches what's actually requested. Automatic.</td>
+            <td>First user gets slow response (cache miss penalty). Thundering herd on cold cache.</td>
+        </tr>
+        <tr>
+            <td><strong>Push (Pre-populate)</strong></td>
+            <td>Content is proactively pushed to edge servers before any user requests it.</td>
+            <td>First user gets fast response. Predictable performance.</td>
+            <td>Wastes storage for unpopular content. Complex deployment pipeline. Must know what to push.</td>
+        </tr>
+    </table>
+    <div class="example">
+        <strong>Hybrid approach (most common):</strong> Use pull CDN + cache warming. After deploying new content or purging cache, immediately make requests to critical URLs through the CDN to "warm" the cache before real users hit it.
+    </div>
+
+</div>
+
+<!-- ==================== 12. CACHING ==================== -->
+<h2 id="caching">12. Caching – Concepts, Cache Warming, Cache Invalidation</h2>
+<div class="section">
+
+    <h3>12.1 Why Caching Exists</h3>
+    <p>Caching exploits the <strong>principle of locality</strong>: recently or frequently accessed data is likely to be accessed again. By storing copies of data in faster storage closer to the consumer, we trade freshness for speed.</p>
+
+    <div class="diagram">
+Access Latency Hierarchy:
+┌────────────────────────────────────────────────────────────────────┐
+│  L1 CPU Cache:         ~1 ns    (4 cycles)       ~64 KB           │
+│  L2 CPU Cache:         ~4 ns    (12 cycles)      ~256 KB          │
+│  L3 CPU Cache:         ~12 ns   (40 cycles)      ~32 MB           │
+│  RAM (DRAM):           ~100 ns                    ~256 GB          │
+│  NVMe SSD:             ~100 μs  (100,000 ns)     ~4 TB            │
+│  HDD (seek):           ~10 ms   (10,000,000 ns)  ~16 TB           │
+│  Network (same DC):    ~500 μs                    unlimited        │
+│  Network (cross-DC):   ~50 ms                     unlimited        │
+│  Network (cross-ocean):~200 ms                    unlimited        │
+└────────────────────────────────────────────────────────────────────┘
+
+Speed ratios:
+  RAM is         1,000x faster than SSD
+  SSD is         100x faster than HDD
+  Local cache is 1,000x faster than cross-datacenter fetch
+  Redis call is  50x faster than PostgreSQL query (for same data)
+    </div>
+
+    <h3>12.2 Caching Layers in a System</h3>
+    <div class="diagram">
+┌──────────┐    ┌───────────┐    ┌──────────────┐    ┌───────────┐    ┌──────────────┐
+│  Browser │───→│    CDN     │───→│  API Gateway │───→│Application│───→│   Database   │
+│  Cache   │    │   Cache    │    │    Cache     │    │   Cache   │    │  Query Cache │
+└──────────┘    └───────────┘    └──────────────┘    └───────────┘    └──────────────┘
+     │                │                  │                  │                  │
+  HTTP cache      Edge cache        Response cache     Redis/Memcached    Buffer pool
+  Service Worker  (static +        (full responses    (app-level         (InnoDB buffer
+  localStorage    dynamic)          rate limit state)  objects, sessions)  pool, shared
+  IndexedDB                                                                buffers)
+
+Each layer has different:
+  - Capacity (browser: MBs, CDN: TBs, Redis: GBs, DB buffer: GBs)
+  - Latency (browser: 0ms, CDN edge: 5ms, Redis: 0.5ms, DB disk: 5-50ms)
+  - Freshness guarantees (varies by TTL and invalidation strategy)
+  - Scope (per-user vs shared vs global)
+    </div>
+
+    <h3>12.3 Caching Patterns – How Application Code Interacts with Cache</h3>
+
+    <h4>12.3.1 Cache-Aside (Lazy Loading)</h4>
+    <p>Application manages cache explicitly. Most common and flexible pattern.</p>
+    <pre>
+// Cache-Aside: Application controls both read and write paths
+
+async function getUser(userId) {
+    // 1. Check cache first
+    const cacheKey = `user:${userId}`;
+    const cached = await redis.get(cacheKey);
+
+    if (cached) {
+        metrics.increment('cache.hit');
+        return JSON.parse(cached);  // HIT: return immediately (~0.5ms)
+    }
+
+    // 2. Cache miss: query database
+    metrics.increment('cache.miss');
+    const user = await db.query('SELECT * FROM users WHERE id = $1', [userId]);  // ~5-50ms
+
+    if (user) {
+        // 3. Populate cache for future requests
+        await redis.set(cacheKey, JSON.stringify(user), 'EX', 3600);  // TTL: 1 hour
+    }
+
+    return user;
+}
+
+// Write path (two strategies):
+
+// Strategy A: Invalidate on write (simple, safe)
+async function updateUser(userId, data) {
+    await db.query('UPDATE users SET name=$1 WHERE id=$2', [data.name, userId]);
+    await redis.del(`user:${userId}`);  // Delete cache entry
+    // Next read will miss → fetch fresh from DB → repopulate cache
+}
+
+// Strategy B: Update on write (faster subsequent reads, risk of inconsistency)
+async function updateUser(userId, data) {
+    const updated = await db.query('UPDATE users SET name=$1 WHERE id=$2 RETURNING *', [data.name, userId]);
+    await redis.set(`user:${userId}`, JSON.stringify(updated), 'EX', 3600);
+    // Cache immediately has fresh data
+    // Risk: If DB write succeeds but cache write fails → stale cache
+}
+    </pre>
+    <p><strong>Pros:</strong> Simple. Cache only contains requested data (no waste). Resilient (if cache dies, app still works via DB).</p>
+    <p><strong>Cons:</strong> First request always slow (cache miss). Possible stale data between write and invalidation. Three calls on miss (check cache + query DB + write cache).</p>
+
+    <h4>12.3.2 Read-Through Cache</h4>
+    <pre>
+// Cache itself loads data on miss. Application only talks to cache.
+// Cache acts as the data access layer.
+
+// Conceptual: cache.get() internally handles DB fetch on miss
+const user = await cache.get('user:123', {
+    loader: async (key) => {
+        // This function is called automatically on cache miss
+        return await db.query('SELECT * FROM users WHERE id = $1', [key.split(':')[1]]);
+    },
+    ttl: 3600
+});
+
+// Implementation inside the cache library:
+class ReadThroughCache {
+    async get(key, options) {
+        let value = await this.store.get(key);
+        if (value !== null) return value;
+
+        // Miss: invoke loader
+        value = await options.loader(key);
+        if (value !== null) {
+            await this.store.set(key, value, options.ttl);
+        }
+        return value;
+    }
+}
+    </pre>
+    <p><strong>Pros:</strong> Simpler application code (no cache logic). Cache manages its own population.</p>
+    <p><strong>Cons:</strong> Cache library must understand data source. Less flexible for complex queries.</p>
+
+    <h4>12.3.3 Write-Through Cache</h4>
+    <pre>
+// Every write goes to BOTH cache and database synchronously.
+// Reads always hit cache (which is always fresh).
+
+async function writeThrough(key, value) {
+    // Write to DB
+    await db.query('INSERT INTO data (key, value) VALUES ($1, $2) ON CONFLICT UPDATE', [key, value]);
+    // Write to cache (same transaction conceptually)
+    await redis.set(key, JSON.stringify(value), 'EX', 3600);
+    // Both succeed → data is consistent
+}
+
+// Read is always a cache hit (if warmed):
+async function read(key) {
+    return JSON.parse(await redis.get(key));  // Always fresh!
+}
+    </pre>
+    <p><strong>Pros:</strong> Cache always consistent with DB. Reads are always fast.</p>
+    <p><strong>Cons:</strong> Write latency increases (two synchronous writes). Cache stores ALL written data (including rarely read data = waste).</p>
+
+    <h4>12.3.4 Write-Behind (Write-Back) Cache</h4>
+    <pre>
+// Writes go to cache ONLY. Cache asynchronously flushes to DB in batches.
+// Extremely fast writes but risk of data loss.
+
+class WriteBehindCache {
+    constructor() {
+        this.dirtyKeys = new Set();
+        this.flushInterval = setInterval(() => this.flush(), 5000); // Flush every 5s
+    }
+
+    async write(key, value) {
+        await redis.set(key, JSON.stringify(value));  // Only cache write (fast!)
+        this.dirtyKeys.add(key);
+        return; // Return immediately — DB write happens later
+    }
+
+    async flush() {
+        if (this.dirtyKeys.size === 0) return;
+
+        const batch = [...this.dirtyKeys];
+        this.dirtyKeys.clear();
+
+        // Batch write to DB (much more efficient than individual writes)
+        const pipeline = batch.map(async (key) => {
+            const value = JSON.parse(await redis.get(key));
+            return db.query('UPSERT INTO data (key, value) VALUES ($1, $2)', [key, value]);
+        });
+
+        await Promise.all(pipeline);
+        console.log(`Flushed ${batch.length} entries to database`);
+    }
+}
+
+// Use cases:
+// - Write-heavy workloads (IoT sensor data, analytics events)
+// - Leaderboard updates (thousands of score changes per second)
+// - Shopping cart (frequent updates, eventual persistence is fine)
+//
+// Risks:
+// - Cache crash before flush = DATA LOSS
+// - Mitigation: Redis persistence (AOF fsync every second), replication
+    </pre>
+
+    <h4>12.3.5 Refresh-Ahead Cache</h4>
+    <pre>
+// Proactively refresh cache entries BEFORE they expire.
+// User never experiences a cache miss (if access pattern is predictable).
+
+class RefreshAheadCache {
+    async get(key, options) {
+        const entry = await this.store.getWithMetadata(key);
+
+        if (!entry) {
+            // Cold miss: load synchronously
+            return this.loadAndCache(key, options);
+        }
+
+        const age = Date.now() - entry.cachedAt;
+        const refreshThreshold = options.ttl * 0.8; // Refresh at 80% of TTL
+
+        if (age > refreshThreshold) {
+            // Entry is about to expire: refresh in BACKGROUND
+            // Return current (slightly stale) value immediately
+            this.refreshInBackground(key, options); // Don't await!
+        }
+
+        return entry.value; // Always instant response
+    }
+
+    async refreshInBackground(key, options) {
+        try {
+            const freshValue = await options.loader(key);
+            await this.store.set(key, freshValue, options.ttl);
+        } catch (error) {
+            // Refresh failed — keep serving stale (better than nothing)
+            console.warn(`Background refresh failed for ${key}:`, error);
+        }
+    }
+}
+
+// Similar to stale-while-revalidate in HTTP but at application layer
+    </pre>
+
+    <h3>12.4 Cache Eviction Policies – Internal Algorithms</h3>
+
+    <table>
+        <tr><th>Policy</th><th>How It Works Internally</th><th>Best For</th></tr>
+        <tr>
+            <td><strong>LRU (Least Recently Used)</strong></td>
+            <td>Doubly-linked list + hash map. On access: move to head. On eviction: remove tail. O(1) for both.</td>
+            <td>General purpose. Most caches default to this.</td>
+        </tr>
+        <tr>
+            <td><strong>LFU (Least Frequently Used)</strong></td>
+            <td>Maintain access count per key. Evict lowest count. Use min-heap or count-indexed buckets.</td>
+            <td>Workloads with stable hot set. Prevents scan pollution.</td>
+        </tr>
+        <tr>
+            <td><strong>W-TinyLFU (Caffeine/Redis)</strong></td>
+            <td>Admission filter (frequency sketch) + segmented LRU. New items must prove popularity before entering main cache.</td>
+            <td>Near-optimal hit ratio. Used by Caffeine (Java), Redis 7+.</td>
+        </tr>
+        <tr>
+            <td><strong>FIFO</strong></td>
+            <td>Simple queue. First in, first evicted. No metadata per entry.</td>
+            <td>Streaming data where recency doesn't predict future access.</td>
+        </tr>
+        <tr>
+            <td><strong>Random</strong></td>
+            <td>Evict a random entry. Zero overhead.</td>
+            <td>When access pattern is truly random (no locality).</td>
+        </tr>
+        <tr>
+            <td><strong>TTL-based</strong></td>
+            <td>Each entry has expiration timestamp. Expired entries removed on access or by background sweeper.</td>
+            <td>Time-sensitive data. Usually combined with LRU for memory pressure.</td>
+        </tr>
+    </table>
+
+    <pre>
+// LRU Implementation (O(1) get and put):
+class LRUCache {
+    constructor(capacity) {
+        this.capacity = capacity;
+        this.map = new Map();         // key → node (Map preserves insertion order)
+        // Doubly-linked list: head = most recent, tail = least recent
+        this.head = { prev: null, next: null }; // sentinel
+        this.tail = { prev: null, next: null }; // sentinel
+        this.head.next = this.tail;
+        this.tail.prev = this.head;
+    }
+
+    get(key) {
+        const node = this.map.get(key);
+        if (!node) return null;
+        // Move to head (most recently used)
+        this._remove(node);
+        this._addToHead(node);
+        return node.value;
+    }
+
+    put(key, value) {
+        if (this.map.has(key)) {
+            const node = this.map.get(key);
+            node.value = value;
+            this._remove(node);
+            this._addToHead(node);
+        } else {
+            if (this.map.size >= this.capacity) {
+                // Evict LRU (tail)
+                const lru = this.tail.prev;
+                this._remove(lru);
+                this.map.delete(lru.key);
+            }
+            const node = { key, value, prev: null, next: null };
+            this._addToHead(node);
+            this.map.set(key, node);
+        }
+    }
+
+    _remove(node) { node.prev.next = node.next; node.next.prev = node.prev; }
+    _addToHead(node) {
+        node.next = this.head.next; node.prev = this.head;
+        this.head.next.prev = node; this.head.next = node;
+    }
+}
+
+// Redis Approximated LRU (memory efficient):
+// Instead of maintaining a linked list of ALL keys:
+// Each key stores only 24-bit last-access timestamp (LRU clock)
+// On eviction: sample N random keys (default 5), evict the one with oldest timestamp
+// With sample size 10: within 3% of true LRU accuracy
+// Memory saved: No linked list pointers (16 bytes/key saved)
+    </pre>
+
+    <h3>12.5 Cache Warming</h3>
+    <p>Cache warming is the process of pre-loading the cache with data BEFORE real traffic arrives, eliminating the "cold start" problem where initial users experience slow cache misses.</p>
+
+    <h4>12.5.1 Why Cold Cache is Dangerous</h4>
+    <div class="diagram">
+Cold Cache Thundering Herd Problem:
+
+T=0: Server restarts. Cache is empty.
+T=1: 10,000 concurrent users hit /popular-page
+     ALL 10,000 requests → cache miss → ALL hit database simultaneously
+     Database: 10,000 simultaneous queries on same data!
+     Result: Database overwhelmed → timeouts → cascading failure
+
+With Cache Warming:
+T=-5min: Warming script pre-loads top 1000 URLs into cache
+T=0: Server goes live. Cache is HOT.
+T=1: 10,000 users hit /popular-page → CACHE HIT → 0.5ms response
+     Database: 0 queries. Peace and quiet.
+    </div>
+
+    <h4>12.5.2 Cache Warming Strategies</h4>
+    <pre>
+// Strategy 1: Pre-computation from access logs
+// Analyze yesterday's access logs to identify hot keys, pre-load them
+
+async function warmFromAccessLogs() {
+    // Get top 10,000 most accessed keys from yesterday
+    const topKeys = await analytics.query(`
+        SELECT cache_key, count(*) as hits
+        FROM access_log
+        WHERE timestamp > NOW() - INTERVAL '24 hours'
+        GROUP BY cache_key
+        ORDER BY hits DESC
+        LIMIT 10000
+    `);
+
+    // Pre-load into cache (rate-limited to not overload DB)
+    const rateLimiter = new RateLimiter(100); // 100 queries/sec to DB
+    for (const { cache_key } of topKeys) {
+        await rateLimiter.acquire();
+        const data = await fetchFromSource(cache_key);
+        await redis.set(cache_key, JSON.stringify(data), 'EX', 3600);
+    }
+    console.log(`Warmed ${topKeys.length} cache entries`);
+}
+
+// Strategy 2: Replicate from peer (cache replication)
+// When a new cache node joins the cluster, copy hot data from existing nodes
+
+async function warmFromPeer(newNode, existingNode) {
+    // Get hot keys from existing node (Redis SCAN with idle time filter)
+    const hotKeys = await existingNode.scanWithFilter({
+        match: '*',
+        count: 1000,
+        filter: (key, metadata) => metadata.accessCount > 100  // only popular keys
+    });
+
+    // Bulk copy to new node
+    const pipeline = newNode.pipeline();
+    for (const key of hotKeys) {
+        const value = await existingNode.get(key);
+        const ttl = await existingNode.ttl(key);
+        pipeline.set(key, value, 'EX', ttl);
+    }
+    await pipeline.exec();
+}
+
+// Strategy 3: Scheduled warming for predictable patterns
+// E.g., warm product catalog cache every day at 5 AM before traffic ramp
+
+// Strategy 4: Request replay
+// Capture production requests, replay them against new cache nodes
+// Tools: GoReplay (gor), tcpreplay
+
+// Strategy 5: Lazy warming with request coalescing (prevents thundering herd)
+async function getWithCoalescing(key, loader) {
+    const cached = await redis.get(key);
+    if (cached) return JSON.parse(cached);
+
+    // Only ONE request actually fetches from DB
+    // All other concurrent requests for same key WAIT for that one
+    return singleflight.do(key, async () => {
+        const data = await loader(key);
+        await redis.set(key, JSON.stringify(data), 'EX', 3600);
+        return data;
+    });
+}
+
+// Singleflight implementation:
+class Singleflight {
+    constructor() { this.inflight = new Map(); }
+
+    async do(key, fn) {
+        if (this.inflight.has(key)) {
+            return this.inflight.get(key);  // Wait for existing request
+        }
+        const promise = fn();
+        this.inflight.set(key, promise);
+        try {
+            return await promise;
+        } finally {
+            this.inflight.delete(key);
+        }
+    }
+}
+    </pre>
+
+    <h3>12.6 Cache Invalidation</h3>
+    <div class="important">
+        <strong>"There are only two hard things in Computer Science: cache invalidation and naming things."</strong> — Phil Karlton<br><br>
+        Cache invalidation is hard because you must answer: "When cached data becomes stale, how do I ensure no one reads the stale version?" in a distributed system where multiple processes read/write concurrently.
+    </div>
+
+    <h4>12.6.1 TTL-Based Expiration (Time-Bounded Staleness)</h4>
+    <pre>
+// Simplest approach: Every cached entry has a Time-To-Live
+redis.set('user:123', data, 'EX', 300);  // Expires in 5 minutes
+
+// After TTL: entry is automatically deleted (or lazily on next access)
+// Staleness window: Up to TTL duration (0 to 300 seconds of stale data)
+
+// Choosing TTL:
+// - High TTL (1 hour): Fewer cache misses, more stale data
+// - Low TTL (10 seconds): Fresher data, more origin load
+// - TTL = 0: No caching (defeats purpose)
+
+// Anti-pattern: Same TTL for everything
+// Better: Different TTLs based on data characteristics:
+//   User profile: TTL 3600s (changes rarely)
+//   Product price: TTL 60s (changes periodically)
+//   Stock price: TTL 1s (changes constantly)
+//   Session data: TTL 86400s (expires daily)
+
+// TTL jitter: Prevent mass expiration at same time (thundering herd)
+const baseTTL = 3600;
+const jitter = Math.floor(Math.random() * 600); // ±10 minutes
+redis.set(key, value, 'EX', baseTTL + jitter);
+    </pre>
+
+    <h4>12.6.2 Event-Driven Invalidation (Immediate Consistency)</h4>
+    <pre>
+// When data changes, emit event → subscribers invalidate their caches
+
+// Using database CDC (Change Data Capture):
+// PostgreSQL → Debezium → Kafka → Cache Invalidation Service
+
+// Kafka consumer that invalidates cache on DB changes:
+consumer.subscribe('dbserver.public.users');
+
+consumer.on('message', async (event) => {
+    const { op, after, before } = event.value;
+    const userId = (after || before).id;
+    const cacheKey = `user:${userId}`;
+
+    switch (op) {
+        case 'c': // Create
+        case 'u': // Update
+            // Option A: Invalidate (next read will repopulate)
+            await redis.del(cacheKey);
+
+            // Option B: Update cache with new value (faster subsequent reads)
+            await redis.set(cacheKey, JSON.stringify(after), 'EX', 3600);
+            break;
+
+        case 'd': // Delete
+            await redis.del(cacheKey);
+            break;
+    }
+});
+
+// Advantages:
+// - Near real-time invalidation (100-500ms latency)
+// - No polling (event-driven = efficient)
+// - Decoupled (writers don't need to know about caches)
+//
+// Challenges:
+// - Event ordering (out-of-order events can restore stale data)
+// - At-least-once delivery (duplicate events = must be idempotent)
+// - Infrastructure complexity (Kafka + Debezium + consumers)
+    </pre>
+
+    <h4>12.6.3 Version-Based Invalidation</h4>
+    <pre>
+// Store a version number with the cached data
+// On write: increment version in source of truth
+// On read: compare cached version with current version
+
+async function getProduct(productId) {
+    const cacheKey = `product:${productId}`;
+    const cached = await redis.hgetall(cacheKey);
+
+    // Get current version from lightweight source (Redis counter or DB column)
+    const currentVersion = await redis.get(`product_version:${productId}`);
+
+    if (cached && cached.version === currentVersion) {
+        return JSON.parse(cached.data);  // Version matches: fresh!
+    }
+
+    // Stale or missing: reload
+    const product = await db.query('SELECT * FROM products WHERE id = $1', [productId]);
+    await redis.hset(cacheKey, {
+        data: JSON.stringify(product),
+        version: currentVersion
+    });
+    return product;
+}
+
+async function updateProduct(productId, changes) {
+    await db.query('UPDATE products SET ... WHERE id = $1', [productId]);
+    // Increment version (atomic)
+    await redis.incr(`product_version:${productId}`);
+    // All cached copies with old version are now effectively stale
+    // They'll be refreshed on next read (lazy invalidation)
+}
+    </pre>
+
+    <h4>12.6.4 Cache Invalidation Patterns Comparison</h4>
+    <table>
+        <tr><th>Pattern</th><th>Staleness</th><th>Complexity</th><th>Best For</th></tr>
+        <tr><td>TTL expiration</td><td>Up to TTL duration</td><td>Very Low</td><td>Content where brief staleness is acceptable</td></tr>
+        <tr><td>Explicit delete on write</td><td>~0 (write path deletes)</td><td>Low</td><td>Single-service, same-process caches</td></tr>
+        <tr><td>Event-driven (CDC/pub-sub)</td><td>100-500ms</td><td>High</td><td>Microservices, cross-service caches</td></tr>
+        <tr><td>Version comparison</td><td>0 (verified on read)</td><td>Medium</td><td>Read-heavy with infrequent writes</td></tr>
+        <tr><td>Write-through</td><td>0 (cache always fresh)</td><td>Medium</td><td>When reads vastly outnumber writes</td></tr>
+        <tr><td>Lease-based (Facebook TAO)</td><td>~0</td><td>Very High</td><td>Massive scale, thundering herd prevention</td></tr>
+    </table>
+
+    <h4>12.6.5 The Stale Read Problem (Race Condition)</h4>
+    <pre>
+// Classic race condition with cache-aside + invalidation:
+
+// Timeline (two concurrent requests):
+// T=0: Cache has user:123 = {name: "Alice"}
+// T=1: Thread A: UPDATE users SET name='Bob' WHERE id=123  (DB committed)
+// T=2: Thread B: Cache MISS on user:123 (cache was just invalidated)
+// T=3: Thread A: redis.del('user:123')  (invalidation)
+// T=4: Thread B: SELECT * FROM users WHERE id=123  → gets {name: "Bob"}
+// T=5: Thread B: redis.set('user:123', {name: "Bob"})
+// Result: Correct! But what if Thread B read BEFORE Thread A committed?
+
+// DANGEROUS ordering:
+// T=1: Thread A starts UPDATE (not yet committed, DB returns old data to others)
+// T=2: Thread B: cache miss → SELECT → gets {name: "Alice"} (old!)
+// T=3: Thread A: commits UPDATE. Deletes cache.
+// T=4: Thread B: redis.set('user:123', {name: "Alice"})  ← STALE DATA CACHED!
+// Cache now has Alice even though DB has Bob. Stuck stale until TTL expires.
+
+// Solutions:
+// 1. Double-delete: Delete cache, write DB, wait 500ms, delete cache again
+// 2. Write-through: Always write to cache from write path (not read path)
+// 3. Lease tokens (Facebook's approach):
+//    On miss: cache gives a "lease" (token). Set operation must include valid lease.
+//    On invalidation: cache revokes all outstanding leases.
+//    Thread B's set rejected because its lease was revoked.
+    </pre>
+
+    <h3>12.7 Distributed Cache Topologies</h3>
+    <div class="diagram">
+Topology 1: Embedded/Local Cache (per-process)
+┌───────────────┐  ┌───────────────┐  ┌───────────────┐
+│ App Server 1  │  │ App Server 2  │  │ App Server 3  │
+│ ┌───────────┐ │  │ ┌───────────┐ │  │ ┌───────────┐ │
+│ │Local Cache│ │  │ │Local Cache│ │  │ │Local Cache│ │
+│ │(HashMap)  │ │  │ │(HashMap)  │ │  │ │(HashMap)  │ │
+│ └───────────┘ │  │ └───────────┘ │  │ └───────────┘ │
+└───────────────┘  └───────────────┘  └───────────────┘
+Pro: Zero network latency. Con: Inconsistency across servers, limited size.
+
+Topology 2: External Shared Cache (Redis/Memcached)
+┌───────────────┐  ┌───────────────┐  ┌───────────────┐
+│ App Server 1  │  │ App Server 2  │  │ App Server 3  │
+└───────┬───────┘  └───────┬───────┘  └───────┬───────┘
+        │                  │                  │
+        └─────────────┬────┴──────────────────┘
+                      ▼
+             ┌────────────────┐
+             │ Redis Cluster  │
+             │ (shared state) │
+             └────────────────┘
+Pro: Consistent view. Con: Network hop (~0.5ms per call).
+
+Topology 3: Two-Tier (Local + Distributed)
+┌──────────────────────┐
+│ App Server 1         │
+│ ┌──────────────────┐ │     Cache miss in L1
+│ │ L1: Local (100MB)│─┼──→ ┌────────────────┐
+│ └──────────────────┘ │    │ L2: Redis (64GB)│
+└──────────────────────┘    └────────────────┘
+L1 hit: 0ms. L1 miss + L2 hit: 0.5ms. Both miss: DB query.
+Invalidation: Must invalidate BOTH layers! Pub/sub for L1 invalidation across instances.
+    </div>
+
+    <h3>12.8 Cache Stampede / Thundering Herd Prevention</h3>
+    <pre>
+// Problem: Popular key expires → 1000 concurrent requests all miss →
+//          1000 simultaneous DB queries for same data → DB overloaded
+
+// Solution 1: Singleflight / Request Coalescing (shown above)
+// Only one request fetches; others wait for its result.
+
+// Solution 2: Probabilistic Early Expiration (Redis approach)
+function shouldRefresh(cachedAt, ttl, beta = 1.0) {
+    const age = Date.now() - cachedAt;
+    const remaining = ttl - age;
+    const random = -beta * Math.log(Math.random()); // Exponential distribution
+    return random * 1000 > remaining;
+    // As TTL approaches: probability of refresh increases
+    // Only ONE of N concurrent readers is likely to trigger refresh
+    // Others continue serving stale (acceptable for brief window)
+}
+
+// Solution 3: Lock-based (distributed lock for cache fill)
+async function getWithLock(key, loader, ttl) {
+    const cached = await redis.get(key);
+    if (cached) return JSON.parse(cached);
+
+    const lockKey = `lock:${key}`;
+    const acquired = await redis.set(lockKey, '1', 'NX', 'EX', 10); // 10s lock
+
+    if (acquired) {
+        // I won the lock: fetch data and populate cache
+        try {
+            const data = await loader();
+            await redis.set(key, JSON.stringify(data), 'EX', ttl);
+            return data;
+        } finally {
+            await redis.del(lockKey);
+        }
+    } else {
+        // Someone else is fetching: wait and retry
+        await sleep(100);
+        return getWithLock(key, loader, ttl); // Retry (will likely hit cache now)
+    }
+}
+
+// Solution 4: Pre-compute/refresh before expiry (Refresh-Ahead pattern)
+// Never let hot keys expire. Background thread refreshes at 80% of TTL.
+    </pre>
+
+</div>
+
+<!-- ==================== 13. TCP vs UDP ==================== -->
+<h2 id="tcp-udp">13. TCP vs UDP</h2>
+<div class="section">
+
+    <h3>13.1 Fundamental Difference</h3>
+    <p><strong>TCP (Transmission Control Protocol):</strong> Reliable, ordered, connection-oriented byte stream. Guarantees every byte arrives exactly once, in order.</p>
+    <p><strong>UDP (User Datagram Protocol):</strong> Unreliable, unordered, connectionless datagrams. Fire-and-forget. No guarantees whatsoever.</p>
+
+    <div class="diagram">
+TCP: "Registered mail with tracking"
+- Establishes connection first (handshake)
+- Every byte is acknowledged
+- Lost data is retransmitted
+- Data arrives in order
+- Flow control (don't overwhelm receiver)
+- Congestion control (don't overwhelm network)
+
+UDP: "Shouting across a crowded room"
+- No connection setup
+- No acknowledgments
+- Lost data stays lost
+- Data may arrive out of order (or not at all)
+- No flow control
+- No congestion control
+- But FAST (minimal overhead)
+    </div>
+
+    <h3>13.2 TCP Internals – How Reliability is Achieved</h3>
+
+    <h4>13.2.1 Three-Way Handshake (Connection Establishment)</h4>
+    <div class="diagram">
+Client                            Server
+  │                                 │
+  │─── SYN (seq=x) ──────────────→│  "I want to connect. My starting sequence is x."
+  │                                 │  Server allocates resources (SYN queue)
+  │                                 │
+  │←── SYN-ACK (seq=y, ack=x+1) ──│  "OK. My starting sequence is y. I acknowledge your x."
+  │                                 │
+  │─── ACK (seq=x+1, ack=y+1) ───→│  "I acknowledge your y. Connection established."
+  │                                 │  Server moves from SYN queue → ESTABLISHED
+  │                                 │
+  │    ═══ DATA TRANSFER ═══       │
+  │                                 │
+
+Why 3 packets? To synchronize BOTH sides' sequence numbers.
+- Client proves it can receive (by ACKing server's SYN)
+- Server proves it can receive (by ACKing client's SYN)
+- Prevents old duplicate SYN packets from creating ghost connections
+
+Cost: 1 full RTT before ANY data can be sent.
+On 100ms link: 100ms "wasted" on handshake.
+This is why HTTP/1.1 keep-alive and connection pooling exist.
+    </div>
+
+    <h4>13.2.2 Sequence Numbers and Acknowledgments</h4>
+    <pre>
+// Every byte in a TCP stream has a sequence number.
+// Receiver ACKs the NEXT byte it expects.
+
+// Example: Sending "Hello World" (11 bytes), starting seq=1000
+//
+// Sender → Receiver:
+//   Segment 1: seq=1000, data="Hello" (5 bytes)
+//   Segment 2: seq=1005, data=" Worl" (5 bytes)
+//   Segment 3: seq=1010, data="d"     (1 byte)
+//
+// Receiver → Sender:
+//   ACK=1005  (I got bytes up to 1004, send me 1005 next)
+//   ACK=1010  (I got bytes up to 1009, send me 1010 next)
+//   ACK=1011  (I got everything!)
+//
+// If segment 2 is lost:
+//   Receiver gets segment 1 (ACKs 1005) and segment 3
+//   Receiver sends: ACK=1005, ACK=1005, ACK=1005 (duplicate ACKs!)
+//   Sender sees 3 duplicate ACKs → Fast Retransmit (don't wait for timeout)
+//   Sender retransmits segment 2 (seq=1005, data=" Worl")
+//   Receiver now has all three → ACK=1011
+
+// Selective ACK (SACK): Receiver tells sender exactly which ranges it HAS
+//   SACK: ACK=1005, SACK_BLOCK=[1010-1011]
+//   Means: "I'm missing 1005-1009 but I DO have 1010-1011"
+//   Sender only retransmits the gap (much more efficient than retransmitting everything)
+    </pre>
+
+    <h4>13.2.3 Flow Control (Receiver Window)</h4>
+    <pre>
+// Problem: Fast sender can overwhelm slow receiver's buffer.
+// Solution: Receiver advertises its available buffer space (receive window).
+
+// Receiver → Sender: "My window is 64KB"
+// Sender: Can have at most 64KB of unacknowledged data in flight
+// As receiver processes data: window opens (ACK + larger window)
+// If receiver is slow: window shrinks (eventually to 0 = sender stops)
+
+// Window size field: 16 bits = max 65,535 bytes (too small for modern networks!)
+// Window Scaling option (negotiated in SYN): Allows window up to 1 GB
+//   Scale factor = 2^N where N = 0-14
+//   Window = 65535 × 2^7 = 8,388,480 bytes (8MB) — needed for high BDP links
+
+// Zero Window Probe:
+// If receiver advertises window=0, sender periodically sends 1-byte probes
+// to check if window has reopened (prevents deadlock)
+    </pre>
+
+    <h4>13.2.4 Congestion Control – TCP's Most Complex Mechanism</h4>
+    <div class="diagram">
+TCP Congestion Window (cwnd) evolution:
+
+cwnd │
+(KB) │
+     │                 ╱╲  Congestion detected
+128  │               ╱    ╲  (packet loss)
+     │             ╱        ╲
+ 64  │           ╱            ╲─────────────╱──────── Linear increase again
+     │         ╱                            ╱
+ 32  │       ╱   ← Exponential            ╱
+     │     ╱      (Slow Start)           ╱
+ 16  │   ╱                             ╱
+     │  ╱                            ╱
+  8  │╱                            ╱
+  4  │  ← Initial cwnd           ╱
+  2  │     (usually 10 MSS      ╱
+  1  │      = ~14KB in Linux)  ╱
+     └──────────────────────────────────────── time
+
+Algorithms (internal state machine):
+┌────────────────────────────────────────────────────────────────┐
+│ 1. Slow Start (despite name, grows FAST — exponentially):      │
+│    - Initial cwnd = 10 MSS (~14KB on Linux)                    │
+│    - For each ACK received: cwnd += 1 MSS                      │
+│    - Effect: cwnd doubles every RTT (exponential growth)        │
+│    - Continues until: cwnd >= ssthresh OR packet loss           │
+│                                                                 │
+│ 2. Congestion Avoidance (linear growth):                       │
+│    - When cwnd >= ssthresh: switch to linear                   │
+│    - For each RTT: cwnd += 1 MSS (additive increase)           │
+│    - Gently probes for available bandwidth                     │
+│                                                                 │
+│ 3. On packet loss detection:                                   │
+│    Fast Retransmit (3 dup ACKs):                               │
+│      ssthresh = cwnd / 2                                       │
+│      cwnd = ssthresh + 3 (fast recovery)                       │
+│    Timeout (RTO expiry):                                       │
+│      ssthresh = cwnd / 2                                       │
+│      cwnd = 1 MSS (back to slow start — catastrophic reset)    │
+└────────────────────────────────────────────────────────────────┘
+
+Modern algorithm: BBR (Bottleneck Bandwidth and RTT) by Google
+- Does NOT use loss as congestion signal
+- Measures actual bottleneck bandwidth (max throughput) + min RTT
+- Maintains sending rate = bandwidth × min_RTT
+- Much better on lossy networks (WiFi, cellular)
+- Used by YouTube, Google Cloud, ~40% of internet traffic
+    </div>
+
+    <h4>13.2.5 Connection Termination (Four-Way Close)</h4>
+    <pre>
+// TCP uses 4-way handshake to close (each side closes independently):
+//
+// Client → Server: FIN (I'm done sending)
+// Server → Client: ACK (Got it. I might still have data to send.)
+// Server → Client: FIN (I'm done sending too)
+// Client → Server: ACK (Got it. Connection closed.)
+//
+// TIME_WAIT state: Client enters TIME_WAIT for 2×MSL (Maximum Segment Lifetime)
+//   typically 60-120 seconds. WHY?
+//   1. Ensure final ACK reaches server (if lost, server retransmits FIN)
+//   2. Prevent old packets from being misinterpreted as new connection data
+//
+// Problem at scale: High-traffic servers accumulate thousands of TIME_WAIT sockets
+//   Each consumes: file descriptor + memory (~3.3KB in Linux)
+//   Solution: SO_REUSEADDR, SO_REUSEPORT, tcp_tw_reuse sysctl
+//   Better solution: Connection pooling (don't close connections frequently!)
+    </pre>
+
+    <h3>13.3 UDP Internals – Simplicity by Design</h3>
+
+    <h4>13.3.1 UDP Header (8 bytes total — that's it!)</h4>
+    <div class="diagram">
+UDP Datagram:
+┌───────────────────────────────────────────────┐
+│  Source Port (16 bits) │ Dest Port (16 bits)  │  4 bytes
+├────────────────────────┼──────────────────────┤
+│  Length (16 bits)      │ Checksum (16 bits)   │  4 bytes
+├────────────────────────┴──────────────────────┤
+│                                               │
+│              Payload (data)                    │  0 to 65,507 bytes
+│                                               │
+└───────────────────────────────────────────────┘
+
+Compare with TCP header: 20-60 bytes of header overhead!
+UDP: 8 bytes. That's it. No sequence numbers, no ACKs, no window,
+     no flags, no options. Pure simplicity.
+
+What UDP does NOT do:
+✗ Connection establishment (no handshake)
+✗ Ordering guarantee
+✗ Delivery guarantee
+✗ Duplicate detection
+✗ Flow control
+✗ Congestion control
+✗ Retransmission
+
+What UDP DOES do:
+✓ Multiplexing (port numbers)
+✓ Checksumming (optional in IPv4, mandatory in IPv6)
+✓ Framing (preserves message boundaries, unlike TCP's byte stream)
+    </div>
+
+    <h4>13.3.2 UDP Message Boundary Preservation</h4>
+    <pre>
+// Critical difference from TCP:
+
+// TCP is a BYTE STREAM (no message boundaries):
+// Sender writes: write(socket, "Hello"); write(socket, "World");
+// Receiver might read: read() → "HelloWorld"  (merged!)
+//   or: read() → "Hel" then read() → "loWorld"  (split!)
+// TCP provides NO guarantee about how data is chunked on the read side.
+// Application must implement its own framing (length prefix, delimiter, etc.)
+
+// UDP is a DATAGRAM protocol (message boundaries preserved):
+// Sender sends: sendto(socket, "Hello"); sendto(socket, "World");
+// Receiver reads: recvfrom() → "Hello"  (exactly one message!)
+//                 recvfrom() → "World"  (exactly one message!)
+// Each sendto() = one atomic datagram. Never merged or split.
+// (But might arrive out of order, duplicated, or not at all!)
+
+// This is why DNS uses UDP:
+// One question = one datagram. One answer = one datagram.
+// Clean, simple, no connection overhead for single request-response.
+    </pre>
+
+    <h3>13.4 TCP vs UDP – Deep Comparison</h3>
+    <table>
+        <tr><th>Characteristic</th><th>TCP</th><th>UDP</th></tr>
+        <tr><td><strong>Connection</strong></td><td>Connection-oriented (3-way handshake)</td><td>Connectionless (send immediately)</td></tr>
+        <tr><td><strong>Reliability</strong></td><td>Guaranteed delivery via ACK + retransmission</td><td>Best-effort. Packets may be lost.</td></tr>
+        <tr><td><strong>Ordering</strong></td><td>Guaranteed in-order (sequence numbers)</td><td>No ordering. Datagrams may arrive in any order.</td></tr>
+        <tr><td><strong>Duplicates</strong></td><td>Handled (sequence numbers detect duplicates)</td><td>Possible. Application must handle.</td></tr>
+        <tr><td><strong>Flow Control</strong></td><td>Yes (receiver window)</td><td>None. Sender can overwhelm receiver.</td></tr>
+        <tr><td><strong>Congestion Control</strong></td><td>Yes (AIMD, BBR, CUBIC)</td><td>None. Can congest network.</td></tr>
+        <tr><td><strong>Header Size</strong></td><td>20-60 bytes</td><td>8 bytes</td></tr>
+        <tr><td><strong>Data Model</strong></td><td>Byte stream (no boundaries)</td><td>Datagrams (boundaries preserved)</td></tr>
+        <tr><td><strong>Latency</strong></td><td>1 RTT handshake + possible retransmission delays</td><td>Zero setup. Minimum possible latency.</td></tr>
+        <tr><td><strong>Use Cases</strong></td><td>Web (HTTP), email, file transfer, databases</td><td>DNS, gaming, video streaming, VoIP, IoT</td></tr>
+        <tr><td><strong>Connection State</strong></td><td>~280 bytes kernel memory per connection</td><td>No state. Kernel stores nothing.</td></tr>
+        <tr><td><strong>Max Throughput</strong></td><td>Limited by congestion window + RTT</td><td>Limited only by NIC bandwidth</td></tr>
+        <tr><td><strong>NAT Traversal</strong></td><td>Difficult (connection state in NAT)</td><td>Easier (UDP hole punching for P2P)</td></tr>
+        <tr><td><strong>Broadcast/Multicast</strong></td><td>Not supported</td><td>Supported (one sender → many receivers)</td></tr>
+    </table>
+
+    <h3>13.5 When to Use TCP vs UDP – Decision Framework</h3>
+    <pre>
+// Use TCP when:
+// ✓ Data integrity is critical (every byte must arrive correctly)
+// ✓ Order matters (database transactions, file transfers)
+// ✓ Long-lived connections (HTTP keep-alive, database connections)
+// ✓ Large data transfers (TCP congestion control prevents network collapse)
+// ✓ Request-response patterns (HTTP, gRPC, database protocols)
+//
+// Examples: HTTP/HTTPS, SMTP, FTP, SSH, MySQL/PostgreSQL, Redis
+
+// Use UDP when:
+// ✓ Speed > reliability (real-time data where old data is useless)
+// ✓ Small messages (fits in single datagram, no connection overhead)
+// ✓ Multicast/broadcast needed
+// ✓ Application implements its own reliability (selectively, only where needed)
+// ✓ Loss is tolerable (skip frame, play next one)
+// ✓ Latency is critical (can't wait for retransmission)
+//
+// Examples: DNS, DHCP, NTP, online gaming, live video, VoIP, IoT telemetry
+    </pre>
+
+    <h3>13.6 Real-World Protocol Choices Explained</h3>
+
+    <h4>13.6.1 Online Gaming (UDP + Custom Reliability)</h4>
+    <pre>
+// Problem: In a fast-paced game (60 updates/sec):
+// - Player position update lost? DON'T retransmit! It's already stale.
+//   Just send the NEXT position update (which is newer anyway).
+// - Player fired a bullet? MUST be reliable (affects game state).
+//
+// Solution: UDP with selective reliability built on top
+
+class GameProtocol {
+    // Channel 0: Unreliable, unordered (positions, rotations)
+    // No ACK needed. Lost packet = skip, use next update.
+    sendUnreliable(data) {
+        const packet = Buffer.concat([
+            Buffer.from([0x00]),         // channel 0
+            uint16(this.sequenceNum++),  // for dedup/ordering detection
+            data
+        ]);
+        this.socket.send(packet);
+        // Fire and forget. If lost, ¯\_(ツ)_/¯
+    }
+
+    // Channel 1: Reliable, ordered (critical game events)
+    // ACK required. Retransmit if not acknowledged.
+    sendReliable(data) {
+        const seq = this.reliableSeqNum++;
+        const packet = Buffer.concat([
+            Buffer.from([0x01]),  // channel 1 (reliable)
+            uint16(seq),
+            data
+        ]);
+        this.socket.send(packet);
+        this.pendingAcks.set(seq, { packet, sentAt: Date.now(), retries: 0 });
+        // Retransmit after 100ms if no ACK (game-specific, much shorter than TCP's RTO)
+    }
+
+    // Tick: Check for needed retransmissions (every 16ms = 60fps)
+    tick() {
+        const now = Date.now();
+        for (const [seq, entry] of this.pendingAcks) {
+            if (now - entry.sentAt > 100) { // 100ms timeout (fast!)
+                this.socket.send(entry.packet); // Retransmit
+                entry.sentAt = now;
+                entry.retries++;
+            }
+        }
+    }
+}
+
+// Why not TCP for games?
+// TCP retransmission: wait for RTO (200ms-1s) → unacceptable lag
+// TCP HOL blocking: One lost packet blocks ALL subsequent game data
+// TCP Nagle algorithm: Buffers small writes → adds 200ms delay (must disable!)
+// TCP 3-way handshake: 1 RTT wasted before gameplay starts
+    </pre>
+
+    <h4>13.6.2 Video Streaming (UDP-based: RTP/RTCP)</h4>
+    <pre>
+// Live video streaming requirements:
+// - Constant bitrate delivery (jitter kills playback quality)
+// - Old frames become useless (can't display frame from 5 seconds ago)
+// - Slight loss is OK (artifact in one frame, next frame is fine)
+// - Latency matters (live = < 1 second delay)
+
+// RTP (Real-time Transport Protocol) over UDP:
+// - Sequence numbers (detect loss, reorder at receiver)
+// - Timestamps (synchronize audio/video, measure jitter)
+// - SSRC (identify source in multiparty calls)
+// - NO retransmission (by design — old frames are useless)
+
+// RTCP (companion protocol): Sender/receiver reports
+// - Packet loss rate
+// - Jitter statistics
+// - Allows sender to adapt bitrate dynamically
+
+// Modern: WebRTC uses SRTP (Secure RTP) over UDP
+// with DTLS (Datagram TLS) for encryption
+// Plus optional NACK-based retransmission for important frames (I-frames)
+    </pre>
+
+    <h4>13.6.3 DNS (UDP for queries, TCP for zone transfers)</h4>
+    <pre>
+// DNS uses UDP port 53 by default:
+// - Typical query: ~60 bytes. Response: ~200 bytes.
+// - Fits in single datagram (no fragmentation)
+// - Zero connection overhead (critical: DNS is in every request's hot path!)
+// - Stateless server (handles millions of queries/sec)
+//
+// If UDP response would exceed 512 bytes (or 4096 with EDNS0):
+// - Server sets TC (truncated) flag in response
+// - Client retries over TCP (larger response delivered reliably)
+//
+// DNS zone transfers (AXFR/IXFR): Always TCP
+// - Transfers entire zone (potentially megabytes)
+// - Must be reliable (missing records = broken DNS)
+// - Long-lived connection for incremental updates
+    </pre>
+
+    <h4>13.6.4 QUIC: UDP + TCP's Reliability (Best of Both)</h4>
+    <pre>
+// QUIC = "UDP + reliability + encryption + multiplexing" built in userspace
+// Used by HTTP/3, gaining adoption for all protocols
+
+// Why build reliability on UDP instead of using TCP?
+// 1. TCP is in kernel → deploying changes takes YEARS (OS update cycles)
+//    QUIC is in userspace → deploy updates with application (immediate)
+//
+// 2. TCP provides a SINGLE ordered stream
+//    QUIC provides MULTIPLE independent streams (no HOL blocking)
+//
+// 3. TCP identifies connections by (srcIP, srcPort, dstIP, dstPort)
+//    QUIC identifies by Connection ID → survives IP changes (mobile!)
+//
+// 4. TCP handshake (1 RTT) + TLS handshake (1 RTT) = 2 RTT minimum
+//    QUIC combines both in 1 RTT (0 RTT on resumption)
+//
+// 5. TCP congestion control is per-connection
+//    QUIC can share congestion state across streams
+
+// What QUIC implements on top of UDP:
+// ✓ Reliable delivery (per-stream ACKs + retransmission)
+// ✓ Ordering (per-stream, not global)
+// ✓ Flow control (per-stream + connection-level)
+// ✓ Congestion control (pluggable: Cubic, BBR, etc.)
+// ✓ TLS 1.3 encryption (integrated, mandatory)
+// ✓ Connection migration
+// ✓ 0-RTT data
+    </pre>
+
+    <h3>13.7 TCP Performance Tuning (System Design Relevant)</h3>
+    <pre>
+// Critical TCP settings for high-performance servers:
+
+// 1. Increase backlog queue (pending connections)
+//    Default: 128. Under load: SYN packets dropped!
+net.core.somaxconn = 65535
+net.ipv4.tcp_max_syn_backlog = 65535
+
+// 2. Reuse TIME_WAIT connections (critical for high connection rate)
+net.ipv4.tcp_tw_reuse = 1
+
+// 3. Enable window scaling (required for high bandwidth × latency)
+net.ipv4.tcp_window_scaling = 1
+
+// 4. Increase socket buffer sizes (for high throughput)
+net.core.rmem_max = 16777216      // 16MB receive buffer
+net.core.wmem_max = 16777216      // 16MB send buffer
+net.ipv4.tcp_rmem = 4096 87380 16777216  // min default max
+net.ipv4.tcp_wmem = 4096 65536 16777216
+
+// 5. Enable TCP Fast Open (saves 1 RTT on subsequent connections)
+net.ipv4.tcp_fastopen = 3  // Enable for client + server
+// Client sends data in SYN packet (using cached cookie from previous connection)
+// Server processes immediately — no waiting for 3-way handshake to complete
+
+// 6. Disable Nagle algorithm for latency-sensitive applications
+//    setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, 1)
+//    Nagle: Buffers small writes until ACK received or MSS filled
+//    Good for throughput, TERRIBLE for latency (adds up to 200ms delay!)
+//    Always disable for: games, interactive apps, APIs
+
+// 7. BBR congestion control (instead of default CUBIC)
+net.ipv4.tcp_congestion_control = bbr
+net.core.default_qdisc = fq
+// BBR: 2-3x throughput improvement on lossy/high-latency networks
+    </pre>
+
+    <h3>13.8 System Design Decision Matrix</h3>
+    <table>
+        <tr><th>Application</th><th>Protocol</th><th>Why</th></tr>
+        <tr><td>Web API (REST/GraphQL)</td><td>TCP (HTTP/2, HTTP/3)</td><td>Need reliable delivery of JSON/data. HTTP/3 uses QUIC over UDP but provides TCP-like reliability.</td></tr>
+        <tr><td>Database connections</td><td>TCP</td><td>Every query and result must arrive completely and in order. Data integrity is paramount.</td></tr>
+        <tr><td>File transfer</td><td>TCP</td><td>Every byte matters. A corrupted file is useless.</td></tr>
+        <tr><td>DNS lookup</td><td>UDP (small), TCP (large)</td><td>Single request-response. Connection overhead would double latency.</td></tr>
+        <tr><td>Live video call</td><td>UDP (RTP/SRTP)</td><td>Old frames are worthless. Latency matters more than perfect quality.</td></tr>
+        <tr><td>Online gaming</td><td>UDP + custom reliability</td><td>Position updates: unreliable OK. Game events: selective reliability on top of UDP.</td></tr>
+        <tr><td>IoT sensor data</td><td>UDP (MQTT-SN, CoAP)</td><td>Devices are resource-constrained. Losing one reading is fine; next one comes in 1 second.</td></tr>
+        <tr><td>Service mesh (internal)</td><td>TCP (gRPC/HTTP2) or QUIC</td><td>Reliable microservice communication within datacenter (low latency anyway).</td></tr>
+        <tr><td>Log shipping</td><td>TCP</td><td>Don't want to lose log entries. Throughput over latency.</td></tr>
+        <tr><td>CDN content delivery</td><td>TCP (HTTP/2) or QUIC (HTTP/3)</td><td>Files must arrive intact. QUIC helps mobile users (connection migration).</td></tr>
+        <tr><td>DDoS attack traffic</td><td>UDP (typically)</td><td>Attackers prefer UDP: no handshake = easy to spoof source IP. Amplification attacks.</td></tr>
+    </table>
+
+    <h3>13.9 TCP vs UDP in Kernel – What Actually Happens</h3>
+    <pre>
+// When you call send() on a TCP socket:
+// 1. Data copied from userspace → kernel socket send buffer
+// 2. TCP segments data (divides into MSS-sized chunks, ~1460 bytes)
+// 3. TCP adds header (seq#, ack#, window, checksum, flags)
+// 4. IP layer adds header (src/dst IP, TTL, protocol=6)
+// 5. Data placed in NIC's TX queue (ring buffer)
+// 6. NIC DMA's data to wire
+// 7. TCP starts retransmission timer
+// 8. send() returns immediately (data is in kernel buffer, NOT on wire yet!)
+//    → Actual transmission is asynchronous
+//    → TCP may buffer data (Nagle) before sending
+
+// When you call sendto() on a UDP socket:
+// 1. Data copied from userspace → kernel
+// 2. UDP adds 8-byte header (ports + length + checksum)
+// 3. IP layer adds header (src/dst IP, TTL, protocol=17)
+// 4. Data placed in NIC's TX queue
+// 5. NIC sends immediately
+// 6. sendto() returns immediately
+//    → No retransmission timer. No buffering. No state. Done.
+//    → If NIC queue is full: packet DROPPED (sendto returns error)
+
+// Server handling capacity:
+// TCP: Each connection = ~3.3KB kernel memory (socket buffers, TCB)
+//   100K connections = 330 MB kernel memory (C10K problem)
+//   Solution: epoll (Linux), kqueue (BSD) → millions of connections possible
+//
+// UDP: No per-connection state. 1 socket handles ALL clients.
+//   UDP server with 1 million "clients" = 1 socket, ~0 KB overhead
+//   This is why DNS/game servers can handle massive connection counts.
+    </pre>
+
+</div>
+
+<!-- ==================== Summary ==================== -->
+<div class="section" style="margin-top: 40px; text-align: center;">
+    <h3>Summary &amp; Interconnections</h3>
+    <p>These topics connect in real system designs:</p>
+    <ul style="text-align: left;">
+        <li><strong>CDN caching</strong> reduces bandwidth costs and latency by serving content from the edge, using <strong>HTTP cache headers</strong> to control freshness.</li>
+        <li><strong>Application caching</strong> (Redis/Memcached) reduces database load. <strong>Cache warming</strong> prevents thundering herds on cold start. <strong>Cache invalidation</strong> ensures consistency.</li>
+        <li><strong>TCP</strong> underpins HTTP/1.1 and HTTP/2 reliability, while <strong>UDP</strong> (via QUIC) powers HTTP/3 with better performance. <strong>HTTPS</strong> adds TLS encryption on top.</li>
+        <li><strong>Circuit breakers</strong> protect against cascading failures when downstream services (accessed over <strong>TCP</strong>) become unresponsive.</li>
+        <li><strong>Bandwidth</strong> constraints drive decisions about compression, caching, CDN placement, and protocol choice (HTTP/2 header compression, Protocol Buffers over JSON).</li>
+    </ul>
+    <p style="margin-top: 20px; color: #666;"><em>Generated for experienced engineers (9+ years) seeking deep technical understanding.</em></p>
+</div>
+
+</body>
+</html>
