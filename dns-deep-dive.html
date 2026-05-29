@@ -1,0 +1,607 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>DNS Deep Dive - A Detailed System Design and Interview Guide</title>
+  <style>
+    body {
+      font-family: Calibri, Arial, sans-serif;
+      line-height: 1.6;
+      color: #222;
+      max-width: 900px;
+      margin: 40px auto;
+      padding: 0 24px;
+      background: #fff;
+    }
+    h1, h2, h3, h4 {
+      color: #111;
+      margin-top: 1.4em;
+      margin-bottom: 0.5em;
+    }
+    h1 {
+      font-size: 28px;
+      border-bottom: 2px solid #444;
+      padding-bottom: 10px;
+    }
+    h2 {
+      font-size: 22px;
+      border-bottom: 1px solid #ccc;
+      padding-bottom: 6px;
+    }
+    h3 {
+      font-size: 18px;
+    }
+    h4 {
+      font-size: 16px;
+    }
+    p {
+      margin: 0.6em 0;
+    }
+    ul, ol {
+      margin: 0.5em 0 1em 1.5em;
+    }
+    li {
+      margin: 0.25em 0;
+    }
+    blockquote {
+      border-left: 4px solid #ccc;
+      margin: 1em 0;
+      padding: 0.5em 1em;
+      color: #444;
+      background: #f8f8f8;
+    }
+    code {
+      background: #f4f4f4;
+      padding: 2px 5px;
+      border-radius: 4px;
+      font-family: Consolas, monospace;
+    }
+    .subtitle {
+      font-size: 18px;
+      color: #444;
+      margin-top: -8px;
+      margin-bottom: 24px;
+    }
+    .toc {
+      background: #fafafa;
+      border: 1px solid #ddd;
+      padding: 16px 20px;
+      margin: 20px 0 30px 0;
+    }
+    .footer-note {
+      margin-top: 40px;
+      padding-top: 16px;
+      border-top: 1px solid #ccc;
+      font-style: italic;
+      color: #555;
+    }
+    .page-break {
+      page-break-before: always;
+    }
+  </style>
+</head>
+<body>
+
+  <h1>DNS Deep Dive</h1>
+  <div class="subtitle"><strong>A Detailed System Design and Interview Guide</strong></div>
+
+  <div class="toc">
+    <h2>Table of Contents</h2>
+    <ol>
+      <li>Introduction to DNS</li>
+      <li>Why DNS Exists</li>
+      <li>DNS Namespace and Hierarchy</li>
+      <li>Domains and Zones</li>
+      <li>Core DNS Components</li>
+      <li>DNS Record Types</li>
+      <li>How DNS Resolution Works</li>
+      <li>Recursive vs Iterative Queries</li>
+      <li>Stub Resolver vs Recursive Resolver vs Authoritative Server</li>
+      <li>Caching and TTL</li>
+      <li>Negative Caching</li>
+      <li>DNS Load Balancing</li>
+      <li>Reverse DNS</li>
+      <li>Zone Transfers</li>
+      <li>UDP vs TCP in DNS</li>
+      <li>DNSSEC</li>
+      <li>DNS Privacy: DoH, DoT, and DoQ</li>
+      <li>Delegation and Glue Records</li>
+      <li>DNS Failure Scenarios in System Design</li>
+      <li>Interview-Level Important DNS Concepts</li>
+      <li>End-to-End Example</li>
+      <li>Final Summary</li>
+    </ol>
+  </div>
+
+  <h2>1. Introduction to DNS</h2>
+  <p><strong>DNS</strong> stands for <strong>Domain Name System</strong>.</p>
+  <p>It is the system that translates <strong>human-readable domain names</strong> into <strong>machine-usable IP addresses</strong>.</p>
+
+  <h3>Examples</h3>
+  <ul>
+    <li><code>google.com</code></li>
+    <li><code>amazon.com</code></li>
+    <li><code>api.github.com</code></li>
+  </ul>
+
+  <p>These names are converted into IP addresses such as:</p>
+  <ul>
+    <li><code>142.250.183.14</code> (IPv4)</li>
+    <li><code>2607:f8b0:4004:c1b::64</code> (IPv6)</li>
+  </ul>
+
+  <h3>Simple Definition</h3>
+  <blockquote>DNS is the phonebook of the internet.</blockquote>
+  <p>Humans remember names easily, while computers communicate using IP addresses. DNS bridges this gap.</p>
+
+  <h2>2. Why DNS Exists</h2>
+  <p>Without DNS, users would need to remember the IP address of every website or service they wanted to access.</p>
+
+  <h3>Problems Without DNS</h3>
+  <ul>
+    <li>IP addresses are difficult to memorize</li>
+    <li>Server IPs can change over time</li>
+    <li>Infrastructure migrations would break access</li>
+    <li>Load balancing would be harder</li>
+    <li>Failover would be more difficult</li>
+    <li>Large-scale internet communication would become unmanageable</li>
+  </ul>
+
+  <h3>DNS Solves These Problems By Providing</h3>
+  <ul>
+    <li><strong>Name-to-IP mapping</strong></li>
+    <li><strong>Service discovery</strong></li>
+    <li><strong>Email routing</strong></li>
+    <li><strong>Load distribution</strong></li>
+    <li><strong>Fault tolerance</strong></li>
+    <li><strong>Location abstraction</strong></li>
+  </ul>
+
+  <p>DNS allows users and applications to rely on a stable <strong>name</strong>, while the underlying infrastructure can change transparently.</p>
+
+  <h2>3. DNS Namespace and Hierarchy</h2>
+  <p>DNS is organized as a <strong>hierarchical tree structure</strong>.</p>
+
+  <h3>Example Hierarchy</h3>
+  <ul>
+    <li><code>.</code>
+      <ul>
+        <li><code>com</code>
+          <ul>
+            <li><code>example.com</code></li>
+            <li><code>google.com</code></li>
+          </ul>
+        </li>
+        <li><code>org</code></li>
+        <li><code>net</code></li>
+      </ul>
+    </li>
+  </ul>
+
+  <h3>How a Domain Name Is Read</h3>
+  <p>Take this domain:</p>
+  <p><code>api.dev.example.com</code></p>
+  <p>It is interpreted from <strong>right to left</strong>:</p>
+  <ul>
+    <li><code>.</code> → root</li>
+    <li><code>com</code> → top-level domain (TLD)</li>
+    <li><code>example</code> → second-level domain</li>
+    <li><code>dev</code> → subdomain</li>
+    <li><code>api</code> → host label</li>
+  </ul>
+
+  <h3>Why Hierarchy Matters</h3>
+  <ul>
+    <li><strong>Scalable</strong></li>
+    <li><strong>Distributed</strong></li>
+    <li><strong>Decentralized</strong></li>
+    <li><strong>Easy to delegate</strong></li>
+    <li><strong>Operationally manageable</strong></li>
+  </ul>
+
+  <p>No single DNS server needs to know everything. Each layer only needs to know the next responsible layer.</p>
+
+  <h2>4. Domains and Zones</h2>
+
+  <p>Although often used interchangeably, <strong>domain</strong> and <strong>zone</strong> are not exactly the same.</p>
+
+  <h3>4.1 Domain</h3>
+  <p>A <strong>domain</strong> is a logical part of the DNS namespace.</p>
+  <p>Example: <code>example.com</code></p>
+
+  <h3>4.2 Zone</h3>
+  <p>A <strong>zone</strong> is an administrative portion of the namespace managed by a specific set of authoritative DNS servers.</p>
+
+  <h3>Important Difference</h3>
+  <ul>
+    <li>A <strong>domain</strong> is a <strong>naming concept</strong></li>
+    <li>A <strong>zone</strong> is a <strong>management concept</strong></li>
+  </ul>
+
+  <h3>Example</h3>
+  <ul>
+    <li><code>example.com</code> may be one zone</li>
+    <li><code>shop.example.com</code> may be delegated and managed separately as another zone</li>
+  </ul>
+
+  <h3>Why Zones Matter</h3>
+  <ul>
+    <li>Independent administration</li>
+    <li>Delegation to different teams</li>
+    <li>Better scalability</li>
+    <li>Separation of responsibility</li>
+  </ul>
+
+  <h2>5. Core DNS Components</h2>
+
+  <h3>5.1 Stub Resolver</h3>
+  <p>A <strong>stub resolver</strong> is the lightweight DNS client present on a user machine or operating system.</p>
+  <h4>Responsibilities</h4>
+  <ul>
+    <li>Receives lookup requests from applications</li>
+    <li>Sends DNS query to a recursive resolver</li>
+    <li>Returns the answer back to the application</li>
+  </ul>
+  <p>A stub resolver usually does <strong>not</strong> perform full recursive resolution itself.</p>
+
+  <h3>5.2 Recursive Resolver</h3>
+  <p>A <strong>recursive resolver</strong> performs the full DNS lookup on behalf of the client.</p>
+  <h4>Examples</h4>
+  <ul>
+    <li>ISP DNS servers</li>
+    <li>Google Public DNS (<code>8.8.8.8</code>)</li>
+    <li>Cloudflare DNS (<code>1.1.1.1</code>)</li>
+  </ul>
+  <h4>Responsibilities</h4>
+  <ul>
+    <li>Accept recursive queries from clients</li>
+    <li>Check its cache</li>
+    <li>If needed, query root, TLD, and authoritative servers</li>
+    <li>Return the final answer</li>
+    <li>Cache the response for future use</li>
+  </ul>
+
+  <h3>5.3 Root Name Servers</h3>
+  <p>Root name servers sit at the top of the DNS hierarchy.</p>
+  <p>They do <strong>not</strong> usually know the final IP address of a domain. Instead, they know which servers manage each top-level domain.</p>
+  <blockquote>“I do not know the final answer, but ask the <code>.com</code> TLD servers.”</blockquote>
+  <p>There are <strong>13 logical root server names</strong>, but they are distributed globally using <strong>anycast</strong>.</p>
+
+  <h3>5.4 TLD Name Servers</h3>
+  <p>TLD stands for <strong>Top-Level Domain</strong>.</p>
+  <h4>Examples of TLDs</h4>
+  <ul>
+    <li><code>.com</code></li>
+    <li><code>.org</code></li>
+    <li><code>.net</code></li>
+    <li><code>.in</code></li>
+  </ul>
+  <p>TLD servers know which authoritative name servers are responsible for domains under that TLD.</p>
+
+  <h3>5.5 Authoritative Name Servers</h3>
+  <p>An <strong>authoritative name server</strong> is the official source of DNS data for a zone.</p>
+  <h4>Example</h4>
+  <ul>
+    <li><code>www.example.com -> 93.184.216.34</code></li>
+    <li><code>mail.example.com -> 192.0.2.20</code></li>
+  </ul>
+  <p>This is the <strong>source of truth</strong> for DNS data.</p>
+
+  <h2>6. DNS Record Types</h2>
+
+  <h3>6.1 A Record</h3>
+  <p>Maps a hostname to an <strong>IPv4 address</strong>.</p>
+  <p>Example: <code>www.example.com -> 93.184.216.34</code></p>
+
+  <h3>6.2 AAAA Record</h3>
+  <p>Maps a hostname to an <strong>IPv6 address</strong>.</p>
+  <p>Example: <code>www.example.com -> 2606:2800:220:1:248:1893:25c8:1946</code></p>
+
+  <h3>6.3 CNAME Record</h3>
+  <p>Maps one hostname to another hostname.</p>
+  <p>Example: <code>www.example.com -> app.example.com</code></p>
+
+  <h3>6.4 MX Record</h3>
+  <p>Specifies mail servers for a domain.</p>
+  <p>Example: <code>example.com -> 10 mail.example.com</code></p>
+  <p>The number indicates <strong>priority</strong>. Lower value means higher priority.</p>
+
+  <h3>6.5 NS Record</h3>
+  <p>Specifies which authoritative nameservers manage a zone.</p>
+  <p>Example: <code>example.com -> ns1.provider.net</code></p>
+
+  <h3>6.6 TXT Record</h3>
+  <p>Stores arbitrary text data.</p>
+  <h4>Common Uses</h4>
+  <ul>
+    <li>SPF</li>
+    <li>DKIM</li>
+    <li>DMARC</li>
+    <li>Domain ownership verification</li>
+  </ul>
+
+  <h3>6.7 SOA Record</h3>
+  <p><strong>SOA</strong> stands for <strong>Start of Authority</strong>.</p>
+  <p>It contains metadata for the zone, such as:</p>
+  <ul>
+    <li>Primary nameserver</li>
+    <li>Serial number</li>
+    <li>Refresh interval</li>
+    <li>Retry interval</li>
+    <li>Expire time</li>
+    <li>Negative caching TTL</li>
+  </ul>
+
+  <h3>6.8 PTR Record</h3>
+  <p>Used for <strong>reverse DNS</strong>, mapping an IP address back to a hostname.</p>
+
+  <h3>6.9 SRV Record</h3>
+  <p>Specifies service-related information such as:</p>
+  <ul>
+    <li>Service name</li>
+    <li>Protocol</li>
+    <li>Target host</li>
+    <li>Port</li>
+    <li>Priority and weight</li>
+  </ul>
+
+  <h3>6.10 CAA Record</h3>
+  <p>Specifies which certificate authorities are allowed to issue certificates for the domain.</p>
+
+  <h2>7. How DNS Resolution Works</h2>
+  <p>Suppose a user opens: <strong><code>www.example.com</code></strong></p>
+  <ol>
+    <li>Browser checks its local DNS cache</li>
+    <li>Operating system checks DNS cache</li>
+    <li>Hosts file is checked</li>
+    <li>Stub resolver queries recursive resolver</li>
+    <li>Recursive resolver checks its own cache</li>
+    <li>If not cached, it asks a root server</li>
+    <li>Root server refers it to TLD server</li>
+    <li>TLD server refers it to authoritative server</li>
+    <li>Authoritative server returns final answer</li>
+    <li>Recursive resolver caches the result</li>
+    <li>Client receives the IP and connects</li>
+  </ol>
+
+  <h2>8. Recursive vs Iterative Queries</h2>
+
+  <h3>8.1 Recursive Query</h3>
+  <blockquote>“Give me the final answer.”</blockquote>
+  <p>The client sends this to the recursive resolver.</p>
+  <p>The resolver must return:</p>
+  <ul>
+    <li>Final answer</li>
+    <li>Failure</li>
+    <li>NXDOMAIN</li>
+  </ul>
+
+  <h3>8.2 Iterative Query</h3>
+  <blockquote>“Give me the best information you have, and if you do not know the final answer, tell me who to ask next.”</blockquote>
+  <p>The recursive resolver sends iterative queries to root, TLD, and authoritative servers.</p>
+  <p>Typical real-world flow:</p>
+  <ul>
+    <li><strong>Client → Recursive Resolver</strong> = recursive query</li>
+    <li><strong>Recursive Resolver → Other DNS Servers</strong> = iterative queries</li>
+  </ul>
+
+  <h2>9. Stub Resolver vs Recursive Resolver vs Authoritative Server</h2>
+  <ul>
+    <li><strong>Stub Resolver</strong>: Runs on client device, sends DNS request</li>
+    <li><strong>Recursive Resolver</strong>: Performs the full lookup and caches responses</li>
+    <li><strong>Authoritative Server</strong>: Holds official DNS records</li>
+  </ul>
+  <p><strong>Memory Trick:</strong> Stub resolver asks, recursive resolver finds, authoritative server knows.</p>
+
+  <h2>10. Caching and TTL</h2>
+  <p>Caching is one of the most important features in DNS. It reduces latency and decreases infrastructure load.</p>
+
+  <h3>10.1 What Is TTL?</h3>
+  <p>TTL stands for <strong>Time To Live</strong>.</p>
+  <p>It tells caches how long a DNS response can be stored.</p>
+  <p>Example: <code>TTL = 300 seconds</code> means the answer may be reused for <strong>5 minutes</strong>.</p>
+
+  <h3>10.2 Benefits of Caching</h3>
+  <ul>
+    <li>Faster responses</li>
+    <li>Reduced latency</li>
+    <li>Lower DNS infrastructure load</li>
+    <li>Better scalability</li>
+  </ul>
+
+  <h3>10.3 TTL Tradeoff</h3>
+  <h4>High TTL</h4>
+  <ul>
+    <li>Fewer DNS lookups</li>
+    <li>Better performance</li>
+    <li>Lower server load</li>
+    <li>Slower updates</li>
+    <li>Slower failover</li>
+  </ul>
+
+  <h4>Low TTL</h4>
+  <ul>
+    <li>Faster DNS changes</li>
+    <li>Better for failover</li>
+    <li>More dynamic routing</li>
+    <li>More DNS traffic</li>
+    <li>Higher resolver load</li>
+  </ul>
+
+  <h2>11. Negative Caching</h2>
+  <p>DNS also caches failed lookups.</p>
+  <ul>
+    <li>Domain does not exist</li>
+    <li>Requested record type does not exist</li>
+  </ul>
+  <p>This prevents repeated useless lookups and reduces load on DNS servers.</p>
+
+  <h2>12. DNS Load Balancing</h2>
+  <p>DNS can distribute traffic by returning multiple IPs for the same domain.</p>
+  <p>Example:</p>
+  <ul>
+    <li><code>10.0.0.1</code></li>
+    <li><code>10.0.0.2</code></li>
+    <li><code>10.0.0.3</code></li>
+  </ul>
+  <h3>Common Strategies</h3>
+  <ul>
+    <li>Round-robin DNS</li>
+    <li>Weighted routing</li>
+    <li>Geo-based routing</li>
+    <li>Latency-based routing</li>
+    <li>Failover routing</li>
+  </ul>
+  <p><strong>Important limitation:</strong> DNS is not precise real-time load balancing because clients and resolvers cache responses.</p>
+
+  <h2>13. Reverse DNS</h2>
+  <p>Normally DNS maps <strong>Hostname → IP</strong>. Reverse DNS maps <strong>IP → Hostname</strong>.</p>
+  <p>Uses:</p>
+  <ul>
+    <li><code>in-addr.arpa</code> for IPv4</li>
+    <li><code>ip6.arpa</code> for IPv6</li>
+  </ul>
+  <p>Common uses:</p>
+  <ul>
+    <li>Email validation</li>
+    <li>Logging</li>
+    <li>Diagnostics</li>
+    <li>Security analysis</li>
+  </ul>
+
+  <h2>14. Zone Transfers</h2>
+  <p>Authoritative DNS uses multiple servers for redundancy. Zone transfers keep them synchronized.</p>
+  <ul>
+    <li><strong>AXFR</strong> = full zone transfer</li>
+    <li><strong>IXFR</strong> = incremental zone transfer</li>
+  </ul>
+  <p>Zone transfers typically use <strong>TCP</strong>.</p>
+
+  <h2>15. UDP vs TCP in DNS</h2>
+  <p>Most DNS traffic uses <strong>UDP port 53</strong>.</p>
+  <h3>Why UDP Is Common</h3>
+  <ul>
+    <li>Lightweight</li>
+    <li>Low overhead</li>
+    <li>Fast for small exchanges</li>
+  </ul>
+  <h3>When TCP Is Used</h3>
+  <ul>
+    <li>Response is too large</li>
+    <li>Truncation occurs</li>
+    <li>DNSSEC increases response size</li>
+    <li>Zone transfers are needed</li>
+  </ul>
+
+  <h2>16. DNSSEC</h2>
+  <p>DNSSEC stands for <strong>Domain Name System Security Extensions</strong>.</p>
+  <p>It adds verification to DNS responses.</p>
+  <h3>What DNSSEC Provides</h3>
+  <ul>
+    <li>Authenticity</li>
+    <li>Integrity</li>
+  </ul>
+  <h3>What DNSSEC Does Not Provide</h3>
+  <ul>
+    <li>Encryption</li>
+    <li>Privacy</li>
+  </ul>
+  <h3>Important Records</h3>
+  <ul>
+    <li><code>DNSKEY</code></li>
+    <li><code>RRSIG</code></li>
+    <li><code>DS</code></li>
+    <li><code>NSEC</code> / <code>NSEC3</code></li>
+  </ul>
+
+  <h2>17. DNS Privacy: DoH, DoT, and DoQ</h2>
+  <p>Traditional DNS traffic is often unencrypted.</p>
+  <h3>Modern Privacy Enhancements</h3>
+  <ul>
+    <li><strong>DoH</strong> = DNS over HTTPS</li>
+    <li><strong>DoT</strong> = DNS over TLS</li>
+    <li><strong>DoQ</strong> = DNS over QUIC</li>
+  </ul>
+  <p>Benefits include improved privacy and reduced snooping.</p>
+
+  <h2>18. Delegation and Glue Records</h2>
+
+  <h3>18.1 Delegation</h3>
+  <p>Delegation means a parent zone passes responsibility for a subdomain to another set of nameservers.</p>
+
+  <h3>18.2 Glue Records</h3>
+  <p>Glue records are address records included by the parent zone to help resolvers reach delegated nameservers.</p>
+  <p>They prevent circular dependency during resolution.</p>
+
+  <h2>19. DNS Failure Scenarios in System Design</h2>
+  <ul>
+    <li>High TTL delays failover</li>
+    <li>Low TTL increases query load</li>
+    <li>Authoritative server outage</li>
+    <li>Misconfigured NS records</li>
+    <li>Missing or stale glue records</li>
+    <li>DNSSEC misconfiguration</li>
+    <li>Stale caches during migration</li>
+  </ul>
+
+  <h2>20. Interview-Level Important DNS Concepts</h2>
+  <ol>
+    <li><strong>Hierarchical Resolution</strong> — DNS distributes responsibility across root, TLD, and authoritative layers.</li>
+    <li><strong>Recursive vs Iterative Queries</strong> — Clients ask recursively; resolvers walk iteratively.</li>
+    <li><strong>Caching and TTL</strong> — Improves performance while affecting freshness.</li>
+    <li><strong>Authoritative vs Recursive Servers</strong> — Source of truth vs lookup helper.</li>
+    <li><strong>Record Types</strong> — Support IP mapping, aliasing, mail, verification, and more.</li>
+    <li><strong>DNS Load Balancing</strong> — Useful for traffic steering but limited by caching.</li>
+    <li><strong>DNSSEC</strong> — Adds authenticity and integrity.</li>
+    <li><strong>UDP vs TCP</strong> — UDP for most lookups, TCP for large responses and transfers.</li>
+    <li><strong>Reverse DNS</strong> — Maps IP back to hostname.</li>
+    <li><strong>Delegation and Glue</strong> — Supports distributed ownership and resolver reachability.</li>
+  </ol>
+
+  <h2>21. End-to-End Example</h2>
+  <p>Suppose the client wants to resolve <strong><code>www.shop.example.com</code></strong>.</p>
+  <ol>
+    <li>Client asks recursive resolver</li>
+    <li>Recursive resolver asks root server</li>
+    <li>Root refers to <code>.com</code></li>
+    <li>Resolver asks <code>.com</code></li>
+    <li><code>.com</code> refers to <code>example.com</code> authoritative servers</li>
+    <li>Resolver asks <code>example.com</code></li>
+    <li>If <code>shop.example.com</code> is delegated, NS records and glue are returned</li>
+    <li>Resolver asks authoritative server for <code>shop.example.com</code></li>
+    <li>Final A or AAAA record is returned</li>
+    <li>Resolver caches answer based on TTL</li>
+    <li>Client receives IP and connects</li>
+  </ol>
+
+  <h2>22. Final Summary</h2>
+  <p>DNS is one of the foundational systems of the internet. It is:</p>
+  <ul>
+    <li><strong>Distributed</strong></li>
+    <li><strong>Hierarchical</strong></li>
+    <li><strong>Delegation-based</strong></li>
+    <li><strong>Cache-driven</strong></li>
+    <li><strong>Designed for scale</strong></li>
+  </ul>
+
+  <h3>Most Important Topics to Master</h3>
+  <ul>
+    <li>Root, TLD, and authoritative hierarchy</li>
+    <li>Recursive and iterative resolution</li>
+    <li>Record types</li>
+    <li>Caching and TTL</li>
+    <li>Delegation and glue</li>
+    <li>DNS load balancing limitations</li>
+    <li>Reverse DNS</li>
+    <li>UDP vs TCP</li>
+    <li>DNSSEC</li>
+    <li>Operational failure cases</li>
+  </ul>
+
+  <div class="footer-note">
+    Prepared as a DNS Deep Dive Study Guide for System Design and Technical Interviews.
+  </div>
+
+</body>
+</html>

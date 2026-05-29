@@ -1,0 +1,659 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Load Balancing Deep Dive - Full In-Depth Guide</title>
+  <style>
+    body {
+      font-family: Calibri, Arial, sans-serif;
+      line-height: 1.7;
+      color: #222;
+      max-width: 1050px;
+      margin: 40px auto;
+      padding: 0 24px 48px;
+      background: #fff;
+    }
+    h1, h2, h3, h4 {
+      color: #111;
+      margin-top: 1.4em;
+      margin-bottom: 0.55em;
+    }
+    h1 {
+      font-size: 30px;
+      border-bottom: 2px solid #444;
+      padding-bottom: 10px;
+    }
+    h2 {
+      font-size: 24px;
+      border-bottom: 1px solid #ccc;
+      padding-bottom: 6px;
+    }
+    h3 {
+      font-size: 20px;
+    }
+    h4 {
+      font-size: 17px;
+    }
+    p {
+      margin: 0.7em 0;
+    }
+    ul, ol {
+      margin: 0.5em 0 1em 1.5em;
+    }
+    li {
+      margin: 0.28em 0;
+    }
+    blockquote {
+      border-left: 4px solid #ccc;
+      margin: 1em 0;
+      padding: 0.7em 1em;
+      color: #444;
+      background: #f8f8f8;
+    }
+    code {
+      background: #f4f4f4;
+      padding: 2px 5px;
+      border-radius: 4px;
+      font-family: Consolas, monospace;
+    }
+    .subtitle {
+      font-size: 18px;
+      color: #444;
+      margin-top: -6px;
+      margin-bottom: 24px;
+    }
+    .toc {
+      background: #fafafa;
+      border: 1px solid #ddd;
+      padding: 16px 20px;
+      margin: 20px 0 30px 0;
+    }
+    .note {
+      background: #f7fbff;
+      border-left: 4px solid #6aa7ff;
+      padding: 10px 14px;
+      margin: 16px 0;
+    }
+    .important {
+      background: #fff8e8;
+      border-left: 4px solid #e0a100;
+      padding: 10px 14px;
+      margin: 16px 0;
+    }
+    .page-break {
+      page-break-before: always;
+    }
+    .footer-note {
+      margin-top: 40px;
+      padding-top: 16px;
+      border-top: 1px solid #ccc;
+      font-style: italic;
+      color: #555;
+    }
+  </style>
+</head>
+<body>
+
+  <h1>Load Balancing Deep Dive</h1>
+  <div class="subtitle"><strong>Complete Full In-Depth System Design and Interview Guide</strong></div>
+
+  <div class="toc">
+    <h2>Table of Contents</h2>
+    <ol>
+      <li>What Load Balancing Means</li>
+      <li>Why Load Balancing Matters</li>
+      <li>Core Idea Behind Load Balancing</li>
+      <li>What Problems Load Balancing Solves</li>
+      <li>Key Components of a Load Balancing System</li>
+      <li>How Load Balancing Works Behind the Scenes</li>
+      <li>Types of Load Balancing</li>
+      <li>Core Load Balancing Algorithms</li>
+      <li>Session Persistence and Sticky Sessions</li>
+      <li>Health Checks</li>
+      <li>Traffic Distribution Challenges</li>
+      <li>Interview-Level Important Load Balancing Concepts Explained Deeply</li>
+      <li>Example: Load Balancing in an E-Commerce System</li>
+      <li>Common Load Balancing Failure Modes</li>
+      <li>Strong Interview Answer</li>
+      <li>Final Summary</li>
+    </ol>
+  </div>
+
+  <h2>1. What Load Balancing Means</h2>
+  <p><strong>Load balancing</strong> is the process of distributing traffic or work across multiple resources so that no single resource becomes overloaded while others remain underused.</p>
+  <p>These resources may be:</p>
+  <ul>
+    <li>Web servers</li>
+    <li>Application servers</li>
+    <li>Database replicas</li>
+    <li>Cache nodes</li>
+    <li>Worker nodes</li>
+    <li>Network links</li>
+  </ul>
+
+  <h4>Simple definition</h4>
+  <blockquote>
+    Load balancing answers the question: “How do we spread incoming work across many machines in a safe and efficient way?”
+  </blockquote>
+
+  <h2>2. Why Load Balancing Matters</h2>
+  <p>Without load balancing, traffic distribution is uneven and fragile.</p>
+  <p>This creates problems such as:</p>
+  <ul>
+    <li>One server getting overloaded while others sit idle</li>
+    <li>Poor resource utilization</li>
+    <li>Increased latency</li>
+    <li>Higher failure rates</li>
+    <li>Harder failover during server crashes</li>
+    <li>Difficulty scaling horizontally</li>
+  </ul>
+  <p>Load balancing is one of the core mechanisms that turns a set of independent machines into a single scalable service.</p>
+
+  <h2>3. Core Idea Behind Load Balancing</h2>
+  <blockquote>
+    The purpose of load balancing is to spread work intelligently so that the system can use capacity efficiently, remain responsive, and continue operating even when some backends fail.
+  </blockquote>
+  <p>Good load balancing is not just about equal distribution. It is about useful distribution under real conditions.</p>
+
+  <h2>4. What Problems Load Balancing Solves</h2>
+  <ul>
+    <li>Uneven traffic distribution</li>
+    <li>Backend overload</li>
+    <li>Single server dependence</li>
+    <li>Difficulty adding more servers</li>
+    <li>Lack of failover when nodes die</li>
+    <li>Need for routing by path, host, or protocol</li>
+    <li>Need to hide backend topology from clients</li>
+  </ul>
+
+  <h2>5. Key Components of a Load Balancing System</h2>
+  <ul>
+    <li>Client</li>
+    <li>Load balancer</li>
+    <li>Backend servers</li>
+    <li>Health check system</li>
+    <li>Routing policy / balancing algorithm</li>
+    <li>Connection management</li>
+    <li>Optional TLS termination</li>
+    <li>Optional observability and traffic shaping rules</li>
+  </ul>
+
+  <h2>6. How Load Balancing Works Behind the Scenes</h2>
+  <p>At a high level, the flow looks like this:</p>
+  <ol>
+    <li>Client sends request to a load balancer address</li>
+    <li>Load balancer receives the connection or request</li>
+    <li>Load balancer checks which backends are healthy</li>
+    <li>Load balancer selects one backend using a policy</li>
+    <li>Request is forwarded</li>
+    <li>Response is returned to client</li>
+    <li>Backend health and traffic metrics continue to be monitored</li>
+  </ol>
+
+  <h4>Important internal idea</h4>
+  <p>The load balancer becomes the system’s traffic control plane for that layer. It makes routing decisions continuously based on backend health, traffic state, and policy.</p>
+
+  <div class="page-break"></div>
+
+  <h2>7. Types of Load Balancing</h2>
+
+  <h3>7.1 Layer 4 Load Balancing</h3>
+  <p>Layer 4 load balancers operate at the transport layer, usually using information like:</p>
+  <ul>
+    <li>Source IP</li>
+    <li>Destination IP</li>
+    <li>Port</li>
+    <li>TCP or UDP protocol</li>
+  </ul>
+
+  <h4>How it works internally</h4>
+  <p>The balancer does not need to understand HTTP paths or headers. It routes traffic based on connection-level information.</p>
+
+  <h4>Advantages</h4>
+  <ul>
+    <li>Fast</li>
+    <li>Lower overhead</li>
+    <li>Works for non-HTTP protocols too</li>
+  </ul>
+
+  <h4>Disadvantages</h4>
+  <ul>
+    <li>Less routing intelligence</li>
+    <li>Cannot route by URL path or HTTP headers</li>
+  </ul>
+
+  <h3>7.2 Layer 7 Load Balancing</h3>
+  <p>Layer 7 load balancers operate at the application layer.</p>
+  <p>They can route based on:</p>
+  <ul>
+    <li>HTTP path</li>
+    <li>Host header</li>
+    <li>Cookies</li>
+    <li>Headers</li>
+    <li>Methods</li>
+    <li>Request content patterns</li>
+  </ul>
+
+  <h4>How it works internally</h4>
+  <p>The load balancer must parse the application-layer protocol, understand request metadata, and then choose the backend.</p>
+
+  <h4>Advantages</h4>
+  <ul>
+    <li>Fine-grained routing</li>
+    <li>Supports API gateway style behavior</li>
+    <li>Can apply WAF, auth, or header-based rules</li>
+  </ul>
+
+  <h4>Disadvantages</h4>
+  <ul>
+    <li>More complex</li>
+    <li>Higher overhead</li>
+    <li>More CPU intensive</li>
+  </ul>
+
+  <h3>7.3 DNS Load Balancing</h3>
+  <p>DNS can also distribute traffic by returning different IP addresses for the same domain.</p>
+
+  <h4>Why it helps</h4>
+  <p>It can direct users to different regions, edges, or datacenters before a connection even starts.</p>
+
+  <h4>Limitation</h4>
+  <p>DNS is coarse-grained and affected by caching. Once a client caches a result, traffic may continue going to the same destination until TTL expires.</p>
+
+  <h3>7.4 Global vs Local Load Balancing</h3>
+  <h4>Global load balancing</h4>
+  <p>Distributes traffic across regions or datacenters.</p>
+
+  <h4>Local load balancing</h4>
+  <p>Distributes traffic among servers within one region, AZ, or cluster.</p>
+
+  <h2>8. Core Load Balancing Algorithms</h2>
+
+  <h3>8.1 Round Robin</h3>
+  <p>Requests are distributed in a rotating sequence.</p>
+  <p>Example:</p>
+  <ul>
+    <li>Request 1 → Server A</li>
+    <li>Request 2 → Server B</li>
+    <li>Request 3 → Server C</li>
+    <li>Request 4 → Server A</li>
+  </ul>
+
+  <h4>Pros</h4>
+  <ul>
+    <li>Simple</li>
+    <li>Works reasonably well when requests are similar in cost</li>
+  </ul>
+
+  <h4>Cons</h4>
+  <ul>
+    <li>Bad if request cost varies a lot</li>
+    <li>Does not consider active load</li>
+  </ul>
+
+  <h3>8.2 Weighted Round Robin</h3>
+  <p>Some backends receive more traffic because they have greater capacity.</p>
+  <p>Example:</p>
+  <ul>
+    <li>Server A weight 2</li>
+    <li>Server B weight 1</li>
+  </ul>
+  <p>Server A gets roughly twice as much traffic.</p>
+
+  <h3>8.3 Least Connections</h3>
+  <p>Traffic goes to the backend with the fewest active connections.</p>
+
+  <h4>Why it helps</h4>
+  <p>If some requests are long-lived, least-connections can distribute load better than round robin.</p>
+
+  <h4>Limitation</h4>
+  <p>Number of connections does not always match true work cost.</p>
+
+  <h3>8.4 Least Response Time / Latency-Based Routing</h3>
+  <p>Requests go to the backend responding fastest.</p>
+  <p>This can improve user latency, but may become unstable if the balancer reacts too aggressively to short-term fluctuations.</p>
+
+  <h3>8.5 Hash-Based Routing</h3>
+  <p>A hash of some key determines the backend.</p>
+  <p>The key may be:</p>
+  <ul>
+    <li>Client IP</li>
+    <li>User ID</li>
+    <li>Session ID</li>
+    <li>Request key</li>
+  </ul>
+
+  <h4>Why it helps</h4>
+  <p>Useful for session affinity, partition-aware routing, or cache locality.</p>
+
+  <h3>8.6 Random with Power of Two Choices</h3>
+  <p>Choose two random backends and send the request to the less loaded one.</p>
+
+  <h4>Why it matters</h4>
+  <p>This simple method often performs surprisingly well and is widely respected in distributed systems.</p>
+
+  <div class="page-break"></div>
+
+  <h2>9. Session Persistence and Sticky Sessions</h2>
+  <h4>What are sticky sessions?</h4>
+  <p>Sticky sessions mean requests from the same client are repeatedly sent to the same backend.</p>
+
+  <h4>Why they are used</h4>
+  <p>They are often used when session state is stored locally in app server memory.</p>
+
+  <h4>Why they are risky</h4>
+  <ul>
+    <li>Uneven load distribution</li>
+    <li>Harder failover</li>
+    <li>Poor autoscaling behavior</li>
+    <li>Coupling users to instances</li>
+  </ul>
+
+  <h4>Preferred approach</h4>
+  <p>In scalable systems, it is usually better to externalize session state and keep services stateless instead of depending heavily on sticky sessions.</p>
+
+  <h2>10. Health Checks</h2>
+  <h4>Why health checks matter</h4>
+  <p>A load balancer is only useful if it can avoid sending traffic to unhealthy instances.</p>
+
+  <h4>Types of health checks</h4>
+  <ul>
+    <li><strong>TCP health check</strong> — can a connection be opened?</li>
+    <li><strong>HTTP health check</strong> — does an endpoint respond correctly?</li>
+    <li><strong>Deep health check</strong> — can the instance reach critical dependencies and serve requests correctly?</li>
+  </ul>
+
+  <h4>Important insight</h4>
+  <p>A server may respond to a shallow health check but still be unusable for real traffic. For example, it may be alive while all database calls fail.</p>
+
+  <h2>11. Traffic Distribution Challenges</h2>
+  <p>Traffic is rarely uniform in production. Some important challenges include:</p>
+  <ul>
+    <li>Uneven request cost</li>
+    <li>Long-lived connections</li>
+    <li>Slow backends</li>
+    <li>Hot clients or sessions</li>
+    <li>Connection reuse imbalance</li>
+    <li>Retry storms</li>
+    <li>Regional skew</li>
+  </ul>
+
+  <h4>Important lesson</h4>
+  <p>Equal request counts do not guarantee equal system load.</p>
+
+  <div class="page-break"></div>
+
+  <h2>12. Interview-Level Important Load Balancing Concepts Explained Deeply</h2>
+
+  <h3>12.1 Why Load Balancing Is Essential for Horizontal Scaling</h3>
+  <h4>Core idea</h4>
+  <p>Horizontal scaling only works if traffic can be distributed across multiple instances. If you add ten app servers but all traffic still goes to one of them, you have not truly scaled.</p>
+
+  <h4>Why it matters</h4>
+  <p>Load balancing is the mechanism that makes multiple servers act like one larger service. It is what converts raw infrastructure into usable capacity.</p>
+
+  <h4>Behind the scenes</h4>
+  <p>The load balancer continuously maps incoming traffic to healthy backends. This mapping is what allows capacity to grow when more instances are added.</p>
+
+  <h3>12.2 L4 vs L7 Load Balancing</h3>
+  <h4>What interviewers want to see</h4>
+  <p>They want to know whether you understand that there are different layers of routing intelligence.</p>
+
+  <h4>L4 meaning</h4>
+  <p>L4 works with transport-level details only. It is generally simpler and faster.</p>
+
+  <h4>L7 meaning</h4>
+  <p>L7 understands application-level information and can route based on URLs, headers, methods, and other request metadata.</p>
+
+  <h4>Tradeoff</h4>
+  <p>L7 is more powerful and more expensive. L4 is faster and simpler but less expressive.</p>
+
+  <h3>12.3 Load Balancing Is Not Just Equal Distribution</h3>
+  <h4>Important idea</h4>
+  <p>Good load balancing is not about sending the exact same number of requests everywhere. It is about preventing overload and making best use of capacity.</p>
+
+  <h4>Example</h4>
+  <p>Suppose one request takes 2 ms and another takes 2 seconds. Sending the same count of requests to two servers may still create severe imbalance.</p>
+
+  <h4>Implication</h4>
+  <p>The load balancing policy must match workload characteristics.</p>
+
+  <h3>12.4 Request-Level vs Connection-Level Balancing</h3>
+  <h4>Request-level balancing</h4>
+  <p>Each individual request can be routed independently.</p>
+
+  <h4>Connection-level balancing</h4>
+  <p>Once a TCP connection is assigned, multiple requests may continue flowing over that same connection.</p>
+
+  <h4>Why it matters</h4>
+  <p>In protocols with connection reuse, traffic may not distribute evenly just because the balancer accepted connections evenly. Some connections carry far more requests than others.</p>
+
+  <h3>12.5 Health Checks and Why “Alive” Is Not Enough</h3>
+  <h4>Shallow vs deep health</h4>
+  <p>A server process being alive is not enough. It may still be unable to:</p>
+  <ul>
+    <li>Reach the database</li>
+    <li>Access the cache</li>
+    <li>Serve traffic within acceptable latency</li>
+  </ul>
+
+  <h4>Why interviewers care</h4>
+  <p>Many real outages happen because unhealthy instances still pass shallow health checks and continue receiving traffic.</p>
+
+  <h3>12.6 Session Affinity and Sticky Sessions</h3>
+  <h4>What it is</h4>
+  <p>Session affinity keeps the same client bound to the same backend.</p>
+
+  <h4>Why it is sometimes used</h4>
+  <p>It supports stateful applications that keep user session state in memory.</p>
+
+  <h4>Why it hurts scalability</h4>
+  <ul>
+    <li>Traffic becomes uneven</li>
+    <li>Failover becomes harder</li>
+    <li>Autoscaling becomes less effective</li>
+    <li>Specific servers may become hot</li>
+  </ul>
+
+  <h4>Better design</h4>
+  <p>Move state to shared systems and keep application servers stateless.</p>
+
+  <h3>12.7 Failover and Availability</h3>
+  <h4>Why load balancers help availability</h4>
+  <p>If one backend fails, the load balancer can stop sending it traffic and route requests elsewhere.</p>
+
+  <h4>Important nuance</h4>
+  <p>Failover speed depends on how quickly failure is detected, how health checks are configured, and whether healthy alternatives actually exist.</p>
+
+  <h3>12.8 TLS Termination at the Load Balancer</h3>
+  <h4>What it means</h4>
+  <p>The load balancer handles the TLS handshake and decrypts traffic before forwarding it to backends.</p>
+
+  <h4>Why it is used</h4>
+  <ul>
+    <li>Centralized certificate management</li>
+    <li>Reduced crypto overhead on app servers</li>
+    <li>Ability to inspect HTTP metadata for routing</li>
+  </ul>
+
+  <h4>Tradeoff</h4>
+  <p>If internal traffic is not re-encrypted and the internal network is not trusted, security risk increases.</p>
+
+  <h3>12.9 Queueing, Backpressure, and Overload</h3>
+  <h4>Why load balancers matter under overload</h4>
+  <p>A load balancer is not only a router. It can also become part of overload control by rejecting traffic, shedding load, or limiting concurrency.</p>
+
+  <h4>Why this matters</h4>
+  <p>Without overload protection, sending all traffic blindly to already struggling backends can make the whole system collapse.</p>
+
+  <h3>12.10 Hotspots and Uneven Traffic</h3>
+  <h4>Problem</h4>
+  <p>Some users, paths, or requests are far heavier than others. This creates hotspots even in systems with many backends.</p>
+
+  <h4>Examples</h4>
+  <ul>
+    <li>One user with very high traffic</li>
+    <li>One API path that triggers heavy DB queries</li>
+    <li>One backend holding many sticky sessions</li>
+  </ul>
+
+  <h4>Implication</h4>
+  <p>Observability and smarter balancing policies are needed. Pure round robin may not be enough.</p>
+
+  <h3>12.11 Global Load Balancing</h3>
+  <h4>What it is</h4>
+  <p>Global load balancing directs clients to different regions or datacenters.</p>
+
+  <h4>Goals</h4>
+  <ul>
+    <li>Reduce latency</li>
+    <li>Improve disaster resilience</li>
+    <li>Distribute regional load</li>
+  </ul>
+
+  <h4>How it is often done</h4>
+  <ul>
+    <li>DNS routing</li>
+    <li>Anycast</li>
+    <li>Geo-based traffic steering</li>
+  </ul>
+
+  <h4>Important limitation</h4>
+  <p>Global routing decisions are coarser than local load balancing and are affected by DNS caching and network routing behavior.</p>
+
+  <h3>12.12 Client-Side vs Server-Side Load Balancing</h3>
+  <h4>Server-side load balancing</h4>
+  <p>A dedicated load balancer chooses the backend.</p>
+
+  <h4>Client-side load balancing</h4>
+  <p>The client or calling service chooses the backend from a discovered set of instances.</p>
+
+  <h4>Why this matters in microservices</h4>
+  <p>In service mesh and microservice environments, client-side load balancing can reduce central bottlenecks and allow smarter routing decisions closer to the caller.</p>
+
+  <h4>Tradeoff</h4>
+  <p>Client-side balancing shifts complexity to clients and requires accurate service discovery.</p>
+
+  <h3>12.13 Observability in Load Balancing</h3>
+  <h4>What must be measured</h4>
+  <ul>
+    <li>Request distribution</li>
+    <li>Error rate by backend</li>
+    <li>Latency by backend</li>
+    <li>Connection counts</li>
+    <li>Health check failures</li>
+    <li>Retry behavior</li>
+  </ul>
+
+  <h4>Why it matters</h4>
+  <p>Without observability, imbalance may exist without being obvious. A system may appear healthy overall while one backend is overloaded.</p>
+
+  <h3>12.14 Load Balancer as a Potential SPOF</h3>
+  <h4>Important point</h4>
+  <p>A load balancer improves backend reliability only if the load balancer itself is not a single point of failure.</p>
+
+  <h4>Solution</h4>
+  <ul>
+    <li>Redundant load balancer nodes</li>
+    <li>Managed HA load balancer services</li>
+    <li>Anycast or multi-endpoint failover</li>
+  </ul>
+
+  <h3>12.15 Algorithm Selection Depends on Workload</h3>
+  <h4>What this means</h4>
+  <p>No one algorithm is always best.</p>
+  <ul>
+    <li>Round robin works for fairly uniform short requests</li>
+    <li>Least-connections may help with long-lived sessions</li>
+    <li>Hashing helps session locality</li>
+    <li>Weighted routing helps mixed-capacity fleets</li>
+  </ul>
+
+  <h4>Interview expectation</h4>
+  <p>Strong candidates justify the algorithm based on workload rather than naming algorithms randomly.</p>
+
+  <div class="page-break"></div>
+
+  <h2>13. Example: Load Balancing in an E-Commerce System</h2>
+  <p>Suppose an e-commerce platform has:</p>
+  <ul>
+    <li>Multiple web servers</li>
+    <li>Multiple API servers</li>
+    <li>Search service</li>
+    <li>Checkout service</li>
+    <li>Recommendation service</li>
+  </ul>
+
+  <h4>How load balancing is used</h4>
+  <ol>
+    <li>Users reach a public load balancer</li>
+    <li>Static content may go to CDN</li>
+    <li><code>/api/products</code> routes to catalog servers</li>
+    <li><code>/api/cart</code> routes to cart service</li>
+    <li><code>/api/checkout</code> routes to checkout service</li>
+  </ol>
+
+  <h4>Failure scenario</h4>
+  <p>If one checkout server becomes unhealthy:</p>
+  <ul>
+    <li>Health checks fail</li>
+    <li>Load balancer removes it from rotation</li>
+    <li>Remaining healthy servers continue serving traffic</li>
+  </ul>
+
+  <h4>Scaling scenario</h4>
+  <p>If holiday traffic doubles:</p>
+  <ul>
+    <li>More API servers are added</li>
+    <li>Load balancer begins sending traffic to new nodes</li>
+    <li>Capacity increases without changing client behavior</li>
+  </ul>
+
+  <h2>14. Common Load Balancing Failure Modes</h2>
+  <ul>
+    <li>Load balancer is a single point of failure</li>
+    <li>Health checks are too shallow</li>
+    <li>Sticky sessions create hotspots</li>
+    <li>Round robin used for highly uneven request costs</li>
+    <li>Retries amplify backend overload</li>
+    <li>Connection reuse causes imbalance</li>
+    <li>One region gets too much traffic</li>
+    <li>Backend removal is too slow after failure</li>
+    <li>Improper TLS termination design</li>
+    <li>Global routing caches stale targets</li>
+  </ul>
+
+  <h2>15. Strong Interview Answer</h2>
+  <blockquote>
+    Load balancing is the mechanism that distributes incoming traffic across multiple resources so the system can scale horizontally, remain available, and use capacity efficiently. It works by routing requests or connections to healthy backends using algorithms such as round robin, least connections, weighted routing, or hashing. The right load balancing design depends on workload characteristics, protocol layer, health-check quality, and whether the system needs features such as TLS termination, sticky sessions, or global traffic steering.
+  </blockquote>
+
+  <h2>16. Final Summary</h2>
+  <p>To understand load balancing deeply, you must master:</p>
+  <ul>
+    <li>Why load balancing exists</li>
+    <li>How it enables horizontal scaling</li>
+    <li>L4 vs L7 differences</li>
+    <li>Routing algorithms and tradeoffs</li>
+    <li>Health checks</li>
+    <li>Sticky sessions and their problems</li>
+    <li>Connection-level vs request-level balancing</li>
+    <li>TLS termination</li>
+    <li>Overload protection and failover</li>
+    <li>Global vs local balancing</li>
+    <li>Client-side vs server-side balancing</li>
+    <li>Observability and hotspot detection</li>
+    <li>How the load balancer itself can become a SPOF</li>
+  </ul>
+
+  <div class="important">
+    <strong>Most important takeaway:</strong> Load balancing is not just equal request distribution. It is controlled traffic management that enables scalability, failover, performance stability, and better resource utilization.
+  </div>
+
+  <div class="footer-note">
+    Prepared as a complete load balancing deep-dive study guide for system design and technical interviews.
+  </div>
+
+</body>
+</html>

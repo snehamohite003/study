@@ -1,0 +1,670 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Availability Deep Dive - Full In-Depth Guide</title>
+  <style>
+    body {
+      font-family: Calibri, Arial, sans-serif;
+      line-height: 1.7;
+      color: #222;
+      max-width: 1050px;
+      margin: 40px auto;
+      padding: 0 24px 48px;
+      background: #fff;
+    }
+    h1, h2, h3, h4 {
+      color: #111;
+      margin-top: 1.4em;
+      margin-bottom: 0.55em;
+    }
+    h1 {
+      font-size: 30px;
+      border-bottom: 2px solid #444;
+      padding-bottom: 10px;
+    }
+    h2 {
+      font-size: 24px;
+      border-bottom: 1px solid #ccc;
+      padding-bottom: 6px;
+    }
+    h3 {
+      font-size: 20px;
+    }
+    h4 {
+      font-size: 17px;
+    }
+    p {
+      margin: 0.7em 0;
+    }
+    ul, ol {
+      margin: 0.5em 0 1em 1.5em;
+    }
+    li {
+      margin: 0.28em 0;
+    }
+    blockquote {
+      border-left: 4px solid #ccc;
+      margin: 1em 0;
+      padding: 0.7em 1em;
+      color: #444;
+      background: #f8f8f8;
+    }
+    code {
+      background: #f4f4f4;
+      padding: 2px 5px;
+      border-radius: 4px;
+      font-family: Consolas, monospace;
+    }
+    .subtitle {
+      font-size: 18px;
+      color: #444;
+      margin-top: -6px;
+      margin-bottom: 24px;
+    }
+    .toc {
+      background: #fafafa;
+      border: 1px solid #ddd;
+      padding: 16px 20px;
+      margin: 20px 0 30px 0;
+    }
+    .note {
+      background: #f7fbff;
+      border-left: 4px solid #6aa7ff;
+      padding: 10px 14px;
+      margin: 16px 0;
+    }
+    .important {
+      background: #fff8e8;
+      border-left: 4px solid #e0a100;
+      padding: 10px 14px;
+      margin: 16px 0;
+    }
+    .page-break {
+      page-break-before: always;
+    }
+    .footer-note {
+      margin-top: 40px;
+      padding-top: 16px;
+      border-top: 1px solid #ccc;
+      font-style: italic;
+      color: #555;
+    }
+  </style>
+</head>
+<body>
+
+  <h1>Availability Deep Dive</h1>
+  <div class="subtitle"><strong>Complete Full In-Depth System Design and Interview Guide</strong></div>
+
+  <div class="toc">
+    <h2>Table of Contents</h2>
+    <ol>
+      <li>What Availability Means</li>
+      <li>Why Availability Matters</li>
+      <li>Availability vs Reliability vs Durability</li>
+      <li>How Availability Is Measured</li>
+      <li>SLA, SLO, and SLI</li>
+      <li>Core Idea Behind Availability</li>
+      <li>What Actually Causes Unavailability</li>
+      <li>Core Availability Building Blocks</li>
+      <li>Interview-Level Important Availability Concepts Explained Deeply</li>
+      <li>Example: Availability in an E-Commerce System</li>
+      <li>Common Availability Bottlenecks and Failure Modes</li>
+      <li>Strong Interview Answer</li>
+      <li>Final Summary</li>
+    </ol>
+  </div>
+
+  <h2>1. What Availability Means</h2>
+  <p><strong>Availability</strong> is the ability of a system to remain operational and accessible when users need it.</p>
+  <p>If a user sends a request and the system is able to accept, process, and return a usable response, the system is available for that request.</p>
+  <p>If the system is down, timing out, failing, or unable to serve the request correctly, that is unavailability.</p>
+
+  <h4>Simple definition</h4>
+  <blockquote>
+    Availability answers the question: “Is the system up and usable right now?”
+  </blockquote>
+
+  <h4>Important practical meaning</h4>
+  <p>Availability is not only about whether a server process is running. A system may appear “up” at infrastructure level but still be unavailable to users because:</p>
+  <ul>
+    <li>Requests are timing out</li>
+    <li>Dependencies are failing</li>
+    <li>Database is overloaded</li>
+    <li>Load balancer has no healthy backends</li>
+    <li>The service returns errors for important workflows</li>
+  </ul>
+
+  <h2>2. Why Availability Matters</h2>
+  <p>Availability matters because users judge systems based on whether they work when needed.</p>
+  <p>If a payment service is unavailable for even a short period:</p>
+  <ul>
+    <li>Revenue is lost</li>
+    <li>User trust drops</li>
+    <li>Operational pressure increases</li>
+    <li>Retries may amplify system stress</li>
+    <li>Downstream systems may accumulate inconsistent state</li>
+  </ul>
+  <p>For some systems, availability is directly tied to safety or legal obligations, such as healthcare, finance, and infrastructure systems.</p>
+
+  <h2>3. Availability vs Reliability vs Durability</h2>
+
+  <h3>3.1 Availability</h3>
+  <p>Can the system serve requests now?</p>
+
+  <h3>3.2 Reliability</h3>
+  <p>Does the system behave correctly and consistently over time?</p>
+
+  <h3>3.3 Durability</h3>
+  <p>Once data is acknowledged, is it permanently preserved?</p>
+
+  <h4>Why people confuse them</h4>
+  <p>These concepts are related, but not identical.</p>
+  <ul>
+    <li>A system can be available but unreliable if it responds with incorrect results.</li>
+    <li>A system can be available but not durable if it acknowledges writes and later loses data.</li>
+    <li>A system can be durable but temporarily unavailable if it preserves data but cannot currently serve traffic.</li>
+  </ul>
+
+  <h4>Example</h4>
+  <p>A distributed storage system that rejects all writes during a failover may temporarily reduce availability, but protect durability and consistency.</p>
+
+  <h2>4. How Availability Is Measured</h2>
+  <p>Availability is commonly measured as the proportion of total time that a system is functioning correctly for users.</p>
+
+  <h4>Formula</h4>
+  <blockquote>
+    Availability = Uptime / (Uptime + Downtime)
+  </blockquote>
+
+  <h4>Example</h4>
+  <p>If a service is unavailable for 5 minutes in a 30-day month:</p>
+  <ul>
+    <li>Total month ≈ 43,200 minutes</li>
+    <li>Downtime = 5 minutes</li>
+    <li>Availability ≈ 99.988%</li>
+  </ul>
+
+  <h4>The “nines” concept</h4>
+  <ul>
+    <li><strong>99%</strong> = about 3.65 days downtime/year</li>
+    <li><strong>99.9%</strong> = about 8.76 hours/year</li>
+    <li><strong>99.99%</strong> = about 52.56 minutes/year</li>
+    <li><strong>99.999%</strong> = about 5.26 minutes/year</li>
+  </ul>
+
+  <div class="important">
+    <strong>Important insight:</strong> each additional “nine” is much harder and more expensive to achieve.
+  </div>
+
+  <h2>5. SLA, SLO, and SLI</h2>
+
+  <h3>5.1 SLI</h3>
+  <p><strong>Service Level Indicator</strong> is the actual measured metric.</p>
+  <p>Examples:</p>
+  <ul>
+    <li>Successful request percentage</li>
+    <li>p99 latency under threshold</li>
+    <li>API success rate</li>
+  </ul>
+
+  <h3>5.2 SLO</h3>
+  <p><strong>Service Level Objective</strong> is the target the team aims to meet.</p>
+  <p>Example:</p>
+  <ul>
+    <li>99.95% successful checkout requests over 30 days</li>
+  </ul>
+
+  <h3>5.3 SLA</h3>
+  <p><strong>Service Level Agreement</strong> is the formal external commitment, often with business or legal consequences.</p>
+
+  <h4>Why this distinction matters</h4>
+  <p>Teams often operate with internal SLOs tighter than customer-facing SLAs so they have room to detect and correct issues before contractual commitments are breached.</p>
+
+  <h2>6. Core Idea Behind Availability</h2>
+  <blockquote>
+    Availability is achieved by designing systems so that failures are expected, isolated, detected quickly, and recovered from automatically or with minimal disruption.
+  </blockquote>
+  <p>Availability is not the absence of failure. It is the ability to continue serving users despite failure.</p>
+
+  <h2>7. What Actually Causes Unavailability</h2>
+  <p>Unavailability is caused by more than just machine crashes.</p>
+  <p>Common causes include:</p>
+  <ul>
+    <li>Server process crashes</li>
+    <li>Host or VM failure</li>
+    <li>Disk failure</li>
+    <li>Network partition</li>
+    <li>Dependency outage</li>
+    <li>Database overload</li>
+    <li>Slow requests causing timeouts</li>
+    <li>Bad deployments</li>
+    <li>Configuration errors</li>
+    <li>DNS failures</li>
+    <li>Load balancer misconfiguration</li>
+    <li>Certificate expiration</li>
+    <li>Regional outage</li>
+    <li>Retry storms</li>
+    <li>Thundering herd effects</li>
+  </ul>
+
+  <p>Many outages happen not because one component fails, but because that failure is not isolated and propagates.</p>
+
+  <h2>8. Core Availability Building Blocks</h2>
+  <ul>
+    <li>Redundancy</li>
+    <li>Replication</li>
+    <li>Failover</li>
+    <li>Health checks</li>
+    <li>Load balancing</li>
+    <li>Timeouts</li>
+    <li>Retries with limits</li>
+    <li>Circuit breakers</li>
+    <li>Bulkheads</li>
+    <li>Graceful degradation</li>
+    <li>Multi-AZ and multi-region design</li>
+    <li>Monitoring and alerting</li>
+    <li>Disaster recovery</li>
+  </ul>
+
+  <div class="page-break"></div>
+
+  <h2>9. Interview-Level Important Availability Concepts Explained Deeply</h2>
+
+  <h3>9.1 Redundancy</h3>
+  <h4>What is redundancy?</h4>
+  <p>Redundancy means having extra components so that if one fails, another can continue serving.</p>
+
+  <h4>Why it matters</h4>
+  <p>If there is only one server, one database instance, or one load balancer, that component becomes a single point of failure.</p>
+
+  <h4>How it works internally</h4>
+  <p>Instead of relying on one resource, the system keeps multiple resources capable of doing the same job. Requests can be redirected to healthy resources when one fails.</p>
+
+  <h4>Examples</h4>
+  <ul>
+    <li>Multiple application servers behind a load balancer</li>
+    <li>Multiple database replicas</li>
+    <li>Multiple availability zones</li>
+  </ul>
+
+  <h4>Tradeoff</h4>
+  <p>Redundancy improves availability but increases cost and operational complexity.</p>
+
+  <h3>9.2 Single Point of Failure (SPOF)</h3>
+  <h4>What is a SPOF?</h4>
+  <p>A single point of failure is any component whose failure can make the system unavailable.</p>
+
+  <h4>Examples</h4>
+  <ul>
+    <li>One database primary with no failover</li>
+    <li>One load balancer</li>
+    <li>One DNS provider with no resilience plan</li>
+    <li>One shared cache for critical sessions</li>
+  </ul>
+
+  <h4>Why interviewers care</h4>
+  <p>In system design interviews, identifying and removing SPOFs is one of the clearest signs that you understand availability.</p>
+
+  <h3>9.3 Replication</h3>
+  <h4>What is replication?</h4>
+  <p>Replication means keeping copies of data or service state on multiple nodes.</p>
+
+  <h4>Why it helps availability</h4>
+  <p>If one node fails, another node that already has the necessary data can continue serving requests.</p>
+
+  <h4>Types</h4>
+  <ul>
+    <li><strong>Synchronous replication</strong> — replicas confirm before write is acknowledged</li>
+    <li><strong>Asynchronous replication</strong> — primary acknowledges before replicas fully catch up</li>
+  </ul>
+
+  <h4>Tradeoff</h4>
+  <p>Synchronous replication improves consistency and failover safety, but increases latency. Asynchronous replication improves write performance and availability under some conditions, but can lose the most recent updates during failover.</p>
+
+  <h3>9.4 Failover</h3>
+  <h4>What is failover?</h4>
+  <p>Failover is the process of switching traffic or leadership from a failed component to a healthy one.</p>
+
+  <h4>Types</h4>
+  <ul>
+    <li><strong>Automatic failover</strong></li>
+    <li><strong>Manual failover</strong></li>
+  </ul>
+
+  <h4>How it works internally</h4>
+  <ol>
+    <li>System detects failure</li>
+    <li>Marks component unhealthy</li>
+    <li>Selects standby or replica</li>
+    <li>Redirects traffic</li>
+    <li>Resumes service</li>
+  </ol>
+
+  <h4>Important tradeoff</h4>
+  <p>Fast failover reduces downtime, but incorrect failover can create split-brain or data inconsistency if health detection is wrong.</p>
+
+  <h3>9.5 Health Checks</h3>
+  <h4>What are health checks?</h4>
+  <p>Health checks are mechanisms used to determine whether a component is fit to receive traffic.</p>
+
+  <h4>Types</h4>
+  <ul>
+    <li><strong>Liveness check</strong> — is the process alive?</li>
+    <li><strong>Readiness check</strong> — is it ready to serve requests?</li>
+    <li><strong>Deep health check</strong> — can it reach dependencies and function correctly?</li>
+  </ul>
+
+  <h4>Important insight</h4>
+  <p>A process can be alive but not truly available. For example, the web server may be running while the database connection pool is exhausted.</p>
+
+  <h3>9.6 Load Balancing and Availability</h3>
+  <h4>Why it matters</h4>
+  <p>Load balancing improves availability by spreading traffic across multiple healthy instances and removing failed ones from rotation.</p>
+
+  <h4>Internal role in availability</h4>
+  <p>The load balancer acts as a traffic control point. It can shield users from backend instance failures by routing only to healthy nodes.</p>
+
+  <h4>Important caveat</h4>
+  <p>If the load balancer itself is a SPOF, it becomes an availability risk.</p>
+
+  <h3>9.7 Timeouts</h3>
+  <h4>What are timeouts?</h4>
+  <p>A timeout limits how long one component waits for another.</p>
+
+  <h4>Why they matter for availability</h4>
+  <p>Without timeouts, requests can wait indefinitely, tying up threads, connections, and resources. This can turn a localized slowdown into broader unavailability.</p>
+
+  <h4>Internal effect</h4>
+  <p>Timeouts bound resource occupancy. They allow the system to fail fast instead of becoming congested and unresponsive.</p>
+
+  <h3>9.8 Retries</h3>
+  <h4>What are retries?</h4>
+  <p>Retries repeat failed requests in hope that the failure was temporary.</p>
+
+  <h4>Why they help</h4>
+  <p>Some failures are transient, such as short network glitches or a temporary overloaded instance.</p>
+
+  <h4>Why they are dangerous</h4>
+  <p>Retries can amplify load. If a dependency is already struggling, aggressive retries can worsen the outage.</p>
+
+  <h4>Good retry practice</h4>
+  <ul>
+    <li>Retry only idempotent operations when safe</li>
+    <li>Use exponential backoff</li>
+    <li>Add jitter</li>
+    <li>Limit retry count</li>
+  </ul>
+
+  <h3>9.9 Circuit Breakers</h3>
+  <h4>What is a circuit breaker?</h4>
+  <p>A circuit breaker stops sending requests to a failing dependency for some period of time.</p>
+
+  <h4>Why it helps availability</h4>
+  <p>If a dependency is consistently failing, continuing to call it wastes resources and slows the calling service. Circuit breakers prevent that dependency from dragging the whole system down.</p>
+
+  <h4>Common states</h4>
+  <ul>
+    <li><strong>Closed</strong> — normal traffic flows</li>
+    <li><strong>Open</strong> — requests fail fast</li>
+    <li><strong>Half-open</strong> — a few test requests probe recovery</li>
+  </ul>
+
+  <div class="page-break"></div>
+
+  <h3>9.10 Bulkheads / Fault Isolation</h3>
+  <h4>What is a bulkhead?</h4>
+  <p>A bulkhead isolates resources so failure in one area does not spread to another.</p>
+
+  <h4>Why it matters</h4>
+  <p>Without isolation, one slow downstream call can exhaust all threads, all connections, or all worker capacity, making unrelated requests fail too.</p>
+
+  <h4>Examples</h4>
+  <ul>
+    <li>Separate thread pools for different dependencies</li>
+    <li>Separate queues for different workflows</li>
+    <li>Separate connection pools for critical and non-critical traffic</li>
+  </ul>
+
+  <h3>9.11 Graceful Degradation</h3>
+  <h4>What does it mean?</h4>
+  <p>Graceful degradation means the system continues offering core functionality even when some features fail.</p>
+
+  <h4>Example</h4>
+  <p>If recommendations are unavailable, the product page may still load without recommendations.</p>
+
+  <h4>Why it matters</h4>
+  <p>Full unavailability is often worse than partial feature loss. Availability engineering often means protecting the most critical workflows first.</p>
+
+  <h3>9.12 Active-Active vs Active-Passive</h3>
+  <h4>Active-Active</h4>
+  <p>Multiple nodes or regions serve live traffic at the same time.</p>
+
+  <h4>Advantages</h4>
+  <ul>
+    <li>Better resource utilization</li>
+    <li>Faster failover</li>
+    <li>Can reduce latency if geographically distributed</li>
+  </ul>
+
+  <h4>Challenges</h4>
+  <ul>
+    <li>Conflict resolution</li>
+    <li>Data consistency</li>
+    <li>Traffic routing complexity</li>
+  </ul>
+
+  <h4>Active-Passive</h4>
+  <p>One system serves traffic while the standby waits for failover.</p>
+
+  <h4>Advantages</h4>
+  <ul>
+    <li>Simpler operational model</li>
+    <li>Less coordination complexity</li>
+  </ul>
+
+  <h4>Disadvantages</h4>
+  <ul>
+    <li>Standby capacity sits mostly idle</li>
+    <li>Failover may be slower</li>
+  </ul>
+
+  <h3>9.13 Multi-AZ Architecture</h3>
+  <h4>What is it?</h4>
+  <p>Multi-AZ means deploying across multiple availability zones in the same region.</p>
+
+  <h4>Why it helps availability</h4>
+  <p>If one data center or zone fails, another zone can continue serving.</p>
+
+  <h4>Why it is common</h4>
+  <p>It offers high availability with lower latency and less complexity than full multi-region design.</p>
+
+  <h3>9.14 Multi-Region Architecture</h3>
+  <h4>What is it?</h4>
+  <p>Multi-region means running the system across multiple geographic regions.</p>
+
+  <h4>Why it helps</h4>
+  <ul>
+    <li>Survives regional outages</li>
+    <li>Improves user latency globally</li>
+    <li>Supports disaster recovery</li>
+  </ul>
+
+  <h4>Why it is hard</h4>
+  <ul>
+    <li>Cross-region replication latency</li>
+    <li>Consistency complexity</li>
+    <li>Traffic routing complexity</li>
+    <li>Higher cost</li>
+  </ul>
+
+  <h3>9.15 Quorum and Majority-Based Systems</h3>
+  <h4>What is quorum?</h4>
+  <p>Quorum means requiring agreement from a majority or subset of replicas before considering an operation successful.</p>
+
+  <h4>Why it matters</h4>
+  <p>Quorum-based systems can continue operating even if some replicas fail, as long as a sufficient majority remains reachable.</p>
+
+  <h4>Tradeoff</h4>
+  <p>Quorum improves fault tolerance and consistency, but introduces coordination cost and can reduce availability if too many replicas are unreachable.</p>
+
+  <h3>9.16 Leader Election</h3>
+  <h4>What is it?</h4>
+  <p>Leader election chooses one node to coordinate certain operations, such as writes or metadata updates.</p>
+
+  <h4>Why it matters for availability</h4>
+  <p>If the leader fails, a new leader must be elected quickly. Slow or unstable leader election increases downtime.</p>
+
+  <h4>Important risk</h4>
+  <p>Incorrect leader election can create split-brain, where multiple nodes believe they are leader simultaneously.</p>
+
+  <h3>9.17 Network Partitions</h3>
+  <h4>What is a network partition?</h4>
+  <p>A network partition happens when parts of a distributed system cannot communicate even though they may still be running.</p>
+
+  <h4>Why it matters</h4>
+  <p>Partitions force difficult tradeoffs. Should the system continue serving and risk inconsistency, or refuse some operations to preserve correctness?</p>
+
+  <h4>Interview link</h4>
+  <p>This directly connects to CAP tradeoffs between consistency and availability.</p>
+
+  <h3>9.18 Monitoring and Alerting</h3>
+  <h4>Why it matters</h4>
+  <p>You cannot protect availability if you cannot detect degradation quickly.</p>
+
+  <h4>What to monitor</h4>
+  <ul>
+    <li>Success rate</li>
+    <li>Error rate</li>
+    <li>Latency percentiles</li>
+    <li>Health check failures</li>
+    <li>Queue lag</li>
+    <li>CPU and memory</li>
+    <li>Replication lag</li>
+    <li>Dependency failures</li>
+  </ul>
+
+  <h4>Important point</h4>
+  <p>Good alerting must be actionable. Alert noise reduces operational effectiveness.</p>
+
+  <h3>9.19 Disaster Recovery (DR)</h3>
+  <h4>What is DR?</h4>
+  <p>Disaster recovery is the plan for restoring service after catastrophic failure such as region loss, major data corruption, or large operational mistake.</p>
+
+  <h4>Important terms</h4>
+  <ul>
+    <li><strong>RTO</strong> — Recovery Time Objective, how fast service must be restored</li>
+    <li><strong>RPO</strong> — Recovery Point Objective, how much data loss is acceptable</li>
+  </ul>
+
+  <h4>Why it matters</h4>
+  <p>Availability discussions are incomplete without asking how the system recovers from large-scale failure.</p>
+
+  <h3>9.20 Tradeoffs Between Availability, Consistency, and Cost</h3>
+  <h4>Why this matters</h4>
+  <p>High availability is never free. Achieving it often requires:</p>
+  <ul>
+    <li>Redundant infrastructure</li>
+    <li>Replication</li>
+    <li>Cross-region data movement</li>
+    <li>Complex failover systems</li>
+    <li>Operational readiness</li>
+  </ul>
+
+  <h4>Consistency tradeoff</h4>
+  <p>Sometimes systems sacrifice immediate consistency to remain available during partitions or regional failures.</p>
+
+  <h4>Cost tradeoff</h4>
+  <p>Each extra nine of availability becomes significantly more expensive in design, infrastructure, and operations.</p>
+
+  <div class="page-break"></div>
+
+  <h2>10. Example: Availability in an E-Commerce System</h2>
+  <p>Consider an e-commerce system with the following critical flows:</p>
+  <ul>
+    <li>Browse products</li>
+    <li>Add to cart</li>
+    <li>Checkout</li>
+    <li>Payment</li>
+    <li>Order confirmation</li>
+  </ul>
+
+  <h4>Basic availability improvements</h4>
+  <ol>
+    <li>Run multiple app servers behind a load balancer</li>
+    <li>Use a primary database with replicas</li>
+    <li>Deploy across multiple availability zones</li>
+    <li>Add health checks and automatic failover</li>
+    <li>Put static assets behind CDN</li>
+    <li>Use timeouts and circuit breakers for payment dependencies</li>
+    <li>Move email and analytics to async queues</li>
+    <li>Gracefully degrade recommendations if they fail</li>
+  </ol>
+
+  <h4>What happens during failure?</h4>
+  <ul>
+    <li>If one app server dies, the load balancer routes around it</li>
+    <li>If one AZ fails, traffic is served from another AZ</li>
+    <li>If recommendations fail, checkout still works</li>
+    <li>If payment provider is slow, timeouts and circuit breakers prevent total thread exhaustion</li>
+  </ul>
+
+  <p>This is how availability is engineered: not by hoping nothing fails, but by ensuring the system keeps functioning when failures happen.</p>
+
+  <h2>11. Common Availability Bottlenecks and Failure Modes</h2>
+  <ul>
+    <li>Single point of failure</li>
+    <li>No health checks</li>
+    <li>Slow dependency with no timeout</li>
+    <li>Unlimited retries</li>
+    <li>No failover plan</li>
+    <li>No graceful degradation</li>
+    <li>Improper leader election</li>
+    <li>Split-brain</li>
+    <li>DNS outage</li>
+    <li>Certificate expiration</li>
+    <li>Load balancer misconfiguration</li>
+    <li>Deployment causing mass instance failure</li>
+    <li>Shared cache outage for critical path</li>
+    <li>Regional outage with no multi-region recovery</li>
+  </ul>
+
+  <h2>12. Strong Interview Answer</h2>
+  <blockquote>
+    Availability is the ability of a system to remain operational and accessible when users need it. In practice, high availability is achieved by removing single points of failure, adding redundancy, replicating critical data, using health checks and failover mechanisms, isolating faults, applying timeouts and circuit breakers, and designing for graceful degradation. True availability engineering assumes components will fail and focuses on keeping user-facing functionality working despite those failures.
+  </blockquote>
+
+  <h2>13. Final Summary</h2>
+  <p>To understand availability deeply, you must master:</p>
+  <ul>
+    <li>What availability actually means from user perspective</li>
+    <li>How it differs from reliability and durability</li>
+    <li>How it is measured</li>
+    <li>SLA, SLO, and SLI</li>
+    <li>Redundancy and replication</li>
+    <li>Single points of failure</li>
+    <li>Failover and health checks</li>
+    <li>Timeouts and retries</li>
+    <li>Circuit breakers and bulkheads</li>
+    <li>Graceful degradation</li>
+    <li>Active-active vs active-passive</li>
+    <li>Multi-AZ and multi-region architecture</li>
+    <li>Quorum and leader election</li>
+    <li>Network partitions</li>
+    <li>Monitoring and alerting</li>
+    <li>Disaster recovery</li>
+    <li>Availability vs consistency vs cost tradeoffs</li>
+  </ul>
+
+  <div class="important">
+    <strong>Most important takeaway:</strong> Availability is not about preventing all failures. It is about designing systems so failures happen without taking away critical user functionality.
+  </div>
+
+  <div class="footer-note">
+    Prepared as a complete availability deep-dive study guide for system design and technical interviews.
+  </div>
+
+</body>
+</html>

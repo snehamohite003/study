@@ -1,0 +1,1366 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>System Design — Deep Technical Reference (Part 1)</title>
+<style>
+  :root {
+    --bg: #0f1117;
+    --surface: #1a1d27;
+    --surface2: #22263a;
+    --accent: #4f8ef7;
+    --accent2: #7c3aed;
+    --accent3: #06b6d4;
+    --green: #10b981;
+    --yellow: #f59e0b;
+    --red: #ef4444;
+    --text: #e2e8f0;
+    --muted: #94a3b8;
+    --border: #2d3352;
+    --code-bg: #0d1117;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; }
+  body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', system-ui, sans-serif; font-size: 15px; line-height: 1.8; display: flex; }
+
+  /* ── SIDEBAR ── */
+  #sidebar {
+    width: 290px; min-height: 100vh; background: var(--surface);
+    border-right: 1px solid var(--border); position: fixed;
+    top: 0; left: 0; overflow-y: auto; z-index: 100; padding-bottom: 40px;
+  }
+  #sidebar-header {
+    padding: 22px 18px 14px;
+    background: linear-gradient(135deg,#1e3a8a 0%,#4f46e5 100%);
+    border-bottom: 1px solid var(--border);
+  }
+  #sidebar-header h2 { font-size: 15px; color: #fff; font-weight: 800; }
+  #sidebar-header p  { font-size: 11px; color: #a5b4fc; margin-top: 4px; }
+  #search {
+    width: calc(100% - 24px); margin: 12px; padding: 8px 12px;
+    border-radius: 8px; border: 1px solid var(--border);
+    background: var(--bg); color: var(--text); font-size: 13px; outline: none;
+  }
+  #search:focus { border-color: var(--accent); }
+  .nav-link {
+    display: flex; align-items: center; gap: 8px;
+    padding: 7px 18px; font-size: 13px; color: var(--muted);
+    text-decoration: none; border-left: 3px solid transparent; transition: all 0.15s;
+  }
+  .nav-link:hover { color: var(--accent); border-left-color: var(--accent); background: rgba(79,142,247,0.07); }
+  .nav-link .num { font-size: 10px; color: #818cf8; font-weight: 700; min-width: 22px; }
+
+  /* ── MAIN ── */
+  #main { margin-left: 290px; flex: 1; }
+
+  .hero {
+    background: linear-gradient(135deg,#0f172a 0%,#1e1b4b 50%,#0f172a 100%);
+    padding: 64px 64px 48px; border-bottom: 1px solid var(--border);
+  }
+  .hero h1 {
+    font-size: 38px; font-weight: 900;
+    background: linear-gradient(90deg,#60a5fa,#a78bfa,#34d399);
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+  .hero p { color: var(--muted); margin-top: 14px; max-width: 720px; font-size: 15px; }
+  .hero-badges { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 22px; }
+  .badge {
+    background: var(--surface2); border: 1px solid var(--border);
+    padding: 5px 14px; border-radius: 20px; font-size: 12px; color: var(--accent3);
+  }
+
+  /* ── TOPIC SECTION ── */
+  .topic { border-bottom: 2px solid var(--border); }
+  .topic-header { padding: 52px 64px 0; }
+  .topic-num { font-size: 11px; font-weight: 800; color: var(--accent2); text-transform: uppercase; letter-spacing: 2.5px; }
+  .topic-title {
+    font-size: 30px; font-weight: 900; color: #fff; margin-top: 6px;
+    display: flex; align-items: center; gap: 14px;
+  }
+  .topic-icon {
+    width: 42px; height: 42px; border-radius: 10px; display: flex;
+    align-items: center; justify-content: center; font-size: 20px; flex-shrink: 0;
+  }
+  .topic-lead { margin: 14px 0 0; color: #94a3b8; font-size: 15px; max-width: 820px; border-left: 4px solid var(--accent2); padding-left: 14px; }
+
+  .topic-body { padding: 30px 64px 56px; }
+  .topic-body h3 {
+    font-size: 18px; font-weight: 800; color: var(--accent);
+    margin: 36px 0 12px; padding-left: 12px;
+    border-left: 4px solid var(--accent);
+  }
+  .topic-body h4 { font-size: 15px; font-weight: 700; color: var(--accent3); margin: 20px 0 8px; }
+  .topic-body h5 { font-size: 13px; font-weight: 700; color: var(--yellow); margin: 14px 0 6px; }
+  .topic-body p  { color: #cbd5e1; margin-bottom: 14px; }
+  .topic-body ul, .topic-body ol { padding-left: 24px; color: #cbd5e1; margin-bottom: 14px; }
+  .topic-body li { margin-bottom: 8px; }
+  .topic-body strong { color: #f1f5f9; }
+  .topic-body em { color: var(--yellow); font-style: normal; }
+
+  /* CODE */
+  pre {
+    background: var(--code-bg); border: 1px solid var(--border);
+    border-radius: 10px; padding: 22px; overflow-x: auto;
+    font-size: 12.5px; line-height: 1.65; margin: 18px 0;
+    font-family: 'Cascadia Code','Fira Code','Consolas', monospace; color: #e2e8f0;
+  }
+  .kw  { color: #c792ea; }
+  .str { color: #c3e88d; }
+  .cm  { color: #546e7a; font-style: italic; }
+  .fn  { color: #82aaff; }
+  .num { color: #f78c6c; }
+  .op  { color: #89ddff; }
+  code { background: rgba(79,142,247,0.13); padding: 2px 7px; border-radius: 4px; font-size: 13px; font-family: 'Cascadia Code','Fira Code','Consolas',monospace; color: #93c5fd; }
+
+  /* CALLOUT BOXES */
+  .callout {
+    border-radius: 10px; padding: 18px 22px; margin: 20px 0;
+    border-left: 4px solid; font-size: 14px;
+  }
+  .callout-info  { background: rgba(79,142,247,0.09); border-color: var(--accent);  color: #bfdbfe; }
+  .callout-warn  { background: rgba(245,158,11,0.09); border-color: var(--yellow); color: #fde68a; }
+  .callout-green { background: rgba(16,185,129,0.09); border-color: var(--green);  color: #6ee7b7; }
+  .callout-red   { background: rgba(239,68,68,0.09);  border-color: var(--red);    color: #fca5a5; }
+  .callout .callout-title { font-weight: 800; font-size: 12px; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 6px; }
+
+  /* DIAGRAM / ASCII */
+  .diagram {
+    background: #0a0e1a; border: 1px solid #2d3352; border-radius: 10px;
+    padding: 24px 28px; font-family: 'Cascadia Code','Fira Code','Consolas',monospace;
+    font-size: 12px; color: #7dd3fc; white-space: pre; overflow-x: auto;
+    line-height: 1.55; margin: 20px 0;
+  }
+
+  /* TABLE */
+  .tbl-wrap { overflow-x: auto; margin: 18px 0; }
+  table { border-collapse: collapse; width: 100%; font-size: 13.5px; }
+  th { background: var(--surface2); color: var(--accent); padding: 11px 16px; text-align: left; font-weight: 700; border: 1px solid var(--border); }
+  td { padding: 10px 16px; border: 1px solid var(--border); color: #cbd5e1; vertical-align: top; }
+  tr:nth-child(even) td { background: rgba(255,255,255,0.02); }
+
+  /* GRID CARDS */
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 20px 0; }
+  .grid3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; margin: 20px 0; }
+  .card {
+    background: var(--surface2); border: 1px solid var(--border);
+    border-radius: 10px; padding: 18px;
+  }
+  .card h5 { color: var(--accent3); font-size: 13px; font-weight: 700; margin-bottom: 8px; }
+  .card p  { color: var(--muted); font-size: 13px; margin: 0; }
+
+  /* TAG */
+  .tag { display: inline-block; background: rgba(124,58,237,0.18); color: #c4b5fd; border: 1px solid #6d28d9; padding: 2px 9px; border-radius: 12px; font-size: 11px; font-weight: 700; margin: 2px 3px; }
+
+  /* STEPS */
+  .steps { counter-reset: step; padding: 0; list-style: none; margin: 16px 0; }
+  .steps li { counter-increment: step; display: flex; gap: 14px; margin-bottom: 16px; }
+  .steps li::before {
+    content: counter(step); min-width: 28px; height: 28px; border-radius: 50%;
+    background: var(--accent2); color: #fff; font-weight: 800; font-size: 12px;
+    display: flex; align-items: center; justify-content: center; flex-shrink: 0; margin-top: 2px;
+  }
+
+  /* TOC progress */
+  #progress { position: fixed; top: 0; left: 290px; right: 0; height: 3px; background: linear-gradient(90deg,#4f8ef7,#7c3aed,#06b6d4); transform-origin: left; transform: scaleX(0); z-index: 200; transition: transform 0.1s; }
+
+  /* SCROLL TOP */
+  #totop {
+    position: fixed; bottom: 32px; right: 32px; background: var(--accent2);
+    color: #fff; border: none; border-radius: 50%; width: 44px; height: 44px;
+    font-size: 18px; cursor: pointer; display: none; align-items: center;
+    justify-content: center; box-shadow: 0 4px 20px rgba(124,58,237,0.5); z-index: 300;
+  }
+  #totop.show { display: flex; }
+
+  @media(max-width:900px){
+    #sidebar { display: none; }
+    #main { margin-left: 0; }
+    #progress { left: 0; }
+    .hero, .topic-header, .topic-body { padding-left: 24px; padding-right: 24px; }
+    .grid2, .grid3 { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<!-- Progress bar -->
+<div id="progress"></div>
+
+<!-- ═══════════════════════ SIDEBAR ═══════════════════════ -->
+<nav id="sidebar">
+  <div id="sidebar-header">
+    <h2>⚙️ System Design</h2>
+    <p>Deep Technical Reference · Part 1</p>
+  </div>
+  <input id="search" placeholder="🔍  Search topics…" oninput="filterNav(this.value)"/>
+  <div id="nav-links">
+    <a class="nav-link" href="#t1"><span class="num">01</span>Scalability</a>
+    <a class="nav-link" href="#t2"><span class="num">02</span>Availability</a>
+    <a class="nav-link" href="#t3"><span class="num">03</span>Load Balancing</a>
+    <a class="nav-link" href="#t4"><span class="num">04</span>Reliability</a>
+    <a class="nav-link" href="#t5"><span class="num">05</span>Proxy Servers</a>
+    <a class="nav-link" href="#t6"><span class="num">06</span>DNS</a>
+    <a class="nav-link" href="#t7"><span class="num">07</span>HTTP vs HTTPS</a>
+    <a class="nav-link" href="#t8"><span class="num">08</span>API Gateway</a>
+    <a class="nav-link" href="#t9"><span class="num">09</span>Circuit Breaker</a>
+    <a class="nav-link" href="#t10"><span class="num">10</span>Bandwidth</a>
+  </div>
+</nav>
+
+<!-- ═══════════════════════ MAIN ═══════════════════════ -->
+<main id="main">
+
+<!-- HERO -->
+<section class="hero">
+  <h1>System Design — Deep Technical Reference</h1>
+  <p>An expert-level deep-dive into foundational and advanced system design concepts. Every topic is explained from first principles — how it works internally, why it works that way, and where it matters in production systems.</p>
+  <div class="hero-badges">
+    <span class="badge">🧠 10 Core Topics</span>
+    <span class="badge">⚙️ Internal Mechanics</span>
+    <span class="badge">📐 Diagrams &amp; Examples</span>
+    <span class="badge">🛠️ Production Patterns</span>
+    <span class="badge">👨‍💻 9+ Years Level</span>
+  </div>
+</section>
+
+
+<!-- ═══════════════════════════════════════════════════════════
+     TOPIC 1 — SCALABILITY
+════════════════════════════════════════════════════════════ -->
+<section class="topic" id="t1">
+  <div class="topic-header">
+    <div class="topic-num">Topic 01</div>
+    <div class="topic-title">
+      <div class="topic-icon" style="background:linear-gradient(135deg,#1e3a8a,#3b82f6)">📈</div>
+      Scalability
+    </div>
+    <p class="topic-lead">Scalability is the system's ability to handle a growing amount of work — requests, data, users, connections — by adding resources, without a proportional degradation in performance or an exponential increase in cost.</p>
+  </div>
+
+  <div class="topic-body">
+
+    <h3>1. What Does "Scaling" Actually Mean Internally?</h3>
+    <p>At its core, every system is bound by a set of resources: <strong>CPU cycles, RAM, disk I/O bandwidth, network I/O bandwidth, and connection handles</strong>. Scaling is the act of increasing those resources relative to load. The bottleneck shifts over time — first you hit CPU, then RAM, then disk, then network — so real scaling is an ongoing process of identifying and removing successive bottlenecks.</p>
+    <p>A single-server system serving 100 req/s might have: 4 vCPU @ 50% utilisation, 8 GB RAM @ 60%, 100 MB/s disk I/O @ 20%, 1 Gbps NIC @ 10%. When load grows 10×, every single one of those limits gets hit in sequence. Scalability engineering is about predicting and eliminating those limits before they hit production.</p>
+
+    <h3>2. Vertical Scaling (Scale Up)</h3>
+    <p><strong>Vertical scaling</strong> means upgrading the machine: more cores, faster CPU clock, larger RAM, NVMe SSDs, faster NICs. Internally, this works because the OS scheduler can run more threads concurrently (more cores), allocate more memory pages without thrashing (more RAM), and sustain higher I/O throughput.</p>
+
+    <h4>What happens inside the OS when you scale vertically?</h4>
+    <ul>
+      <li><strong>More cores:</strong> The Linux kernel's CFS (Completely Fair Scheduler) can schedule more threads simultaneously on separate CPU run queues, reducing context switches and wake-up latency. A 32-core machine can literally run 32 threads of your app in true parallel at any instant.</li>
+      <li><strong>More RAM:</strong> The page cache grows, keeping hot data in memory. The kernel's slab allocator can satisfy more object allocations without going to the swap device. GC-heavy runtimes (JVM, .NET) have more heap space → longer GC intervals → lower stop-the-world pauses.</li>
+      <li><strong>Faster disk (SSD → NVMe):</strong> NVMe drives use PCIe lanes directly (not SATA controller bottleneck), providing 3–7 GB/s sequential throughput and sub-100µs latency, vs spinning disk's 100–200 MB/s and 5–10 ms latency. Database buffer pool misses become far cheaper.</li>
+    </ul>
+
+    <div class="callout callout-warn">
+      <div class="callout-title">⚠️ Vertical Scaling Ceiling</div>
+      The largest available EC2 instance (u-24tb1.metal) has 448 vCPUs and 24 TB RAM. Beyond that ceiling, vertical scaling is impossible. Also: doubling compute doesn't double throughput — Amdahl's Law limits the parallel speedup to <code>S = 1 / (1 - p + p/N)</code> where <code>p</code> is the parallelisable fraction and <code>N</code> is core count. If 20% of your code is serial, max speedup is 5× regardless of infinity cores.
+    </div>
+
+    <h3>3. Horizontal Scaling (Scale Out)</h3>
+    <p>Horizontal scaling adds more machines (nodes) to a pool and distributes work across them. This is the dominant pattern in modern cloud systems. Instead of one 128-core server, you run 128 single-core VMs, each handling a shard of the load.</p>
+
+    <h4>Internal coordination challenges when scaling horizontally:</h4>
+    <ul>
+      <li><strong>Shared state:</strong> If each instance has its own in-memory cache or session, they diverge. You need a centralised state store (Redis, Memcached) or sticky sessions.</li>
+      <li><strong>Distributed consensus:</strong> When multiple nodes need to agree (e.g., who is leader), you need Raft or Paxos. This adds latency.</li>
+      <li><strong>Network overhead:</strong> Data that previously moved via CPU bus (nanoseconds) now moves over Ethernet (microseconds–milliseconds). Chatty microservice calls compound this.</li>
+      <li><strong>Clock skew:</strong> NTP keeps clocks within ~1–50 ms across nodes. If your logic depends on event ordering, you need logical clocks (Lamport timestamps, vector clocks).</li>
+    </ul>
+
+    <div class="diagram">
+┌─────────────────────────────────────────────────────────────────┐
+│                    HORIZONTAL SCALING ANATOMY                   │
+│                                                                 │
+│   Clients                Load Balancer            App Nodes     │
+│  ┌──────┐                ┌──────────┐           ┌───────────┐   │
+│  │  C1  │──────────────▶│          │──────────▶│  Node 1   │   │
+│  └──────┘                │  L4/L7   │           └───────────┘   │
+│  ┌──────┐                │  Proxy   │           ┌───────────┐   │
+│  │  C2  │──────────────▶│          │──────────▶│  Node 2   │   │
+│  └──────┘                │          │           └───────────┘   │
+│  ┌──────┐                │          │           ┌───────────┐   │
+│  │  C3  │──────────────▶│          │──────────▶│  Node 3   │   │
+│  └──────┘                └──────────┘           └───────────┘   │
+│                                                      │           │
+│                               ┌──────────────────────┘           │
+│                               ▼                                  │
+│                        ┌────────────┐    ┌──────────────┐        │
+│                        │  Shared DB │    │  Redis Cache │        │
+│                        └────────────┘    └──────────────┘        │
+└─────────────────────────────────────────────────────────────────┘</div>
+
+    <h3>4. The Scaling Dimensions — A Mental Model</h3>
+    <p>Martin Kleppmann and the AKF Scale Cube define three dimensions of scaling:</p>
+    <div class="grid3">
+      <div class="card">
+        <h5>X-Axis: Horizontal Duplication</h5>
+        <p>Clone the entire service N times. Load balancer distributes traffic. Each clone has full capability. Simple but every node holds full dataset in memory.</p>
+      </div>
+      <div class="card">
+        <h5>Y-Axis: Functional Decomposition</h5>
+        <p>Split by <em>function</em> — microservices. Order service, User service, Payment service. Each can scale independently based on its own load profile.</p>
+      </div>
+      <div class="card">
+        <h5>Z-Axis: Data Partitioning (Sharding)</h5>
+        <p>Each node handles a <em>subset</em> of data/customers. Node A handles user IDs 0–1M, Node B handles 1M–2M. Reduces dataset per node, enables true horizontal DB scaling.</p>
+      </div>
+    </div>
+
+    <h3>5. Stateless vs Stateful Scaling</h3>
+    <p><strong>Stateless services</strong> (REST APIs, GraphQL resolvers) scale trivially — any request can go to any instance because no per-session state is stored locally. The state is externalised to a database, Redis, or passed in the request (JWT token).</p>
+    <p><strong>Stateful services</strong> (WebSocket connections, TCP sessions, game servers) are harder — the state lives on a specific node, so the LB must route a client to the same node (sticky sessions via IP hash or session cookie). If that node dies, the session is lost unless state is replicated.</p>
+
+    <pre><span class="cm"># Nginx sticky session config — routes same client to same upstream</span>
+<span class="kw">upstream</span> app_servers {
+    <span class="fn">ip_hash</span>;          <span class="cm"># hash of client IP → deterministic node selection</span>
+    server 10.0.0.1<span class="op">:</span><span class="num">8080</span>;
+    server 10.0.0.2<span class="op">:</span><span class="num">8080</span>;
+    server 10.0.0.3<span class="op">:</span><span class="num">8080</span>;
+}</pre>
+
+    <h3>6. Database Scaling — The Hard Part</h3>
+    <p>App servers are easy to scale. Databases are hard because they hold state. There are four main approaches:</p>
+
+    <h4>a) Read Replicas</h4>
+    <p>Primary handles writes. Replicas asynchronously receive the replication stream (WAL in Postgres, binlog in MySQL) and serve reads. Internally, MySQL binlog replication works as: Primary writes event to binlog → Replica I/O thread fetches binlog events → Replica SQL thread applies them to its local data files. Replication lag is the delay between primary write and replica commit — typically 10 ms–seconds under heavy write load.</p>
+
+    <h4>b) Connection Pooling (PgBouncer, ProxySQL)</h4>
+    <p>PostgreSQL forks a backend process per connection (~5 MB RAM each). At 10,000 connections, that's 50 GB RAM just for connection processes. PgBouncer maintains a small pool of real DB connections (say 100) and multiplexes thousands of app connections onto them. In transaction mode, a connection is borrowed for the duration of a single transaction, then returned to the pool.</p>
+
+    <h4>c) Sharding</h4>
+    <p>Split data into shards by key (user_id % N). Each shard is an independent DB server. Cross-shard joins are impossible natively — the application layer must aggregate. Resharding when you add nodes is painful (consistent hashing mitigates this).</p>
+
+    <h4>d) CQRS + Event Sourcing</h4>
+    <p>Separate the write model (commands) from the read model (queries). The read store is optimised for queries (denormalised, indexed differently). Scales read load independently from write load.</p>
+
+    <h3>7. Measuring Scalability — Key Metrics</h3>
+    <div class="tbl-wrap">
+    <table>
+      <tr><th>Metric</th><th>What It Measures</th><th>Target</th></tr>
+      <tr><td>Throughput (RPS/TPS)</td><td>Requests or transactions per second the system handles</td><td>Grows linearly with added nodes (ideal)</td></tr>
+      <tr><td>Latency (p50/p99/p999)</td><td>Time from request to response at percentile</td><td>Stays flat as load increases</td></tr>
+      <tr><td>Saturation</td><td>How full the limiting resource is (CPU%, queue depth)</td><td>&lt; 70% steady state</td></tr>
+      <tr><td>Error Rate</td><td>% requests returning 5xx or timing out</td><td>&lt; 0.1% under normal load</td></tr>
+      <tr><td>Scale-out efficiency</td><td>Throughput gain / node added (ideal = 1.0)</td><td>&gt; 0.8 (80% linear)</td></tr>
+    </table>
+    </div>
+
+    <h3>8. Amdahl's Law — Why You Can't Scale Infinitely</h3>
+    <p>If your workload has a serial fraction <code>s</code> (e.g., global locks, single-threaded queue), the maximum speedup achievable with <code>N</code> processors is:</p>
+    <pre><span class="cm">Speedup(N) = 1 / (s + (1 - s) / N)</span>
+
+<span class="cm">Example: s = 0.10 (10% serial code)</span>
+<span class="cm">N = 2  → speedup = 1.82×</span>
+<span class="cm">N = 8  → speedup = 4.7×</span>
+<span class="cm">N = ∞  → speedup = 10×  (hard ceiling!)</span>
+
+<span class="cm">Implication: reducing serial bottlenecks (locks, single-leader writes)</span>
+<span class="cm">is MORE valuable than adding more nodes after a point.</span></pre>
+
+    <h3>9. Real-World Scalability Patterns</h3>
+    <ul>
+      <li><strong>Auto-scaling groups (AWS ASG):</strong> CloudWatch alarm (CPU &gt; 70%) triggers launch of new EC2. ALB health check detects new instance. Traffic flows in ~90 seconds. Scale-in waits for connection draining (default 300s).</li>
+      <li><strong>Kubernetes HPA (Horizontal Pod Autoscaler):</strong> Queries metrics-server every 15s. Computes desired replicas = ceil(currentReplicas × currentMetricValue / desiredMetricValue). Applies a cooldown (--horizontal-pod-autoscaler-downscale-stabilization, default 5 min) to prevent thrashing.</li>
+      <li><strong>Database connection pool scaling:</strong> PgBouncer pool_size = (DB_max_connections - superuser_reserve) / number_of_pgbouncer_instances. Overshooting causes "sorry, too many clients already".</li>
+      <li><strong>Event-driven async scaling:</strong> SQS queue depth triggers Lambda concurrency or ECS task count. Works because consumers are stateless and idempotent.</li>
+    </ul>
+
+    <div class="callout callout-green">
+      <div class="callout-title">✅ Key Takeaway</div>
+      Scalability is not a single decision — it's a continuous process. Start with vertical scaling for simplicity, introduce horizontal scaling when you hit limits, shard data only when necessary (it adds massive complexity), and always measure bottlenecks before scaling to avoid premature optimisation.
+    </div>
+
+  </div>
+</section>
+
+
+<!-- ═══════════════════════════════════════════════════════════
+     TOPIC 2 — AVAILABILITY
+════════════════════════════════════════════════════════════ -->
+<section class="topic" id="t2">
+  <div class="topic-header">
+    <div class="topic-num">Topic 02</div>
+    <div class="topic-title">
+      <div class="topic-icon" style="background:linear-gradient(135deg,#065f46,#10b981)">🟢</div>
+      Availability
+    </div>
+    <p class="topic-lead">Availability is the fraction of time a system is operational and serving requests correctly. It is the ratio of uptime to total time. Engineering high availability means designing systems that continue working despite hardware failures, software bugs, network partitions, and operator errors.</p>
+  </div>
+
+  <div class="topic-body">
+
+    <h3>1. The Mathematics of Availability</h3>
+    <p>Availability (A) = Uptime / (Uptime + Downtime) = MTBF / (MTBF + MTTR)</p>
+    <ul>
+      <li><strong>MTBF</strong> (Mean Time Between Failures): average time the system runs before failing. Increase by improving software quality, hardware redundancy.</li>
+      <li><strong>MTTR</strong> (Mean Time To Recovery): average time to detect, diagnose, and restore service after failure. Decrease by improving monitoring, automation, and runbooks.</li>
+    </ul>
+
+    <div class="tbl-wrap">
+    <table>
+      <tr><th>Availability</th><th>Nines</th><th>Downtime / Year</th><th>Downtime / Month</th><th>Downtime / Week</th></tr>
+      <tr><td>90%</td><td>One nine</td><td>36.5 days</td><td>72 hours</td><td>16.8 hours</td></tr>
+      <tr><td>99%</td><td>Two nines</td><td>3.65 days</td><td>7.2 hours</td><td>1.68 hours</td></tr>
+      <tr><td>99.9%</td><td>Three nines</td><td>8.76 hours</td><td>43.8 min</td><td>10.1 min</td></tr>
+      <tr><td>99.99%</td><td>Four nines</td><td>52.6 minutes</td><td>4.38 min</td><td>1.01 min</td></tr>
+      <tr><td>99.999%</td><td>Five nines</td><td>5.26 minutes</td><td>26.3 sec</td><td>6.05 sec</td></tr>
+    </table>
+    </div>
+
+    <div class="callout callout-warn">
+      <div class="callout-title">⚠️ SLA vs SLO vs SLI</div>
+      <strong>SLI</strong> (Service Level Indicator): a measurable metric, e.g., "fraction of successful requests in last 5 min". <strong>SLO</strong> (Service Level Objective): the target you internally commit to, e.g., "99.9% of requests succeed". <strong>SLA</strong> (Service Level Agreement): the contractual commitment with penalty clauses. SLO should be stricter than SLA to give you a buffer (error budget).
+    </div>
+
+    <h3>2. Serial vs Parallel Availability — How Redundancy Works Mathematically</h3>
+
+    <h4>Components in Series (all must work for system to work):</h4>
+    <pre><span class="cm">A_total = A1 × A2 × A3 × ... × An
+
+Example: 3 services each at 99.9%:
+A_total = 0.999 × 0.999 × 0.999 = 0.997 = 99.7%
+
+Adding components in series REDUCES availability!
+This is why you want fewer hops in your critical path.</span></pre>
+
+    <h4>Components in Parallel (any one working = system works):</h4>
+    <pre><span class="cm">A_total = 1 - (1 - A1) × (1 - A2) × ... × (1 - An)
+
+Example: 2 servers each at 99% availability:
+A_total = 1 - (1 - 0.99) × (1 - 0.99)
+        = 1 - 0.01 × 0.01
+        = 1 - 0.0001 = 99.99%
+
+Redundancy improves availability exponentially!</span></pre>
+
+    <h3>3. Failure Modes — What Actually Causes Downtime</h3>
+    <div class="grid2">
+      <div class="card">
+        <h5>Hardware Failures</h5>
+        <p>Disk failure (MTTF ~3–5 years), NIC failure, RAM bit-flip (ECC corrects single-bit, can't fix multi-bit), power supply failure, rack switch failure. Google reports ~0.5% of drives fail per year at scale.</p>
+      </div>
+      <div class="card">
+        <h5>Software Bugs</h5>
+        <p>Memory leaks (gradual OOM), deadlocks (threads wait on each other forever), race conditions, off-by-one errors in buffer allocation causing crashes under specific load.</p>
+      </div>
+      <div class="card">
+        <h5>Network Partitions</h5>
+        <p>BGP route flaps, misconfigured ACLs, NIC firmware bugs causing packet loss, datacenter link saturation causing TCP retransmits and timeout cascades.</p>
+      </div>
+      <div class="card">
+        <h5>Operator Errors</h5>
+        <p>Misconfigured deployment (wrong env var), accidental deletion (DROP TABLE), failed migration (schema change locks table), capacity exhaustion (disk full → log writes fail → service crash).</p>
+      </div>
+      <div class="card">
+        <h5>Dependency Failures</h5>
+        <p>Third-party API (payment, email) outage, DNS resolver timeout, certificate expiry, cloud provider regional failure (AWS us-east-1 incidents).</p>
+      </div>
+      <div class="card">
+        <h5>Overload / Traffic Spikes</h5>
+        <p>Thundering herd on cache miss, DDoS, viral traffic event, poorly batched cron job that queries full table simultaneously with prod traffic.</p>
+      </div>
+    </div>
+
+    <h3>4. High Availability Architecture Patterns</h3>
+
+    <h4>a) Active-Active</h4>
+    <p>Multiple nodes serve traffic simultaneously. Load balancer distributes across all. If one fails, the others absorb its share. <em>Both nodes process writes</em>, so conflict resolution or consensus is needed (e.g., last-write-wins, vector clocks, or Paxos). Used by: Cassandra, CockroachDB, global anycast DNS.</p>
+
+    <h4>b) Active-Passive (Hot Standby)</h4>
+    <p>One primary serves all traffic. The standby is fully up-to-date via synchronous replication but serves no traffic. On primary failure, health check detects it (within 10–30 seconds typically) and the standby is promoted. Failover time = detection time + DNS TTL propagation + standby initialisation. Used by: PostgreSQL streaming replication, MySQL with MHA.</p>
+
+    <h4>c) Active-Passive (Cold Standby)</h4>
+    <p>Standby is not running. Must be booted, restored from backup, and started. RTO (Recovery Time Objective) is minutes to hours. Much cheaper but higher downtime. Used for non-critical tier-2 systems.</p>
+
+    <div class="diagram">
+┌─────────────────────────────────────────────────────────────────┐
+│                  ACTIVE-ACTIVE HA PATTERN                       │
+│                                                                 │
+│          ┌──────────┐         ┌──────────┐                      │
+│          │  Node A  │◀──────▶│  Node B  │  ← Sync replication  │
+│          │ (active) │         │ (active) │                      │
+│          └──────────┘         └──────────┘                      │
+│               ▲                    ▲                             │
+│               └──────────┬─────────┘                             │
+│                     ┌────┴─────┐                                 │
+│                     │    LB    │                                 │
+│                     └────┬─────┘                                 │
+│                          ▼                                       │
+│                       Clients                                    │
+│                                                                 │
+│  If Node A fails → LB health check detects (via /health probe)  │
+│  LB removes A from pool → 100% traffic to Node B in ~5 seconds  │
+└─────────────────────────────────────────────────────────────────┘</div>
+
+    <h3>5. Health Checks — How LBs Detect Failure</h3>
+    <p>Health checks are the mechanism that enables automatic failover. There are three types:</p>
+    <ul>
+      <li><strong>TCP health check:</strong> LB opens a TCP connection to the backend port. If 3-way handshake completes, node is "up". Does NOT verify application logic — a crashed app with SO_REUSEADDR holding port open would pass.</li>
+      <li><strong>HTTP health check:</strong> LB sends <code>GET /health HTTP/1.1</code> and expects 200 OK within a timeout. The <code>/health</code> endpoint should verify DB connectivity, cache connectivity, and critical dependencies. A returning 200 when DB is unreachable is a bad health endpoint — it lies.</li>
+      <li><strong>Deep health check:</strong> The endpoint performs a lightweight DB query (<code>SELECT 1</code>), checks cache ping, verifies disk space, and returns JSON with each component's status. Used for debugging but not always as the LB probe (too slow).</li>
+    </ul>
+
+    <pre><span class="cm">// Example robust health endpoint (Node.js / Express)</span>
+app.<span class="fn">get</span>(<span class="str">'/health'</span>, <span class="kw">async</span> (req, res) => {
+  <span class="kw">const</span> checks = <span class="kw">await</span> Promise.<span class="fn">allSettled</span>([
+    db.<span class="fn">query</span>(<span class="str">'SELECT 1'</span>),
+    redis.<span class="fn">ping</span>(),
+  ]);
+  <span class="kw">const</span> healthy = checks.<span class="fn">every</span>(c => c.status === <span class="str">'fulfilled'</span>);
+  res.<span class="fn">status</span>(healthy ? <span class="num">200</span> : <span class="num">503</span>).<span class="fn">json</span>({
+    status: healthy ? <span class="str">'ok'</span> : <span class="str">'degraded'</span>,
+    db: checks[<span class="num">0</span>].status,
+    redis: checks[<span class="num">1</span>].status,
+    uptime: process.<span class="fn">uptime</span>(),
+  });
+});</pre>
+
+    <h3>6. Geo-Redundancy and Multi-Region Availability</h3>
+    <p>For five-nines availability, a single region is insufficient — AWS regions themselves have had multi-hour outages. You need multi-region deployment:</p>
+    <ol class="steps">
+      <li><strong>Global Load Balancer (Route 53, Cloudflare):</strong> Uses DNS-based routing (latency-based, geolocation, failover policies) to direct users to the nearest healthy region.</li>
+      <li><strong>Data replication across regions:</strong> Async replication (low overhead, risk of data loss on failover) vs sync replication (no data loss, high latency penalty). Most systems use async with RPO (Recovery Point Objective) of &lt;1 minute.</li>
+      <li><strong>Global Accelerator / Anycast:</strong> Traffic enters AWS backbone at the nearest PoP and traverses the private backbone (lower latency, avoids public internet jitter) to the serving region.</li>
+      <li><strong>Chaos Engineering:</strong> Netflix Chaos Monkey randomly terminates production instances. Chaos Kong terminates entire regions. This validates that your HA mechanisms actually work under real conditions.</li>
+    </ol>
+
+    <h3>7. Graceful Degradation</h3>
+    <p>When a dependency fails, rather than returning an error to the user, the system returns a degraded but functional response. Example: YouTube's recommendation engine is down → show popular videos instead of personalised recommendations. The user gets a worse experience but the service is still "available".</p>
+
+    <div class="callout callout-green">
+      <div class="callout-title">✅ Key Takeaway</div>
+      Availability engineering is a trade-off between cost and downtime tolerance. True high availability requires: redundancy at every layer (app, DB, network, datacenter), fast failure detection (health checks, alerts), fast recovery (automated failover, runbooks), and regular testing (chaos engineering, game days). No single component should be a single point of failure (SPOF).
+    </div>
+
+  </div>
+</section>
+
+
+<!-- ═══════════════════════════════════════════════════════════
+     TOPIC 3 — LOAD BALANCING
+════════════════════════════════════════════════════════════ -->
+<section class="topic" id="t3">
+  <div class="topic-header">
+    <div class="topic-num">Topic 03</div>
+    <div class="topic-title">
+      <div class="topic-icon" style="background:linear-gradient(135deg,#7c3aed,#a78bfa)">⚖️</div>
+      Load Balancing
+    </div>
+    <p class="topic-lead">A load balancer is a device or software that distributes incoming network traffic across multiple backend servers to maximise throughput, minimise response time, avoid overload of any single server, and increase reliability through redundancy.</p>
+  </div>
+
+  <div class="topic-body">
+
+    <h3>1. The Core Problem Load Balancers Solve</h3>
+    <p>Without a load balancer, your single server is both a performance bottleneck and a SPOF. With a load balancer, you get: <strong>traffic distribution</strong> (no single server drowns), <strong>health-based routing</strong> (dead servers are bypassed), <strong>SSL termination</strong> (offload TLS handshake cost), and <strong>a single public endpoint</strong> (backend topology is hidden).</p>
+
+    <h3>2. L4 vs L7 Load Balancing — The Deep Difference</h3>
+
+    <h4>Layer 4 (Transport Layer) Load Balancing</h4>
+    <p>Operates on TCP/UDP packets. The LB looks at IP address + TCP port and makes routing decisions <em>without</em> reading the HTTP payload. It performs NAT (Network Address Translation) or IP tunnelling to forward packets.</p>
+    <p><strong>How it works internally (NAT mode):</strong></p>
+    <ol class="steps">
+      <li>Client establishes TCP connection to LB VIP (Virtual IP): 10.0.0.100:443.</li>
+      <li>LB's kernel netfilter/iptables or DPDK-based dataplane selects a backend (10.0.0.5:8080) using its algorithm.</li>
+      <li>LB rewrites the destination IP/port in the packet header (DNAT) and forwards. Source IP may also be rewritten (SNAT) so the backend sends return traffic back through the LB, or the LB uses DSR (Direct Server Return) to let the backend reply directly to the client.</li>
+      <li>Connection table entry is kept so all packets of the same TCP flow go to the same backend (connection affinity).</li>
+    </ol>
+    <p><em>Pros:</em> Extremely fast (kernel bypass with DPDK: millions of packets/sec), works with any protocol (MySQL, Redis, SMTP), minimal overhead. <em>Cons:</em> Can't route based on HTTP Host header, URL path, or cookie — it can't read layer-7 content.</p>
+
+    <h4>Layer 7 (Application Layer) Load Balancing</h4>
+    <p>Terminates the TCP connection at the LB, reads the full HTTP/2 or gRPC request, and makes intelligent routing decisions based on content, then opens a new connection to the backend.</p>
+    <p><strong>How it works internally:</strong></p>
+    <ol class="steps">
+      <li>Client's TCP connection terminates at the LB. TLS is decrypted here (SSL termination).</li>
+      <li>LB reads HTTP headers: <code>Host: api.example.com</code>, <code>GET /users/123</code>, <code>Cookie: session=abc</code>.</li>
+      <li>Routing rules evaluated: if path starts with <code>/api/v2</code>, route to v2 cluster; if <code>X-Beta-User: true</code>, route to canary cluster.</li>
+      <li>LB opens a new TCP connection to selected backend (from its connection pool). Forwards the request, receives response, sends back to client.</li>
+    </ol>
+    <p><em>Pros:</em> Content-based routing, A/B testing, rate limiting per endpoint, WebSocket upgrades, circuit breaking. <em>Cons:</em> Higher CPU cost per connection (full HTTP parse), added latency hop, requires TLS private key access.</p>
+
+    <div class="diagram">
+┌───────────────────────────────────────────────────────────────┐
+│              L4 vs L7 LOAD BALANCER INTERNALS                 │
+│                                                               │
+│  L4 (TCP/UDP):                                                │
+│  Client ──TCP SYN──▶ LB (reads IP:PORT only)                  │
+│                       LB ──DNAT──▶ Backend                    │
+│  No HTTP awareness. Just packet-level forwarding.             │
+│                                                               │
+│  L7 (HTTP/HTTPS):                                             │
+│  Client ──TLS+HTTP──▶ LB (decrypts, reads headers/path)       │
+│    ├─ Host: api.example.com, GET /users → User Service        │
+│    ├─ Host: api.example.com, GET /orders → Order Service      │
+│    └─ X-Beta: true → Canary Cluster                           │
+│                       LB ──new TCP──▶ Selected Backend        │
+│  Full HTTP awareness. Can do smart routing + transforms.      │
+└───────────────────────────────────────────────────────────────┘</div>
+
+    <h3>3. Load Balancing Algorithms — Internal Mechanics</h3>
+
+    <h4>a) Round Robin</h4>
+    <p>Requests are distributed sequentially: 1→Node1, 2→Node2, 3→Node3, 4→Node1... Internally, the LB maintains a circular pointer. Fast, zero overhead. Problem: doesn't account for backend capacity difference or current load. A slow request on Node1 doesn't affect routing of future requests to Node1.</p>
+
+    <h4>b) Weighted Round Robin</h4>
+    <p>Nodes get weights: Node1(weight=3), Node2(weight=1). In every 4 requests, 3 go to Node1 and 1 to Node2. Used when nodes have different hardware specs (larger VM gets more weight). Implemented as a GCD-based algorithm or interleaved pointer.</p>
+
+    <h4>c) Least Connections</h4>
+    <p>New request goes to the backend with fewest active connections. LB maintains a connection count per backend (incremented on open, decremented on close). Best for workloads with variable request duration (some requests take 1ms, others take 5s — round robin would pile requests on a slow backend). Requires synchronisation if LB is distributed (shared counter or approximate local counts).</p>
+
+    <h4>d) Least Response Time</h4>
+    <p>Routes to the backend with the lowest combination of: active connections × average response time. Requires the LB to measure and track backend response latency (EWMA — Exponentially Weighted Moving Average). Used by Envoy's <code>LEAST_REQUEST</code> policy with random selection among the two least-loaded upstreams (power-of-two-choices algorithm).</p>
+
+    <h4>e) IP Hash (Source IP Affinity)</h4>
+    <p>Hash of client IP → modulo N backends. The same client always goes to the same backend (sticky session without a cookie). Problem: if a backend dies, the hash changes for all clients whose modulo lands differently after N shrinks. Consistent hashing solves this.</p>
+
+    <h4>f) Random</h4>
+    <p>Uniformly random backend selection. With enough requests, converges to equal distribution (Law of Large Numbers). Envoy's power-of-two-choices: pick 2 random backends, route to the one with fewer active requests. Much better than pure random, nearly as good as least connections, without requiring a global counter.</p>
+
+    <h4>g) Resource-Based (Adaptive)</h4>
+    <p>Backends periodically report their CPU/memory utilisation. LB routes to the least-loaded backend. Requires a side-channel (e.g., gRPC metadata, custom headers) for backends to report metrics. Used in some service mesh implementations.</p>
+
+    <h3>4. Health Checking in Load Balancers</h3>
+    <p>LBs continuously probe backends:</p>
+    <ul>
+      <li><strong>Probe interval:</strong> every 5–30 seconds.</li>
+      <li><strong>Unhealthy threshold:</strong> N consecutive failures (e.g., 3) before marking down. Prevents flapping on transient failures.</li>
+      <li><strong>Healthy threshold:</strong> M consecutive successes (e.g., 2) before marking up after recovery.</li>
+      <li><strong>Probe timeout:</strong> If backend doesn't respond within 2 seconds, count as failure.</li>
+    </ul>
+    <p>During the window between a backend dying and the LB detecting it (up to 3 × 10s = 30 seconds at worst), traffic still flows to the dead backend → those requests fail. This is why application-level retries and circuit breakers exist as a complement to LB health checks.</p>
+
+    <h3>5. SSL/TLS Termination</h3>
+    <p>TLS handshake is expensive: it involves asymmetric cryptography (RSA or ECDH key exchange), certificate validation (chain traversal, OCSP stapling), and session establishment. Offloading this to the LB means:</p>
+    <ul>
+      <li>Backends receive plain HTTP — no TLS overhead per request.</li>
+      <li>LB can reuse TLS sessions (session ticket resumption) — a returning client's TLS overhead drops from ~5 round trips to 1.</li>
+      <li>Certificate management is centralised (one cert on the LB, not on every backend).</li>
+      <li><strong>Risk:</strong> Traffic between LB and backend is unencrypted. In a shared datacenter or cloud, this may violate compliance. Solution: use TLS between LB and backend too (end-to-end encryption) but accept slightly higher overhead.</li>
+    </ul>
+
+    <h3>6. Connection Draining (Graceful Backend Removal)</h3>
+    <p>When you deploy a new version, you remove the old backend from the LB. If you do this abruptly, in-flight requests are killed. Connection draining: LB stops sending <em>new</em> requests to the backend being removed but allows existing connections to complete (up to a drain timeout, e.g., 30 seconds). After the timeout, the LB forcefully closes remaining connections.</p>
+
+    <h3>7. Global vs Local Load Balancing</h3>
+    <div class="grid2">
+      <div class="card">
+        <h5>Local LB (L4/L7 in-datacenter)</h5>
+        <p>HAProxy, Nginx, Envoy, AWS ALB/NLB. Routes traffic within a single region/datacenter. Sub-millisecond overhead. Handles SSL, health checks, content routing.</p>
+      </div>
+      <div class="card">
+        <h5>Global LB (DNS-based / Anycast)</h5>
+        <p>AWS Route 53, Cloudflare, GCP Global LB. Routes traffic across regions based on latency, geography, or health. DNS TTL must be short (30–60s) for fast failover. Anycast routes to nearest PoP via BGP.</p>
+      </div>
+    </div>
+
+    <h3>8. Real-World LB Tools Internals</h3>
+    <h4>HAProxy</h4>
+    <p>Single-process, event-driven architecture. Uses <code>epoll</code> on Linux (or <code>kqueue</code> on BSD) to handle tens of thousands of concurrent connections with a small thread pool. Each thread runs an event loop. No thread-per-connection overhead. HAProxy's stick tables implement shared state for per-IP rate limiting and sticky sessions in clustered mode using a peer protocol.</p>
+
+    <h4>Nginx (as LB)</h4>
+    <p>Master process + N worker processes (one per CPU core). Each worker uses <code>epoll</code> event loop. Upstream module maintains connection pools to backends. <code>keepalive</code> directive enables persistent connections to backends, amortising TCP + TLS handshake cost over many requests.</p>
+
+    <h4>Envoy Proxy</h4>
+    <p>C++ L7 proxy used as the data plane in Istio service mesh. Features: hot restart (zero-downtime config reloads), xDS API (dynamic configuration from control plane), WASM filter plugins, native HTTP/2 and gRPC support, built-in circuit breaking, outlier detection (automatic backend ejection based on error rate), and distributed tracing.</p>
+
+    <div class="callout callout-green">
+      <div class="callout-title">✅ Key Takeaway</div>
+      Use L4 LB for raw throughput and protocol-agnostic scenarios. Use L7 LB for HTTP/gRPC workloads where you need content routing, canary deployments, or rate limiting. Always enable health checks with appropriate thresholds, and connection draining for zero-downtime deploys. At scale, layer global DNS-based routing on top for multi-region resilience.
+    </div>
+
+  </div>
+</section>
+
+
+<!-- ═══════════════════════════════════════════════════════════
+     TOPIC 4 — RELIABILITY
+════════════════════════════════════════════════════════════ -->
+<section class="topic" id="t4">
+  <div class="topic-header">
+    <div class="topic-num">Topic 04</div>
+    <div class="topic-title">
+      <div class="topic-icon" style="background:linear-gradient(135deg,#92400e,#f59e0b)">🔧</div>
+      Reliability
+    </div>
+    <p class="topic-lead">Reliability is the probability that a system performs its intended function correctly, without failure, for a specified period under stated conditions. Unlike availability (which measures uptime), reliability measures correctness — the system is up AND produces correct results AND meets its performance SLOs.</p>
+  </div>
+
+  <div class="topic-body">
+
+    <h3>1. Reliability vs Availability — The Critical Distinction</h3>
+    <p>A system can be <em>available but unreliable</em>: imagine a banking API that returns 200 OK but occasionally returns the wrong account balance due to a race condition. It's "up" but corrupting data. Reliability requires both: <strong>functional correctness</strong> (right answer) and <strong>performance correctness</strong> (within SLO). Availability without reliability is worse than downtime — silent data corruption goes undetected and is hard to remediate.</p>
+
+    <div class="callout callout-red">
+      <div class="callout-title">🔴 Example: The Danger of Silent Data Corruption</div>
+      In 2012, Knight Capital's trading software sent wrong orders due to a bug in a code deployment. The system was fully "available" — responding to market data — but executing incorrect trades. Lost $440 million in 45 minutes before detection. Reliability failure, not availability failure.
+    </div>
+
+    <h3>2. Reliability Engineering — Core Principles</h3>
+
+    <h4>a) Fault Tolerance vs Fault Avoidance</h4>
+    <p><strong>Fault avoidance:</strong> Write bug-free code, use formal verification, rigorous testing. Asymptotically approaches but never reaches zero bugs. <strong>Fault tolerance:</strong> Assume faults will happen (hardware WILL fail, bugs WILL ship) and design the system to continue operating correctly despite them. Modern distributed systems rely on fault tolerance because fault avoidance at scale is impossible.</p>
+
+    <h4>b) Redundancy</h4>
+    <p>Every critical component is duplicated. Types:</p>
+    <ul>
+      <li><strong>Hardware redundancy:</strong> RAID disks (parity), dual power supplies, dual NICs (bonding), redundant switches.</li>
+      <li><strong>Software redundancy:</strong> Multiple service replicas, replicated databases.</li>
+      <li><strong>Geographic redundancy:</strong> Multi-region, multi-AZ deployments.</li>
+      <li><strong>Temporal redundancy:</strong> Retry failed operations (with backoff). If a request fails once, try again — the failure may be transient.</li>
+    </ul>
+
+    <h4>c) Idempotency</h4>
+    <p>Operations that can be retried safely without double-effects. A payment API that deduplicates on a client-generated idempotency key (UUID) — if the same request is retried, the second attempt is recognised by the key and returns the original result without charging again. This enables safe retries, which are essential for reliability.</p>
+
+    <h3>3. Failure Detection — How Systems Know They're Failing</h3>
+    <h4>Timeouts</h4>
+    <p>Without timeouts, a slow dependency can hold your threads/connections indefinitely, exhausting your connection pool and causing cascading failure. Timeouts should be set based on p99 response time of the dependency + buffer. Too short → spurious failures under normal load. Too long → slow failures cascade.</p>
+    <pre><span class="cm"># Good timeout strategy: connect timeout &lt; read timeout &lt; overall request timeout</span>
+connect_timeout = <span class="num">100</span>ms   <span class="cm"># TCP handshake should be fast</span>
+read_timeout    = <span class="num">500</span>ms   <span class="cm"># backend p99 + buffer</span>
+total_timeout   = <span class="num">1000</span>ms  <span class="cm"># absolute ceiling including retries</span></pre>
+
+    <h4>Heartbeats</h4>
+    <p>Nodes periodically send heartbeat messages to a coordinator or each other. If heartbeat is missing for N intervals, node is presumed failed. Used in: ZooKeeper (session timeout), Kafka (broker heartbeats to controller), Kubernetes (kubelet heartbeat to API server every 10s, eviction after 40s default). <em>Problem:</em> heartbeat absence could mean node failure OR network partition — both look the same from outside. This is the fundamental problem in distributed systems.</p>
+
+    <h3>4. The Reliability Hierarchy — What to Fix First</h3>
+    <ol class="steps">
+      <li><strong>On-call &amp; monitoring:</strong> You can't fix what you can't detect. Implement structured logging, distributed tracing, and alerting before anything else.</li>
+      <li><strong>Incident response:</strong> Runbooks, escalation paths, post-mortems with blameless culture. Each incident should produce an action item that prevents recurrence.</li>
+      <li><strong>Testing:</strong> Unit tests, integration tests, contract tests, load tests, chaos tests. Each layer catches different classes of bugs.</li>
+      <li><strong>Release engineering:</strong> Feature flags, canary deployments, automated rollbacks. Reduce blast radius of bad deploys.</li>
+      <li><strong>Capacity planning:</strong> Ensure you have headroom (30% free capacity) so that loss of one node doesn't overload remaining nodes.</li>
+    </ol>
+
+    <h3>5. Testing for Reliability</h3>
+
+    <h4>Chaos Engineering</h4>
+    <p>Deliberately inject failures into production (or staging) to validate reliability assumptions. Principles (from Netflix Simian Army):</p>
+    <ul>
+      <li><strong>Hypothesis-driven:</strong> "We believe the system will maintain p99 &lt; 200ms even if one AZ is unavailable."</li>
+      <li><strong>Blast radius control:</strong> Start small (1% of traffic, 1 instance), expand if hypothesis holds.</li>
+      <li><strong>Automated experiments:</strong> Run continuously. If a result diverges from the hypothesis, halt and alert.</li>
+    </ul>
+    <p>Tools: Netflix Chaos Monkey (kills EC2 instances), Chaos Mesh (Kubernetes), Gremlin (commercial), AWS Fault Injection Simulator.</p>
+
+    <h4>Property-Based Testing</h4>
+    <p>Instead of writing specific test cases, you define properties that must always hold and the test framework generates thousands of random inputs to try to falsify them. Example: "for any two users, their account balances after a transfer should sum to the same total as before." Tools: Hypothesis (Python), QuickCheck (Haskell/Erlang), jqwik (Java).</p>
+
+    <h3>6. Error Budgets</h3>
+    <p>Google SRE introduced the concept: if your SLO is 99.9% availability, your error budget is 0.1% of requests (or 43.8 min/month). This budget is shared between planned downtime (deployments), unexpected failures, and risky changes. When the error budget is exhausted, the development team must freeze feature work and focus on reliability improvements. This creates alignment between engineering velocity and reliability.</p>
+
+    <pre><span class="cm">Error Budget = 1 - SLO
+Monthly error budget = (1 - 0.999) × 30 × 24 × 60 = 43.8 minutes
+
+If last 30 days had 50 min of downtime:
+  Budget consumed = 50/43.8 = 114% → budget exhausted → freeze features</span></pre>
+
+    <h3>7. Data Reliability — Durability</h3>
+    <p><strong>Durability</strong> is reliability applied to data: once written, it stays written. Mechanisms:</p>
+    <ul>
+      <li><strong>Write-ahead logging (WAL):</strong> All changes are written to a sequential log on durable storage before being applied to data files. On crash, the WAL is replayed. Used by PostgreSQL, MySQL InnoDB, RocksDB.</li>
+      <li><strong>Fsync:</strong> <code>fsync()</code> system call flushes OS page cache to disk (calls disk controller's write-back cache flush if the disk supports it). Without fsync, a crash after write acknowledgement could lose data sitting in OS buffer. PostgreSQL calls fsync per WAL segment. Disabling fsync is a dangerous "performance" option.</li>
+      <li><strong>Checksums:</strong> Data pages in PostgreSQL (since v9.3, enabled optionally) store a checksum. On read, checksum is verified. Detects bit-rot (disk data corruption that happens silently over time).</li>
+      <li><strong>Replication:</strong> Synchronous replication ensures a write is confirmed only after it's written to the WAL of at least N replicas (configurable). Protects against single-node hardware failure losing data.</li>
+    </ul>
+
+    <div class="callout callout-green">
+      <div class="callout-title">✅ Key Takeaway</div>
+      Reliability = correct behaviour under failure conditions. It requires fault tolerance (not just fault avoidance), comprehensive testing (especially chaos engineering), observability, and cultural practices (blameless post-mortems, error budgets). Data reliability specifically requires WAL, fsync, and synchronous replication for strong durability guarantees.
+    </div>
+
+  </div>
+</section>
+
+
+<!-- ═══════════════════════════════════════════════════════════
+     TOPIC 5 — PROXY SERVERS
+════════════════════════════════════════════════════════════ -->
+<section class="topic" id="t5">
+  <div class="topic-header">
+    <div class="topic-num">Topic 05</div>
+    <div class="topic-title">
+      <div class="topic-icon" style="background:linear-gradient(135deg,#0f4c75,#1b98e0)">🔀</div>
+      Proxy Servers
+    </div>
+    <p class="topic-lead">A proxy server is an intermediary that sits between clients and servers. It intercepts requests/responses and performs additional functions: caching, authentication, load balancing, security filtering, traffic routing, logging, and protocol translation.</p>
+  </div>
+
+  <div class="topic-body">
+
+    <h3>1. Forward Proxy vs Reverse Proxy — Fundamental Difference</h3>
+    <div class="grid2">
+      <div class="card">
+        <h5>Forward Proxy</h5>
+        <p>Sits <em>in front of clients</em>. Clients know about the proxy and direct requests to it. The proxy forwards to the internet. The origin server sees the proxy's IP, not the client's. Use cases: corporate internet filtering, privacy (VPN-like), bypassing geo-restrictions, caching outbound requests.</p>
+      </div>
+      <div class="card">
+        <h5>Reverse Proxy</h5>
+        <p>Sits <em>in front of servers</em>. Clients don't know about it — they think they're talking to the origin. The proxy routes to backend servers. Use cases: load balancing, SSL termination, caching, WAF, CDN edge, hiding backend topology. Nginx, HAProxy, Envoy, Cloudflare are all reverse proxies.</p>
+      </div>
+    </div>
+
+    <div class="diagram">
+┌──────────────────────────────────────────────────────────────────┐
+│           FORWARD PROXY vs REVERSE PROXY                         │
+│                                                                  │
+│  FORWARD PROXY:                                                  │
+│  Client (knows proxy) ──▶ Forward Proxy ──▶ Internet/Origin      │
+│  Origin sees: Proxy IP                                           │
+│  Used for: Privacy, filtering, caching outbound                  │
+│                                                                  │
+│  REVERSE PROXY:                                                  │
+│  Client (unaware) ──▶ Reverse Proxy ──▶ Backend servers          │
+│  Client sees: Proxy IP (thinks it's the server)                  │
+│  Used for: LB, SSL termination, caching inbound, WAF             │
+└──────────────────────────────────────────────────────────────────┘</div>
+
+    <h3>2. How a Reverse Proxy Works Internally</h3>
+    <ol class="steps">
+      <li><strong>Client DNS resolution:</strong> <code>api.example.com</code> resolves to the proxy's IP (not backend IPs, which are private/internal).</li>
+      <li><strong>TCP connection + TLS handshake:</strong> Client connects to proxy on port 443. Proxy terminates TLS (has the private key), decrypts the HTTP request.</li>
+      <li><strong>Request inspection:</strong> Proxy reads Host header, URL path, headers. Applies WAF rules (block SQLi/XSS patterns), rate limiting (count requests per IP in sliding window), authentication (validate JWT or API key).</li>
+      <li><strong>Backend selection:</strong> Based on URL routing rules, select backend cluster. Use LB algorithm (least connections, round robin) to pick specific instance. Add/modify headers: <code>X-Forwarded-For: &lt;client-ip&gt;</code>, <code>X-Request-ID: uuid</code>.</li>
+      <li><strong>Connection to backend:</strong> From a connection pool (persistent HTTP/2 connections). Forwards request to backend over plaintext HTTP or TLS (re-encryption).</li>
+      <li><strong>Response path:</strong> Backend response returns to proxy. Proxy may cache it (check Cache-Control headers), compress it (gzip/br), then forwards to client over the original encrypted connection.</li>
+    </ol>
+
+    <h3>3. Proxy Protocols and Headers</h3>
+    <h4>X-Forwarded-For (XFF)</h4>
+    <p>When the proxy forwards the request, it adds the client's IP to the XFF header. If multiple proxies are involved, each appends: <code>X-Forwarded-For: client-ip, proxy1-ip, proxy2-ip</code>. The backend reads this to get the true client IP for logging, rate limiting, and geo-blocking. <strong>Security concern:</strong> A client can spoof XFF by sending their own header value. Trust only the last N hops (N = number of trusted proxies in your infrastructure).</p>
+
+    <h4>PROXY Protocol (HAProxy)</h4>
+    <p>Unlike XFF (HTTP-level), PROXY protocol operates at TCP level. The proxy prepends a binary or text header to the TCP stream before any application data: <code>PROXY TCP4 192.168.1.1 10.0.0.5 54321 80\r\n</code>. The backend must support PROXY protocol parsing. This allows the backend to know the real client IP even for non-HTTP protocols (MySQL, Redis).</p>
+
+    <h3>4. Caching in Reverse Proxies</h3>
+    <p>Varnish and Nginx can cache backend responses. The cache decision is based on HTTP cache semantics:</p>
+    <ul>
+      <li><strong>Cacheable:</strong> <code>Cache-Control: public, max-age=3600</code> → proxy stores the response for 3600 seconds. Subsequent requests are served from cache without hitting the backend.</li>
+      <li><strong>Not cacheable:</strong> <code>Cache-Control: private, no-store</code> → always fetches from backend.</li>
+      <li><strong>Conditional requests:</strong> If the cached response has an <code>ETag</code>, the proxy sends <code>If-None-Match: &lt;etag&gt;</code> to the backend. Backend returns 304 Not Modified if unchanged — proxy serves cached copy, saving bandwidth.</li>
+    </ul>
+    <p>Internally, the cache stores responses keyed by URL (+ Vary headers). On hit, it checks TTL. If expired but valid (stale), it can serve stale while revalidating in background (<code>stale-while-revalidate</code> directive). Varnish stores cache in shared memory (mmap'd) — extremely fast, orders of magnitude faster than disk.</p>
+
+    <h3>5. Transparent Proxy</h3>
+    <p>Intercepts traffic without client configuration — the client doesn't know a proxy exists. Implemented at network level using iptables REDIRECT rules that intercept TCP connections on port 80/443 and redirect to the proxy process. Used by ISPs for content filtering, corporate networks for monitoring all employee traffic. HTTPS traffic can't be content-inspected (end-to-end encrypted) unless the proxy does TLS interception with a root CA installed on client devices (SSL inspection / MITM).</p>
+
+    <h3>6. SOCKS Proxy</h3>
+    <p>SOCKS (Socket Secure) is a general-purpose proxy protocol at layer 5 (session layer). Unlike HTTP proxy (which understands HTTP), SOCKS proxies work at TCP/UDP level — they tunnel any protocol. Client sends <code>CONNECT hostname:port</code> command; SOCKS server opens a TCP connection to the target and relays bytes. Used by: SSH tunnels (<code>ssh -D 1080</code> creates a local SOCKS5 proxy), Tor network (routes through multiple SOCKS nodes for anonymity).</p>
+
+    <h3>7. Service Mesh as Proxy</h3>
+    <p>In Kubernetes service mesh (Istio, Linkerd), an Envoy sidecar proxy is injected into every pod. All inbound/outbound traffic flows through the sidecar without the application knowing. This enables: mTLS between services, distributed tracing, per-service rate limiting, traffic splitting (for canary), and circuit breaking — all without changing application code. The control plane (Istiod) pushes configuration to sidecars via xDS API (gRPC long-poll).</p>
+
+    <div class="callout callout-green">
+      <div class="callout-title">✅ Key Takeaway</div>
+      Proxies are the traffic cops of distributed systems. Forward proxies protect clients; reverse proxies protect and scale servers. At the network level they perform NAT/routing; at the application level they cache, authenticate, rate-limit, and route intelligently. Modern service meshes make proxying ubiquitous and transparent — every service becomes a proxy consumer.
+    </div>
+
+  </div>
+</section>
+
+
+<!-- ═══════════════════════════════════════════════════════════
+     TOPIC 6 — DNS
+════════════════════════════════════════════════════════════ -->
+<section class="topic" id="t6">
+  <div class="topic-header">
+    <div class="topic-num">Topic 06</div>
+    <div class="topic-title">
+      <div class="topic-icon" style="background:linear-gradient(135deg,#1a4731,#22c55e)">🌐</div>
+      DNS — Domain Name System
+    </div>
+    <p class="topic-lead">DNS is the distributed, hierarchical system that translates human-readable domain names (api.example.com) into IP addresses (93.184.216.34) that machines use to route packets. It is the phone book of the internet — and its internals are far more complex and critical than most engineers appreciate.</p>
+  </div>
+
+  <div class="topic-body">
+
+    <h3>1. The DNS Hierarchy — How it's Structured</h3>
+    <p>DNS is a tree structure with the root at the top:</p>
+    <div class="diagram">
+                        . (Root)
+                        │
+          ┌─────────────┼─────────────┐
+         com           org           io
+          │
+      example.com
+          │
+      api.example.com
+      www.example.com</div>
+
+    <p>Each level is managed by different authoritative servers:</p>
+    <ul>
+      <li><strong>Root servers (13 logical clusters, anycast to 1000+ physical servers):</strong> Know where the TLD servers are. They don't know your domain — they only know: "for .com, ask these servers".</li>
+      <li><strong>TLD servers (Verisign for .com, PIR for .org):</strong> Know which authoritative server manages a specific domain. "For example.com, ask ns1.cloudflare.com".</li>
+      <li><strong>Authoritative DNS servers (Cloudflare, Route 53, your own BIND):</strong> Have the actual DNS records (A, AAAA, CNAME, MX, TXT, etc.) for your domain. The final source of truth.</li>
+    </ul>
+
+    <h3>2. Full DNS Resolution — Step by Step (What Actually Happens)</h3>
+    <ol class="steps">
+      <li><strong>Browser cache check:</strong> Browser checks its own DNS cache (Chrome: <code>chrome://net-internals/#dns</code>). If cached and not expired (TTL not elapsed), done.</li>
+      <li><strong>OS resolver cache check:</strong> <code>nscd</code> or <code>systemd-resolved</code> on Linux. If found, return immediately.</li>
+      <li><strong>OS stub resolver → Recursive resolver:</strong> The OS sends a UDP (or TCP) query to the configured recursive resolver (your ISP's resolver, or 8.8.8.8, 1.1.1.1). This is the server that does the actual work of querying the hierarchy.</li>
+      <li><strong>Recursive resolver → Root server:</strong> Sends: "What is the IP of api.example.com?" Root responds: "I don't know, but .com TLD servers are at these IPs."</li>
+      <li><strong>Recursive resolver → .com TLD server:</strong> Asks same question. TLD responds: "I don't know, but example.com's authoritative servers are ns1.cloudflare.com, ns2.cloudflare.com."</li>
+      <li><strong>Recursive resolver → Authoritative server (Cloudflare/Route 53):</strong> Asks for api.example.com. Gets back: "A record: 93.184.216.34, TTL: 300".</li>
+      <li><strong>Recursive resolver caches and responds:</strong> Caches the answer for 300 seconds (the TTL). Returns the IP to the OS. OS caches it. Browser caches it.</li>
+    </ol>
+
+    <div class="diagram">
+┌─────────────────────────────────────────────────────────────────────┐
+│                 FULL DNS RESOLUTION FLOW                            │
+│                                                                     │
+│  Browser ──①──▶ OS Cache ──②──▶ Recursive Resolver (8.8.8.8)      │
+│                                      │                             │
+│                        ③ Query Root (.): "api.example.com?"        │
+│                        ◀─ Referral: ".com NS: a.gtld-servers.net"  │
+│                                      │                             │
+│                        ④ Query .com TLD: "api.example.com?"        │
+│                        ◀─ Referral: "NS: ns1.cloudflare.com"       │
+│                                      │                             │
+│                        ⑤ Query Cloudflare NS: "api.example.com?"   │
+│                        ◀─ Answer: A: 93.184.216.34, TTL: 300       │
+│                                      │                             │
+│  Browser ◀── OS ◀── Recursive ──⑥── Cached + returned to client   │
+└─────────────────────────────────────────────────────────────────────┘</div>
+
+    <h3>3. DNS Record Types — Internals</h3>
+    <div class="tbl-wrap">
+    <table>
+      <tr><th>Record</th><th>Purpose</th><th>Internal Detail</th></tr>
+      <tr><td><strong>A</strong></td><td>Hostname → IPv4</td><td>32-bit IPv4 address. Multiple A records = multiple IPs returned (client picks one, usually first). Basic round-robin LB.</td></tr>
+      <tr><td><strong>AAAA</strong></td><td>Hostname → IPv6</td><td>128-bit IPv6 address. Client queries both A and AAAA, uses IPv6 preferentially if available (Happy Eyeballs RFC 6555).</td></tr>
+      <tr><td><strong>CNAME</strong></td><td>Alias to another name</td><td>Returns another domain name, not an IP. Client must re-query for that name. Cannot co-exist with other records at same name. Cannot be used at zone apex (use ALIAS/ANAME instead).</td></tr>
+      <tr><td><strong>MX</strong></td><td>Mail exchange</td><td>Returns SMTP server for the domain + priority. Lower priority number = preferred. Email sending MTAs query MX before connecting.</td></tr>
+      <tr><td><strong>TXT</strong></td><td>Arbitrary text</td><td>Used for: SPF (email sender policy), DKIM (email signing key), domain verification (Google Search Console), DMARC policy. No enforced format — just a string.</td></tr>
+      <tr><td><strong>NS</strong></td><td>Authoritative name servers</td><td>Delegates a zone to specific servers. The TLD servers store NS records for your domain pointing to your authoritative DNS provider.</td></tr>
+      <tr><td><strong>SOA</strong></td><td>Start of Authority</td><td>Contains: primary NS, responsible email, serial number (YYYYMMDDNN), refresh/retry/expire intervals for secondary DNS sync, negative caching TTL.</td></tr>
+      <tr><td><strong>SRV</strong></td><td>Service location</td><td>Format: priority, weight, port, target. Used by SIP, XMPP, Kubernetes for service discovery. Encodes which host+port runs a specific service.</td></tr>
+      <tr><td><strong>PTR</strong></td><td>Reverse DNS</td><td>IP → hostname. Stored in in-addr.arpa zone. Used for spam filtering (mail server IP should have valid PTR), logging, debugging.</td></tr>
+      <tr><td><strong>CAA</strong></td><td>Certificate Authority Auth</td><td>Specifies which CAs can issue TLS certs for your domain. Prevents unauthorized cert issuance. "Only Let's Encrypt and DigiCert may issue certs for example.com."</td></tr>
+    </table>
+    </div>
+
+    <h3>4. DNS Caching and TTL — The Hidden Complexity</h3>
+    <p>TTL (Time-To-Live) is set on each DNS record by the domain owner. It controls how long resolvers cache the record. Trade-offs:</p>
+    <ul>
+      <li><strong>High TTL (3600s - 86400s):</strong> Less DNS query load, faster resolution (usually from cache), but IP changes take up to TTL time to propagate globally. Good for stable infrastructure.</li>
+      <li><strong>Low TTL (30s - 60s):</strong> Fast propagation of IP changes (useful for failover), but every cache expiry requires a fresh recursive query — higher DNS load and slightly more latency. Required for active-active multi-region failover.</li>
+    </ul>
+    <p><strong>TTL propagation reality:</strong> When you change an A record, the new value propagates as caches expire. With TTL=300s, within 5 minutes most clients use the new IP. But some broken resolvers ignore TTL and cache forever. Some ISPs have aggressive caching. Budget 10× TTL for full propagation in practice.</p>
+
+    <h3>5. DNS and Load Balancing</h3>
+    <h4>DNS Round Robin</h4>
+    <p>Return multiple A records for the same name. The resolver returns all of them; the OS picks one (usually the first) and caches per TTL. Clients get different IPs on different queries, distributing load. <em>Problem:</em> If one server is down, DNS still returns its IP (DNS has no concept of health checking). Clients must handle the failure in their application layer.</p>
+
+    <h4>Geo-DNS / Latency-Based Routing (Route 53)</h4>
+    <p>The authoritative DNS server returns different A records based on the source IP of the recursive resolver (as a proxy for client location). A resolver from Singapore gets the Singapore PoP IP; a resolver from Virginia gets the US-East IP. This achieves geographic routing at the DNS level. Limitation: resolver IP ≠ client IP (CGNAT, corporate proxies); EDNS Client Subnet (ECS) extension passes a /24 prefix of the client IP to the authoritative server for more accurate routing.</p>
+
+    <h3>6. DNSSEC — DNS Security Internals</h3>
+    <p>Standard DNS is unauthenticated — an attacker can inject forged responses (DNS cache poisoning / Kaminsky attack). DNSSEC adds cryptographic signatures:</p>
+    <ul>
+      <li>Each zone signs its records with a private key (ZSK — Zone Signing Key). The signature is stored in RRSIG records.</li>
+      <li>The ZSK's public key is stored in DNSKEY record. Its hash is stored as DS record in the parent zone, creating a chain of trust from root down.</li>
+      <li>A resolver verifying DNSSEC fetches RRSIG, verifies against DNSKEY, verifies DNSKEY against parent DS, all the way to the root (which has a well-known public key).</li>
+      <li>Doesn't encrypt DNS (responses are still in plaintext). Only authenticates. DNS-over-HTTPS (DoH) and DNS-over-TLS (DoT) add encryption.</li>
+    </ul>
+
+    <h3>7. DNS-over-HTTPS (DoH) and DNS-over-TLS (DoT)</h3>
+    <p><strong>DoT (RFC 7858):</strong> DNS queries sent over TLS on port 853. Encrypts the DNS query, preventing ISP snooping and man-in-the-middle injection. The resolver is still known (you're connecting to a specific IP:853).</p>
+    <p><strong>DoH (RFC 8484):</strong> DNS queries sent as HTTPS requests (<code>POST /dns-query</code> with <code>application/dns-message</code> content type). Indistinguishable from regular HTTPS traffic to a network observer. Supported by Cloudflare (1.1.1.1), Google (8.8.8.8), and natively in Firefox (using Cloudflare by default). Centralises resolver choice — moves trust from ISP to DoH provider.</p>
+
+    <h3>8. Internal DNS in Kubernetes</h3>
+    <p>Kubernetes runs CoreDNS as its cluster-internal DNS server. Every service gets a DNS name: <code>service-name.namespace.svc.cluster.local</code>. When a pod queries this name:</p>
+    <ol class="steps">
+      <li>Pod's /etc/resolv.conf points to CoreDNS ClusterIP (10.96.0.10).</li>
+      <li>CoreDNS receives query, checks its Kubernetes plugin which queries the API server's etcd for Service endpoints.</li>
+      <li>Returns ClusterIP of the Service (for ClusterIP services) or the pod IPs (for Headless services — <code>clusterIP: None</code>).</li>
+      <li>Pod connects to ClusterIP → kube-proxy (iptables/ipvs rules) performs DNAT to one of the backing pod IPs.</li>
+    </ol>
+
+    <div class="callout callout-green">
+      <div class="callout-title">✅ Key Takeaway</div>
+      DNS is the first hop in every network connection — its performance and reliability directly impact user experience. Understand TTLs to plan failover strategy, use low TTLs when you need fast IP changes, DNSSEC for integrity, DoH/DoT for privacy. In Kubernetes, CoreDNS is the critical internal DNS — a misconfigured or overloaded CoreDNS breaks all service-to-service communication.
+    </div>
+
+  </div>
+</section>
+
+
+<!-- ═══════════════════════════════════════════════════════════
+     TOPIC 7 — HTTP vs HTTPS
+════════════════════════════════════════════════════════════ -->
+<section class="topic" id="t7">
+  <div class="topic-header">
+    <div class="topic-num">Topic 07</div>
+    <div class="topic-title">
+      <div class="topic-icon" style="background:linear-gradient(135deg,#1e3a5f,#3b82f6)">🔒</div>
+      HTTP vs HTTPS
+    </div>
+    <p class="topic-lead">HTTP (HyperText Transfer Protocol) is the application-layer protocol for transferring web data. HTTPS is HTTP secured by TLS (Transport Layer Security) — every byte of HTTP data is encrypted, authenticated, and integrity-checked. The difference is not just a lock icon — it's a fundamentally different security architecture.</p>
+  </div>
+
+  <div class="topic-body">
+
+    <h3>1. HTTP Internals — How it Works</h3>
+    <p>HTTP is a stateless, text-based, request-response protocol over TCP. Every request contains: Method + URL + HTTP version, headers (key:value pairs), optional body. Every response contains: status line, headers, optional body.</p>
+
+    <h4>HTTP/1.0 — One Request Per Connection</h4>
+    <p>TCP connection opens → one request sent → response received → connection closes. TCP's slow-start means the first few roundtrips have reduced throughput. Closing and reopening for every request is enormously wasteful.</p>
+
+    <h4>HTTP/1.1 — Persistent Connections and Pipelining</h4>
+    <p><strong>Keep-alive:</strong> Connection stays open after response. Subsequent requests reuse the TCP connection. Default in HTTP/1.1. <strong>Head-of-line blocking:</strong> Requests are still serialised on one connection — response 1 must complete before response 2 is sent (even if response 2 is ready first). <strong>Pipelining:</strong> Client can send multiple requests without waiting for responses, but server must respond in order — still has HOL blocking. Workaround: open 6 parallel TCP connections per domain (browsers do this).</p>
+
+    <h4>HTTP/2 — Binary Framing and Multiplexing</h4>
+    <p>HTTP/2 redesigns the wire format from text to binary frames. Key mechanisms:</p>
+    <ul>
+      <li><strong>Streams:</strong> Each request/response pair is a stream with an ID (odd for client-initiated, even for server-initiated). Multiple streams are multiplexed over one TCP connection simultaneously. No HOL blocking at HTTP layer.</li>
+      <li><strong>HPACK header compression:</strong> HTTP headers are repetitive (same headers sent with every request). HPACK uses a static table (61 common headers), a dynamic table (context-specific headers built during connection), and Huffman encoding. Reduces header overhead by 85%.</li>
+      <li><strong>Server Push:</strong> Server proactively sends resources (CSS, JS) before client requests them. Client can reject pushed resources if already cached (RST_STREAM).</li>
+      <li><strong>Remaining problem:</strong> HTTP/2 solves HTTP-layer HOL blocking but TCP-layer HOL blocking remains. One lost TCP packet blocks all streams until retransmit. Solution: HTTP/3.</li>
+    </ul>
+
+    <h4>HTTP/3 — QUIC (UDP-based)</h4>
+    <p>HTTP/3 runs over QUIC (Quick UDP Internet Connections, RFC 9000) instead of TCP. QUIC is implemented in user space (not kernel), runs over UDP, and provides its own reliability, flow control, and congestion control. Benefits:</p>
+    <ul>
+      <li>No TCP HOL blocking — packet loss affects only one QUIC stream, not all streams.</li>
+      <li>0-RTT connection establishment — if client has previously connected, it can send data immediately (resuming session ticket). 1-RTT for new connections (vs TCP+TLS 1.3's 1-RTT for new and TCP's 1.5-RTT overhead).</li>
+      <li>Connection migration — QUIC connections are identified by a connection ID, not IP:port. Mobile users switching from WiFi to cellular maintain the same QUIC connection.</li>
+    </ul>
+
+    <h3>2. TLS — The Engine Behind HTTPS</h3>
+    <p>TLS (Transport Layer Security) provides three services: <strong>Confidentiality</strong> (encryption — nobody can read the data), <strong>Authentication</strong> (server's identity is verified via certificate), <strong>Integrity</strong> (data hasn't been tampered with — MAC/AEAD).</p>
+
+    <h4>TLS 1.3 Handshake — Step by Step (What Happens in Microseconds)</h4>
+    <ol class="steps">
+      <li><strong>ClientHello:</strong> Client sends: TLS version, random nonce (32 bytes), cipher suites supported (e.g., TLS_AES_256_GCM_SHA384), supported key exchange groups (X25519, P-256), extensions (SNI, ALPN, session ticket).</li>
+      <li><strong>ServerHello:</strong> Server responds: chosen cipher suite, chosen key exchange group, server's key share (public Diffie-Hellman value).</li>
+      <li><strong>Key derivation:</strong> Both sides independently compute the session keys using ECDH (Elliptic Curve Diffie-Hellman). The client's key share + server's key share → shared secret → HKDF (HMAC-based Key Derivation Function) → multiple symmetric keys (handshake key, data key, IV).</li>
+      <li><strong>Server sends:</strong> Encrypted certificate (server's identity), CertificateVerify (proves server holds the private key — digital signature over the handshake transcript), Finished (MAC over entire handshake).</li>
+      <li><strong>Client verifies:</strong> Certificate chain → trusted root CA → not expired → subject matches domain. Verifies digital signature. Sends own Finished.</li>
+      <li><strong>Encrypted data exchange begins.</strong> All HTTP bytes are now AES-GCM or ChaCha20-Poly1305 encrypted.</li>
+    </ol>
+
+    <div class="diagram">
+┌────────────────────────────────────────────────────────────────────┐
+│                    TLS 1.3 HANDSHAKE                               │
+│                                                                    │
+│  Client                                              Server        │
+│    │──── ClientHello (key_share, ciphers, SNI) ──────▶│           │
+│    │◀─── ServerHello (key_share) ────────────────────│           │
+│    │     ◀── {EncryptedExtensions} ──────────────────│           │
+│    │     ◀── {Certificate} ───────────────────────────│           │
+│    │     ◀── {CertificateVerify} ────────────────────│           │
+│    │     ◀── {Finished} ─────────────────────────────│           │
+│    │                                                              │
+│    │  [Both sides derive same session keys via ECDH]              │
+│    │                                                              │
+│    │──── {Finished} ─────────────────────────────────▶│           │
+│    │                                                              │
+│    │════ Encrypted HTTP/2 or HTTP/1.1 data ═══════════│           │
+│                                                                    │
+│  Total: 1 round trip (vs TLS 1.2's 2 round trips)                 │
+└────────────────────────────────────────────────────────────────────┘</div>
+
+    <h3>3. Certificates — The Trust Infrastructure</h3>
+    <p>A certificate is an X.509 document containing: subject domain name, public key, issuer (CA name), validity period, serial number, signature by issuer's private key. The browser trusts a certificate if it was signed by a CA in its trust store (Mozilla, Apple, Microsoft, Google each maintain their own trust stores — ~150 CAs).</p>
+
+    <h4>Certificate Chain</h4>
+    <p>Root CA (self-signed, in browser trust store) → Intermediate CA (signed by Root CA) → Server Certificate (signed by Intermediate CA). Root CAs are kept offline (air-gapped). Intermediate CAs do the actual signing. If an Intermediate CA is compromised, it can be revoked without touching the Root CA.</p>
+
+    <h4>Certificate Revocation</h4>
+    <ul>
+      <li><strong>CRL (Certificate Revocation List):</strong> A signed list of revoked serial numbers. Downloaded periodically. Can be stale (hours old). Large for big CAs.</li>
+      <li><strong>OCSP (Online Certificate Status Protocol):</strong> Real-time query to CA's OCSP server for cert status. Adds latency. Privacy issue (CA knows which certs you're checking).</li>
+      <li><strong>OCSP Stapling:</strong> Server fetches OCSP response from CA, attaches it to the TLS handshake (staples it). Client gets fresh proof of cert validity without contacting CA. Best of both worlds. Server must refresh staple periodically (before it expires).</li>
+    </ul>
+
+    <h3>4. HSTS (HTTP Strict Transport Security)</h3>
+    <p>Server sends header: <code>Strict-Transport-Security: max-age=31536000; includeSubDomains; preload</code>. Browser stores this domain in its HSTS list. For the next year, the browser will <em>never</em> send HTTP to this domain — it automatically upgrades to HTTPS before making any connection. Prevents SSL-stripping attacks (where an attacker intercepts the first HTTP request before the redirect to HTTPS).</p>
+    <p>The <code>preload</code> directive submits the domain to the HSTS preload list — hardcoded in browsers before they even visit the site. Chrome's list has 80,000+ domains.</p>
+
+    <h3>5. Perfect Forward Secrecy (PFS)</h3>
+    <p>In older TLS (RSA key exchange), the server's private key is used to encrypt the session key. If an attacker records all traffic and later steals the private key, they can decrypt ALL past sessions. With ECDH key exchange (used in TLS 1.3 exclusively), the session key is derived from ephemeral DH parameters that are discarded after the handshake. Even if the server's private key is stolen later, past sessions cannot be decrypted because the ephemeral keys are gone.</p>
+
+    <h3>6. HTTP vs HTTPS Performance Reality</h3>
+    <div class="tbl-wrap">
+    <table>
+      <tr><th>Factor</th><th>HTTP</th><th>HTTPS</th><th>Notes</th></tr>
+      <tr><td>Connection overhead</td><td>1 RTT (TCP)</td><td>2 RTT (TCP + TLS 1.2) / 1 RTT (TLS 1.3)</td><td>TLS 1.3 eliminates most overhead</td></tr>
+      <tr><td>CPU overhead</td><td>~0</td><td>AES-NI hardware: &lt;1ms overhead</td><td>Modern CPUs have AES-NI instructions — negligible</td></tr>
+      <tr><td>Data compression</td><td>Yes</td><td>No (CRIME/BREACH attacks)</td><td>HTTP compression disabled for HTTPS to prevent chosen-plaintext attacks</td></tr>
+      <tr><td>0-RTT resumption</td><td>N/A</td><td>TLS 1.3 supports 0-RTT for repeat connections</td><td>Security trade-off: 0-RTT data is replay-vulnerable</td></tr>
+    </table>
+    </div>
+
+    <div class="callout callout-green">
+      <div class="callout-title">✅ Key Takeaway</div>
+      HTTPS is not optional — it provides confidentiality (no eavesdropping), integrity (no tampering), and authentication (correct server). TLS 1.3 has eliminated most performance overhead vs TLS 1.2. HTTP/2 requires TLS in practice (all browsers enforce this). HTTP/3/QUIC eliminates TCP-layer head-of-line blocking. Use HSTS + preloading, OCSP stapling, and ECDH cipher suites for modern HTTPS best practices.
+    </div>
+
+  </div>
+</section>
+
+
+<!-- ═══════════════════════════════════════════════════════════
+     TOPIC 8 — API GATEWAY
+════════════════════════════════════════════════════════════ -->
+<section class="topic" id="t8">
+  <div class="topic-header">
+    <div class="topic-num">Topic 08</div>
+    <div class="topic-title">
+      <div class="topic-icon" style="background:linear-gradient(135deg,#4a1d96,#8b5cf6)">🚪</div>
+      API Gateway
+    </div>
+    <p class="topic-lead">An API Gateway is the single entry point for all client requests to a microservices system. It acts as a reverse proxy that routes requests, aggregates responses, and enforces cross-cutting concerns (authentication, rate limiting, logging, SSL) at the perimeter — so individual services don't need to implement them.</p>
+  </div>
+
+  <div class="topic-body">
+
+    <h3>1. Why API Gateways Exist — The Problem They Solve</h3>
+    <p>Without an API Gateway, every microservice needs to implement: auth token validation, rate limiting, SSL termination, CORS, logging, tracing, and request transformation. This duplicates logic across hundreds of services, creates inconsistency, and makes changes require updating every service. The gateway centralises all of this.</p>
+
+    <h3>2. Core Functions of an API Gateway</h3>
+
+    <h4>a) Request Routing</h4>
+    <p>The gateway inspects the incoming request (URL path, HTTP method, headers) and routes it to the correct downstream microservice. This is L7 routing. Config example:</p>
+    <pre><span class="cm"># Kong / KrakenD style route config</span>
+routes:
+  - path: <span class="str">/api/v1/users/**</span>
+    upstream: http:<span class="op">//</span>user-service<span class="op">:</span><span class="num">8080</span>
+  - path: <span class="str">/api/v1/orders/**</span>
+    upstream: http:<span class="op">//</span>order-service<span class="op">:</span><span class="num">8080</span>
+  - path: <span class="str">/api/v2/users/**</span>
+    upstream: http:<span class="op">//</span>user-service-v2<span class="op">:</span><span class="num">8080</span>
+    canary_weight: <span class="num">10</span>  <span class="cm"># 10% traffic to v2</span></pre>
+
+    <h4>b) Authentication and Authorization</h4>
+    <p>The gateway validates credentials before the request reaches any service. Mechanisms:</p>
+    <ul>
+      <li><strong>JWT validation:</strong> Decode and verify the JWT signature using the issuer's public key (fetched from JWKS endpoint). Check expiry, issuer, audience claims. If valid, forward request with decoded claims as headers (X-User-ID, X-User-Roles) to downstream services so they don't need to re-validate.</li>
+      <li><strong>OAuth 2.0 token introspection:</strong> Forward the bearer token to the authorisation server's introspect endpoint. Slower (network call per request) but authoritative. Can be cached (with short TTL) by the gateway.</li>
+      <li><strong>API Key validation:</strong> Check API key against a lookup store (Redis hash: key→customer metadata). Inject customer context into request headers.</li>
+    </ul>
+
+    <h4>c) Rate Limiting</h4>
+    <p>Implemented at the gateway to protect downstream services. Algorithms (see Rate Limiting topic for deep dive): Token Bucket, Leaky Bucket, Fixed Window, Sliding Window. Gateway stores rate limit counters in Redis (for distributed rate limiting across multiple gateway instances). Per-key (API key), per-IP, per-user, or global limits.</p>
+    <pre><span class="cm">// Sliding window rate limit check (pseudocode in gateway)</span>
+<span class="kw">function</span> <span class="fn">isAllowed</span>(userId, limit=<span class="num">100</span>, windowMs=<span class="num">60000</span>):
+  key = <span class="str">`rate_limit:</span>${userId}<span class="str">`</span>
+  now = Date.<span class="fn">now</span>()
+  <span class="cm">// Remove old entries outside the window</span>
+  redis.<span class="fn">zremrangebyscore</span>(key, <span class="num">0</span>, now - windowMs)
+  count = redis.<span class="fn">zcard</span>(key)
+  <span class="kw">if</span> count &gt;= limit: <span class="kw">return</span> <span class="num">429</span> Too Many Requests
+  redis.<span class="fn">zadd</span>(key, now, now)  <span class="cm">// score=timestamp, member=timestamp</span>
+  redis.<span class="fn">pexpire</span>(key, windowMs)
+  <span class="kw">return</span> <span class="num">200</span> OK</pre>
+
+    <h4>d) Request/Response Transformation</h4>
+    <p>The gateway can modify requests before forwarding and responses before returning to clients:</p>
+    <ul>
+      <li>Add headers: <code>X-Request-ID</code>, <code>X-Trace-ID</code>, <code>X-Correlation-ID</code>, <code>X-Forwarded-For</code></li>
+      <li>Strip sensitive headers before forwarding: <code>Authorization</code> (replace with decoded user context)</li>
+      <li>Request body transformation: convert REST request to gRPC protobuf for downstream service</li>
+      <li>Response aggregation (Backend for Frontend / API composition): call User Service + Order Service + Inventory Service, merge responses into one JSON response for the mobile client</li>
+    </ul>
+
+    <h4>e) SSL/TLS Termination</h4>
+    <p>Same as described in Load Balancing. The gateway holds the TLS certificate and decrypts traffic. Backend services communicate over plaintext HTTP within the private network (or re-encrypted with mTLS in a zero-trust setup).</p>
+
+    <h4>f) Observability</h4>
+    <p>The gateway has visibility into every request crossing the perimeter. It generates:</p>
+    <ul>
+      <li><strong>Access logs:</strong> method, path, status, upstream, latency, bytes, client IP, user ID</li>
+      <li><strong>Metrics:</strong> RPS per route, error rate per route, upstream latency percentiles, rate limit rejections</li>
+      <li><strong>Distributed traces:</strong> Injects trace context (W3C Trace-Context header: <code>traceparent: 00-traceId-spanId-flags</code>) into every request so traces flow through downstream services into Jaeger/Zipkin/Tempo</li>
+    </ul>
+
+    <h3>3. API Gateway Architecture — Request Lifecycle</h3>
+    <div class="diagram">
+┌───────────────────────────────────────────────────────────────────┐
+│                    API GATEWAY REQUEST LIFECYCLE                   │
+│                                                                   │
+│  Client Request                                                   │
+│       │                                                           │
+│       ▼                                                           │
+│  ┌─────────────────────────────────────────────────────┐         │
+│  │                   API GATEWAY                        │         │
+│  │                                                     │         │
+│  │  ①  TLS Termination  (decrypt HTTPS)                │         │
+│  │  ②  Auth Middleware  (validate JWT / API key)       │         │
+│  │  ③  Rate Limiting    (check Redis counter)          │         │
+│  │  ④  Request Transform (add X-User-ID header)        │         │
+│  │  ⑤  Route Matching   (URL → upstream service)       │         │
+│  │  ⑥  Load Balance     (pick backend instance)        │         │
+│  │  ⑦  Circuit Breaker  (fail fast if service down)   │         │
+│  │  ⑧  Forward Request  (to upstream service)          │         │
+│  │  ⑨  Response Transform (merge, compress, format)   │         │
+│  │  ⑩  Log + Trace      (emit metrics, trace spans)   │         │
+│  └─────────────────────────────────────────────────────┘         │
+│       │                                                           │
+│       ▼                                                           │
+│  Response to Client                                               │
+└───────────────────────────────────────────────────────────────────┘</div>
+
+    <h3>4. Backend for Frontend (BFF) Pattern</h3>
+    <p>A single generic API Gateway can become a bottleneck when serving radically different clients (mobile app needs small payloads, web app needs full data, IoT device needs binary protocol). BFF creates specialised gateways per client type:</p>
+    <ul>
+      <li><strong>Mobile BFF:</strong> Aggregates data, reduces payload size, optimises for mobile bandwidth.</li>
+      <li><strong>Web BFF:</strong> Returns richer data, handles server-side rendering concerns.</li>
+      <li><strong>Partner API BFF:</strong> Exposes limited, versioned, heavily rate-limited APIs to external partners.</li>
+    </ul>
+
+    <h3>5. API Gateway vs Service Mesh</h3>
+    <div class="tbl-wrap">
+    <table>
+      <tr><th>Feature</th><th>API Gateway</th><th>Service Mesh</th></tr>
+      <tr><td>Traffic handled</td><td>North-South (client ↔ services)</td><td>East-West (service ↔ service)</td></tr>
+      <tr><td>Auth</td><td>External client auth (JWT, API key)</td><td>mTLS between services</td></tr>
+      <tr><td>Rate limiting</td><td>Per external client</td><td>Per service-to-service pair</td></tr>
+      <tr><td>Implementation</td><td>Central gateway process</td><td>Sidecar proxies per pod</td></tr>
+      <tr><td>Examples</td><td>Kong, AWS API GW, Apigee, KrakenD</td><td>Istio, Linkerd, Consul Connect</td></tr>
+    </table>
+    </div>
+
+    <h3>6. Popular API Gateway Implementations</h3>
+    <h4>Kong Gateway</h4>
+    <p>Built on Nginx + OpenResty (Lua scripting on Nginx). Plugin architecture — each function (auth, rate limit, logging) is a plugin executed in a specific phase of the request lifecycle (access, header_filter, body_filter, log). Plugins run in Lua coroutines within Nginx worker processes. Config stored in PostgreSQL or distributed via declarative YAML (deck).</p>
+
+    <h4>AWS API Gateway</h4>
+    <p>Managed service. Routes to Lambda, HTTP endpoints, or AWS services. Two types: REST API (feature-rich, more expensive) and HTTP API (simpler, cheaper, faster). Stage variables enable environment-specific routing. Usage plans + API keys for partner rate limiting. Throttling at account level (default 10,000 RPS) and per-API level.</p>
+
+    <h4>Envoy + Ambassador / Emissary-ingress</h4>
+    <p>Envoy as the data plane, Kubernetes CRDs as the control plane configuration. Declarative routing config in YAML. Native gRPC support, HTTP/3, WASM plugin extensions.</p>
+
+    <div class="callout callout-green">
+      <div class="callout-title">✅ Key Takeaway</div>
+      An API Gateway is the essential perimeter layer in microservices — it centralises auth, rate limiting, routing, logging, and transformation. Design it to be stateless (state in Redis), horizontally scalable, and fast (plugin pipeline should add &lt;5ms). Consider BFF for multi-client systems. Don't confuse with service mesh — use both: gateway for north-south, mesh for east-west.
+    </div>
+
+  </div>
+</section>
+
+
+<!-- ═══════════════════════════════════════════════════════════
+     TOPIC 9 — CIRCUIT BREAKER
+════════════════════════════════════════════════════════════ -->
+<section class="topic" id="t9">
+  <div class="topic-header">
+    <div class="topic-num">Topic 09</div>
+    <div class="topic-title">
+      <div class="topic-icon" style="background:linear-gradient(135deg,#7f1d1d,#ef4444)">⚡</div>
+      Circuit Breaker
+    </div>
+    <p class="topic-lead">The Circuit Breaker is a stability pattern that prevents cascading failures in distributed systems. When a downstream service is failing, instead of continuously trying and failing (consuming threads, connections, and time), the circuit breaker "trips" — it immediately rejects calls to the failing service, protecting the caller from slow degradation and giving the downstream time to recover.</p>
+  </div>
+
+  <div class="topic-body">
+
+    <h3>1. The Problem: Cascading Failure Without a Circuit Breaker</h3>
+    <p>Imagine Service A calls Service B. Service B is slow (p99: 10 seconds instead of 100ms). Service A's thread pool has 50 threads. Each thread is blocked waiting for B for 10 seconds. Within seconds, all 50 threads are waiting for B. New requests to Service A queue up, then fail. Service A is now as dead as Service B, even though Service A's own code is fine. This is <strong>cascading failure</strong> — one slow service kills the entire call chain.</p>
+
+    <div class="diagram">
+┌──────────────────────────────────────────────────────────────────┐
+│              CASCADE FAILURE WITHOUT CIRCUIT BREAKER             │
+│                                                                  │
+│  Client → Service A → Service B (SLOW: 10s response)            │
+│                                                                  │
+│  Time 0:   A has 50 threads. 10 threads waiting on B.           │
+│  Time 5s:  30 threads waiting on B. A queuing new requests.     │
+│  Time 10s: 50 threads all blocked on B. A is completely stuck.  │
+│  Time 15s: Clients see A timing out. A is effectively DOWN.     │
+│            Service C which calls A is also now failing.          │
+│                                                                  │
+│  Root cause: B (slow) → A (stuck) → C (failing) → cascade       │
+└──────────────────────────────────────────────────────────────────┘</div>
+
+    <h3>2. Circuit Breaker States — The State Machine</h3>
+    <p>The circuit breaker has three states, implemented as a state machine:</p>
+
+    <h4>CLOSED (Normal Operation)</h4>
+    <p>All requests pass through to the downstream service. The circuit breaker monitors results (success/failure). A sliding window of the last N calls (or last N seconds) tracks the failure rate. When the failure rate exceeds a threshold (e.g., 50% of last 100 calls fail), the breaker <strong>trips to OPEN</strong>.</p>
+
+    <h4>OPEN (Failing Fast)</h4>
+    <p>All calls to the downstream service are immediately rejected with an error (no actual network call made). This instantly frees up threads/connections in the caller. The caller gets immediate failure (instead of waiting for timeout), can use a fallback, and the downstream gets relief from traffic. A timer starts (e.g., 60 seconds). When the timer expires, the breaker transitions to HALF-OPEN.</p>
+
+    <h4>HALF-OPEN (Probing Recovery)</h4>
+    <p>A limited number of requests are allowed through to test if the downstream has recovered. If these test requests succeed → breaker closes (service recovered). If they fail → breaker opens again (service still broken) and resets the timer. This prevents premature re-opening.</p>
+
+    <div class="diagram">
+┌──────────────────────────────────────────────────────────────────┐
+│                 CIRCUIT BREAKER STATE MACHINE                    │
+│                                                                  │
+│                    ┌──────────┐                                  │
+│         ┌──────────│  CLOSED  │──────────┐                       │
+│         │ Success  └──────────┘  Failure  │                      │
+│         │          (normal ops)  rate >    │                      │
+│         │                        threshold │                      │
+│         │                                  ▼                     │
+│         │                          ┌──────────┐                  │
+│         │         Timer expires    │   OPEN   │                  │
+│         │         ◀────────────────│          │                  │
+│         │                          │ (reject) │                  │
+│         │                          └──────────┘                  │
+│         │                                │                       │
+│         │                          Timer expires                  │
+│         │                                ▼                       │
+│         │                        ┌───────────────┐               │
+│         │     Probe succeeds     │  HALF-OPEN    │               │
+│         └────────────────────────│               │               │
+│                                  │ (allow few)   │               │
+│                                  └───────────────┘               │
+│                                        │ Probe fails             │
+│                                        ▼                         │
+│                                    OPEN again                    │
+└──────────────────────────────────────────────────────────────────┘</div>
+
+    <h3>3. Implementation — Internal Mechanics</h3>
+
+    <h4>Sliding Window (Count-Based)</h4>
+    <p>Track the last N call outcomes in a circular buffer. Each entry is SUCCESS or FAILURE. Failure rate = failures / N. If failure rate ≥ threshold AND minimum calls in window ≥ minimum (e.g., 10 calls minimum to avoid tripping on cold start), trip the breaker.</p>
+
+    <h4>Sliding Window (Time-Based)</h4>
+    <p>Track outcomes in the last T seconds (e.g., last 60 seconds). Use a bucket structure: divide window into sub-buckets (e.g., 60 buckets of 1 second each). Each second, add a new bucket and discard the oldest. Sum successes/failures across buckets. More accurate for bursty traffic patterns.</p>
+
+    <pre><span class="cm">// Resilience4j Circuit Breaker configuration (Java)</span>
+CircuitBreakerConfig config = CircuitBreakerConfig.<span class="fn">custom</span>()
+  .<span class="fn">slidingWindowType</span>(COUNT_BASED)
+  .<span class="fn">slidingWindowSize</span>(<span class="num">100</span>)            <span class="cm">// last 100 calls</span>
+  .<span class="fn">failureRateThreshold</span>(<span class="num">50</span>)           <span class="cm">// 50% failure → OPEN</span>
+  .<span class="fn">slowCallRateThreshold</span>(<span class="num">80</span>)          <span class="cm">// 80% slow calls → OPEN</span>
+  .<span class="fn">slowCallDurationThreshold</span>(Duration.<span class="fn">ofSeconds</span>(<span class="num">2</span>)) <span class="cm">// "slow" = >2s</span>
+  .<span class="fn">waitDurationInOpenState</span>(Duration.<span class="fn">ofSeconds</span>(<span class="num">60</span>)) <span class="cm">// 60s open timer</span>
+  .<span class="fn">permittedNumberOfCallsInHalfOpenState</span>(<span class="num">10</span>)  <span class="cm">// 10 probes in half-open</span>
+  .<span class="fn">minimumNumberOfCalls</span>(<span class="num">10</span>)           <span class="cm">// need 10 calls before evaluating</span>
+  .<span class="fn">build</span>();</pre>
+
+    <h3>4. Slow Call Detection</h3>
+    <p>An important nuance: a circuit breaker shouldn't only trip on outright failures (exceptions, 5xx). A service that responds in 30 seconds is just as harmful as one that returns 500. Resilience4j supports a <code>slowCallRateThreshold</code> — calls exceeding <code>slowCallDurationThreshold</code> are counted as "slow calls" and contribute to breaker evaluation independently of the failure rate. This catches degraded services before they cause thread pool exhaustion.</p>
+
+    <h3>5. Fallback Strategies</h3>
+    <p>When the circuit is OPEN, the caller needs a fallback to provide partial functionality:</p>
+    <ul>
+      <li><strong>Return cached data:</strong> Return the last known good response from local cache. "Here are yesterday's product recommendations."</li>
+      <li><strong>Return default/empty response:</strong> "No recommendations available right now." Graceful degradation.</li>
+      <li><strong>Fail fast with specific error:</strong> Return 503 Service Unavailable immediately instead of timing out after 30 seconds. Caller handles this error properly.</li>
+      <li><strong>Use a secondary service:</strong> Primary payment processor down → route to secondary. Primary recommendation engine down → use simpler rules-based fallback.</li>
+    </ul>
+
+    <pre><span class="cm">// Circuit breaker with fallback (Resilience4j + Java)</span>
+CircuitBreaker cb = CircuitBreaker.<span class="fn">of</span>(<span class="str">"paymentService"</span>, config);
+
+<span class="kw">String</span> result = Decorators
+  .<span class="fn">ofSupplier</span>(() -> paymentService.<span class="fn">charge</span>(order))
+  .<span class="fn">withCircuitBreaker</span>(cb)
+  .<span class="fn">withFallback</span>(CallNotPermittedException.class,
+               e -> <span class="str">"Payment queued for retry"</span>)  <span class="cm">// CB is OPEN fallback</span>
+  .<span class="fn">withFallback</span>(Exception.class,
+               e -> secondaryPaymentService.<span class="fn">charge</span>(order))
+  .<span class="fn">get</span>();</pre>
+
+    <h3>6. Bulkhead + Circuit Breaker Combination</h3>
+    <p>The

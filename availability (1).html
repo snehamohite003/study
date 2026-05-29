@@ -1,0 +1,1010 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Availability - Deep System Design Study Note</title>
+  <style>
+    :root {
+      --bg: #0b1020;
+      --panel: #121933;
+      --panel-2: #182248;
+      --text: #e8ecf8;
+      --muted: #aab4d6;
+      --accent: #7cc7ff;
+      --accent-2: #8ef0c7;
+      --warn: #ffd166;
+      --danger: #ff7b7b;
+      --code: #0f1530;
+      --border: #2a376d;
+      --shadow: rgba(0,0,0,0.25);
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+      background: linear-gradient(180deg, #0b1020 0%, #0d1430 100%);
+      color: var(--text);
+      line-height: 1.6;
+    }
+    .container { max-width: 1180px; margin: 0 auto; padding: 24px; }
+    header.hero {
+      background: radial-gradient(circle at top right, rgba(124,199,255,0.18), transparent 30%),
+                  radial-gradient(circle at top left, rgba(142,240,199,0.14), transparent 25%),
+                  linear-gradient(180deg, #121933, #10162d);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 28px;
+      box-shadow: 0 12px 30px var(--shadow);
+      position: relative;
+      overflow: hidden;
+    }
+    h1, h2, h3, h4 { line-height: 1.2; margin-top: 1.1em; margin-bottom: 0.55em; }
+    h1 { font-size: 2.2rem; margin-top: 0; }
+    h2 {
+      font-size: 1.65rem;
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 8px;
+      margin-top: 1.8rem;
+    }
+    h3 { font-size: 1.2rem; }
+    p, li { color: var(--text); }
+    .subtle { color: var(--muted); }
+    .badge {
+      display: inline-block;
+      font-size: 0.82rem;
+      color: #08111f;
+      background: linear-gradient(90deg, var(--accent), var(--accent-2));
+      padding: 6px 10px;
+      border-radius: 999px;
+      font-weight: 700;
+      margin-bottom: 12px;
+    }
+    .top-grid {
+      display: grid;
+      grid-template-columns: 1.3fr 0.7fr;
+      gap: 18px;
+      margin-top: 18px;
+    }
+    .card {
+      background: linear-gradient(180deg, var(--panel), var(--panel-2));
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      padding: 18px 18px 16px;
+      box-shadow: 0 10px 22px var(--shadow);
+    }
+    .toc ul { padding-left: 18px; }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    pre {
+      background: var(--code);
+      border: 1px solid var(--border);
+      padding: 14px;
+      border-radius: 12px;
+      overflow-x: auto;
+      color: #dfe7ff;
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.04);
+    }
+    .callout {
+      border-left: 4px solid var(--accent);
+      background: rgba(124,199,255,0.08);
+      padding: 14px 16px;
+      border-radius: 12px;
+      margin: 16px 0;
+    }
+    .warn { border-left-color: var(--warn); background: rgba(255,209,102,0.08); }
+    .danger { border-left-color: var(--danger); background: rgba(255,123,123,0.08); }
+    .good { border-left-color: var(--accent-2); background: rgba(142,240,199,0.08); }
+    .two-col, .three-col { display: grid; gap: 16px; }
+    .two-col { grid-template-columns: 1fr 1fr; }
+    .three-col { grid-template-columns: repeat(3, 1fr); }
+    .pill {
+      display: inline-block;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      padding: 4px 10px;
+      margin: 4px 6px 0 0;
+      color: var(--muted);
+      font-size: 0.9rem;
+      background: rgba(255,255,255,0.02);
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 14px 0;
+      background: rgba(255,255,255,0.02);
+      border-radius: 12px;
+      overflow: hidden;
+      border: 1px solid var(--border);
+    }
+    th, td {
+      border-bottom: 1px solid var(--border);
+      padding: 12px 10px;
+      text-align: left;
+      vertical-align: top;
+    }
+    th { background: rgba(255,255,255,0.04); color: #f0f4ff; }
+    tr:last-child td { border-bottom: none; }
+    .flow {
+      border: 1px dashed var(--border);
+      border-radius: 16px;
+      padding: 16px;
+      background: rgba(255,255,255,0.02);
+      margin: 12px 0;
+    }
+    .flow-step {
+      padding: 10px 12px;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      margin: 8px 0;
+      background: rgba(255,255,255,0.02);
+    }
+    .muted-box {
+      background: rgba(255,255,255,0.03);
+      border: 1px solid var(--border);
+      padding: 12px;
+      border-radius: 12px;
+    }
+    .sticky-top { position: sticky; top: 16px; }
+    details {
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 10px 12px;
+      margin: 10px 0;
+      background: rgba(255,255,255,0.02);
+    }
+    summary { cursor: pointer; font-weight: 700; }
+    .footer {
+      margin: 38px 0 12px;
+      text-align: center;
+      color: var(--muted);
+      font-size: 0.95rem;
+    }
+    .print-btn {
+      appearance: none;
+      border: none;
+      cursor: pointer;
+      background: linear-gradient(90deg, var(--accent), var(--accent-2));
+      color: #06111f;
+      font-weight: 800;
+      padding: 12px 16px;
+      border-radius: 12px;
+      box-shadow: 0 10px 20px var(--shadow);
+      margin-right: 10px;
+    }
+    .secondary-btn {
+      appearance: none;
+      border: 1px solid var(--border);
+      cursor: pointer;
+      background: rgba(255,255,255,0.02);
+      color: var(--text);
+      font-weight: 700;
+      padding: 12px 16px;
+      border-radius: 12px;
+    }
+    .tag-grid {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 6px;
+    }
+    .formula {
+      font-size: 1.05rem;
+      font-weight: 700;
+      color: #f0f4ff;
+    }
+    @media (max-width: 980px) {
+      .top-grid, .two-col, .three-col { grid-template-columns: 1fr; }
+      .sticky-top { position: static; }
+    }
+    @media print {
+      body { background: white; color: black; }
+      .card, header.hero, .muted-box, pre, details, .flow, .flow-step {
+        background: white !important;
+        color: black !important;
+        box-shadow: none !important;
+      }
+      .print-btn, .secondary-btn { display: none; }
+      a { color: black; text-decoration: underline; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header class="hero">
+      <div class="badge">Deep System Design Study Note</div>
+      <h1>Availability</h1>
+      <p class="subtle">
+        A senior-level deep dive into availability in system design: definition, internal components,
+        request flow under failures, redundancy strategies, failover, trade-offs, operational metrics,
+        production patterns, and interview framing.
+      </p>
+      <div style="margin-top:16px;">
+        <button class="print-btn" onclick="window.print()">Download / Print as PDF</button>
+        <button class="secondary-btn" onclick="document.getElementById('toc').scrollIntoView({behavior:'smooth'})">Jump to Table of Contents</button>
+      </div>
+
+      <div class="top-grid">
+        <div class="card">
+          <h3>One-line definition</h3>
+          <p>
+            <strong>Availability</strong> is the probability that a system is operational and accessible
+            when a user or dependent service tries to use it.
+          </p>
+          <div class="callout good">
+            <strong>Senior takeaway:</strong> availability is not just “server is up.”
+            It means the system can successfully serve useful requests within acceptable time,
+            despite failures, maintenance, load spikes, or partial dependency outages.
+          </div>
+          <div class="tag-grid">
+            <span class="pill">Uptime</span>
+            <span class="pill">Fault masking</span>
+            <span class="pill">Redundancy</span>
+            <span class="pill">Failover</span>
+            <span class="pill">Graceful degradation</span>
+          </div>
+        </div>
+
+        <div class="card sticky-top toc" id="toc">
+          <h3>Table of Contents</h3>
+          <ul>
+            <li><a href="#definition">1. What Availability Really Means</a></li>
+            <li><a href="#math">2. Availability Math and Nines</a></li>
+            <li><a href="#why">3. Why Availability Matters</a></li>
+            <li><a href="#components">4. Core Components</a></li>
+            <li><a href="#flows">5. Internal Failure and Recovery Flows</a></li>
+            <li><a href="#strategies">6. Availability Strategies</a></li>
+            <li><a href="#redundancy">7. Redundancy Models</a></li>
+            <li><a href="#example">8. Real-World Example</a></li>
+            <li><a href="#deepdive">9. Production Deep Dive</a></li>
+            <li><a href="#tradeoffs">10. Trade-offs</a></li>
+            <li><a href="#failures">11. Failure Scenarios</a></li>
+            <li><a href="#metrics">12. Metrics and Observability</a></li>
+            <li><a href="#interview">13. Interview Framing</a></li>
+            <li><a href="#compare">14. Related Concepts</a></li>
+            <li><a href="#summary">15. Summary</a></li>
+          </ul>
+        </div>
+      </div>
+    </header>
+
+    <section id="definition">
+      <h2>1. What Availability Really Means</h2>
+      <p>
+        Availability is a service-level property. It asks:
+        <em>When a request arrives, how often can the system serve it successfully?</em>
+      </p>
+
+      <div class="two-col">
+        <div class="card">
+          <h3>Incorrect narrow view</h3>
+          <p>
+            “The machine is running, so the system is available.”
+          </p>
+        </div>
+        <div class="card">
+          <h3>More accurate view</h3>
+          <p>
+            “The user can reach the service and receive a correct enough response within an acceptable time window.”
+          </p>
+        </div>
+      </div>
+
+      <p>
+        A service can be technically “up” but still unavailable because:
+      </p>
+      <ul>
+        <li>latency is too high</li>
+        <li>dependencies are failing</li>
+        <li>error rate is high</li>
+        <li>requests are timing out</li>
+        <li>critical features are inaccessible</li>
+      </ul>
+
+      <div class="callout">
+        <strong>Important:</strong> availability is experienced at the request path, not at the server process alone.
+      </div>
+    </section>
+
+    <section id="math">
+      <h2>2. Availability Math and “Nines”</h2>
+
+      <p>
+        Availability is usually expressed as a percentage over time.
+      </p>
+
+      <p class="formula">Availability = Uptime / (Uptime + Downtime)</p>
+
+      <table>
+        <thead>
+          <tr>
+            <th>Availability</th>
+            <th>Allowed downtime per year</th>
+            <th>Interpretation</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>99%</td>
+            <td>~3.65 days</td>
+            <td>Okay for non-critical internal systems</td>
+          </tr>
+          <tr>
+            <td>99.9%</td>
+            <td>~8.76 hours</td>
+            <td>Common business-grade target</td>
+          </tr>
+          <tr>
+            <td>99.95%</td>
+            <td>~4.38 hours</td>
+            <td>Stronger SaaS target</td>
+          </tr>
+          <tr>
+            <td>99.99%</td>
+            <td>~52.56 minutes</td>
+            <td>High availability goal</td>
+          </tr>
+          <tr>
+            <td>99.999%</td>
+            <td>~5.26 minutes</td>
+            <td>Extreme target, expensive and hard</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="callout warn">
+        <strong>Senior insight:</strong> every extra nine is disproportionately harder.
+        Going from 99.9% to 99.99% is not a minor improvement — it often requires materially different architecture and operations.
+      </div>
+
+      <h3>Composite availability</h3>
+      <p>
+        End-to-end availability depends on the full dependency chain.
+      </p>
+      <pre>
+If Service A depends on Service B and Service C,
+and all must be available for a request to succeed:
+
+Overall availability ≈ A × B × C
+      </pre>
+      <p>
+        This is why deep dependency graphs reduce effective user-facing availability.
+      </p>
+    </section>
+
+    <section id="why">
+      <h2>3. Why Availability Matters</h2>
+
+      <div class="three-col">
+        <div class="card">
+          <h3>User impact</h3>
+          <ul>
+            <li>Can users log in?</li>
+            <li>Can they place orders?</li>
+            <li>Can they complete payments?</li>
+            <li>Can they trust the service?</li>
+          </ul>
+        </div>
+        <div class="card">
+          <h3>Business impact</h3>
+          <ul>
+            <li>Revenue loss</li>
+            <li>SLA penalties</li>
+            <li>Reputation damage</li>
+            <li>Support burden</li>
+          </ul>
+        </div>
+        <div class="card">
+          <h3>Engineering impact</h3>
+          <ul>
+            <li>On-call fatigue</li>
+            <li>Rollback pressure</li>
+            <li>Incident coordination</li>
+            <li>Postmortem and rework cost</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="callout good">
+        <strong>Key idea:</strong> availability is a top-level business property, not just an infrastructure metric.
+      </div>
+    </section>
+
+    <section id="components">
+      <h2>4. Core Components of Availability</h2>
+
+      <h3>4.1 Redundancy</h3>
+      <p>
+        The foundational component. If one instance fails, another should still serve.
+      </p>
+      <ul>
+        <li>multiple app instances</li>
+        <li>multiple DB replicas</li>
+        <li>multiple load balancers / zones / regions</li>
+      </ul>
+
+      <h3>4.2 Health Detection</h3>
+      <p>
+        The system needs fast and accurate failure detection.
+      </p>
+      <ul>
+        <li>liveness checks</li>
+        <li>readiness checks</li>
+        <li>heartbeat monitoring</li>
+        <li>dependency health evaluation</li>
+      </ul>
+
+      <h3>4.3 Failover Mechanism</h3>
+      <p>
+        Redundancy without failover is not enough. The system must route around failure.
+      </p>
+
+      <h3>4.4 Isolation Boundaries</h3>
+      <p>
+        Failure in one component should not take down everything else.
+      </p>
+      <ul>
+        <li>cell-based architecture</li>
+        <li>availability zones</li>
+        <li>service isolation</li>
+        <li>bulkheads</li>
+      </ul>
+
+      <h3>4.5 Graceful Degradation</h3>
+      <p>
+        If the full feature cannot be served, the system may provide a reduced but still useful response.
+      </p>
+
+      <h3>4.6 Retry and Timeout Logic</h3>
+      <p>
+        Correct retry behavior can preserve availability. Bad retry behavior can destroy it through retry storms.
+      </p>
+
+      <h3>4.7 State Management</h3>
+      <p>
+        Stateless services fail over more easily.
+        Stateful systems require replication, leader election, or state recovery.
+      </p>
+
+      <h3>4.8 Operational Process</h3>
+      <p>
+        Availability depends not just on system design but on deployment safety, maintenance workflows, and incident response.
+      </p>
+    </section>
+
+    <section id="flows">
+      <h2>5. Internal Failure and Recovery Flows</h2>
+
+      <h3>5.1 Normal Request Path</h3>
+      <div class="flow">
+        <div class="flow-step"><strong>Step 1:</strong> Client sends request.</div>
+        <div class="flow-step"><strong>Step 2:</strong> Load balancer selects a healthy backend.</div>
+        <div class="flow-step"><strong>Step 3:</strong> Backend calls cache/DB/dependencies.</div>
+        <div class="flow-step"><strong>Step 4:</strong> Response returns within SLA.</div>
+      </div>
+
+      <h3>5.2 Failure Path with Recovery</h3>
+      <div class="flow">
+        <div class="flow-step"><strong>Step 1:</strong> One backend instance fails or becomes unhealthy.</div>
+        <div class="flow-step"><strong>Step 2:</strong> Health checks detect failure.</div>
+        <div class="flow-step"><strong>Step 3:</strong> Load balancer removes unhealthy node from rotation.</div>
+        <div class="flow-step"><strong>Step 4:</strong> Traffic shifts to healthy instances.</div>
+        <div class="flow-step"><strong>Step 5:</strong> Autoscaler/replacement mechanism launches recovery instance.</div>
+      </div>
+
+      <h3>5.3 Dependency Failure Flow</h3>
+      <div class="flow">
+        <div class="flow-step"><strong>Primary service receives request</strong></div>
+        <div class="flow-step"><strong>Downstream dependency becomes slow/failing</strong></div>
+        <div class="flow-step"><strong>Timeout or circuit breaker activates</strong></div>
+        <div class="flow-step"><strong>Fallback response, cached response, or partial response returned</strong></div>
+        <div class="flow-step"><strong>User sees degraded behavior instead of full outage</strong></div>
+      </div>
+
+      <div class="callout">
+        <strong>Availability principle:</strong> the system must convert hard failures into local failures, and local failures into graceful degradation whenever possible.
+      </div>
+
+      <h3>5.4 Multi-Zone Failure Flow</h3>
+      <pre>
+Zone A unhealthy
+  -> health system detects zone impairment
+  -> traffic drained from Zone A
+  -> requests routed to Zone B / Zone C
+  -> autoscaling compensates if capacity permits
+  -> system remains available if dependencies are not zonally coupled
+      </pre>
+    </section>
+
+    <section id="strategies">
+      <h2>6. Availability Strategies</h2>
+
+      <h3>6.1 Active-Active</h3>
+      <p>
+        Multiple nodes or regions serve traffic at the same time.
+      </p>
+      <div class="two-col">
+        <div class="card">
+          <h4>Benefits</h4>
+          <ul>
+            <li>Fast failover</li>
+            <li>Better resource utilization</li>
+            <li>Can improve latency if geo-distributed</li>
+          </ul>
+        </div>
+        <div class="card">
+          <h4>Challenges</h4>
+          <ul>
+            <li>State consistency</li>
+            <li>Conflict resolution</li>
+            <li>Operational complexity</li>
+          </ul>
+        </div>
+      </div>
+
+      <h3>6.2 Active-Passive</h3>
+      <p>
+        One primary serves traffic while another standby is ready to take over.
+      </p>
+      <div class="two-col">
+        <div class="card">
+          <h4>Benefits</h4>
+          <ul>
+            <li>Simpler consistency model</li>
+            <li>Simpler control path</li>
+          </ul>
+        </div>
+        <div class="card">
+          <h4>Challenges</h4>
+          <ul>
+            <li>Slower failover</li>
+            <li>Idle standby capacity</li>
+            <li>Split-brain risk if poorly coordinated</li>
+          </ul>
+        </div>
+      </div>
+
+      <h3>6.3 Graceful Degradation</h3>
+      <p>
+        Instead of full failure:
+      </p>
+      <ul>
+        <li>serve cached content</li>
+        <li>disable recommendations</li>
+        <li>show stale but usable data</li>
+        <li>limit advanced features</li>
+      </ul>
+
+      <h3>6.4 Load Shedding</h3>
+      <p>
+        Reject less important work to preserve critical traffic during overload.
+      </p>
+
+      <h3>6.5 Backpressure</h3>
+      <p>
+        Prevent uncontrolled queue buildup by signaling producers to slow down.
+      </p>
+
+      <h3>6.6 Fast Recovery Engineering</h3>
+      <p>
+        Availability improves not only by preventing failure, but by reducing time to detect and time to recover.
+      </p>
+    </section>
+
+    <section id="redundancy">
+      <h2>7. Redundancy Models</h2>
+
+      <h3>7.1 Instance Redundancy</h3>
+      <p>Multiple instances of the same service behind a load balancer.</p>
+
+      <h3>7.2 Zone Redundancy</h3>
+      <p>Deploy across availability zones to survive rack/power/network isolation failures.</p>
+
+      <h3>7.3 Region Redundancy</h3>
+      <p>Deploy across multiple geographic regions for disaster recovery and regional resilience.</p>
+
+      <h3>7.4 Data Redundancy</h3>
+      <p>Replicate data to survive node or storage loss.</p>
+
+      <h3>7.5 Control Plane Redundancy</h3>
+      <p>
+        Even if app instances are redundant, shared control-plane systems like DNS, config stores, or service discovery must also be highly available.
+      </p>
+
+      <table>
+        <thead>
+          <tr>
+            <th>Redundancy level</th>
+            <th>Protects against</th>
+            <th>Does not fully protect against</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Multiple app instances</td>
+            <td>Single process/node failure</td>
+            <td>DB outage, zone outage</td>
+          </tr>
+          <tr>
+            <td>Multi-zone</td>
+            <td>Zone failure</td>
+            <td>Regional outage, global dependency outage</td>
+          </tr>
+          <tr>
+            <td>Multi-region</td>
+            <td>Regional disaster</td>
+            <td>Global software bug, shared auth outage</td>
+          </tr>
+          <tr>
+            <td>Replicated data</td>
+            <td>Node/storage loss</td>
+            <td>Corrupt replicated writes, logical deletion bugs</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="example">
+      <h2>8. Real-World Example: Highly Available Payment Service</h2>
+
+      <h3>Architecture</h3>
+      <ul>
+        <li>API load balancer</li>
+        <li>multiple stateless payment service instances</li>
+        <li>replicated database with failover</li>
+        <li>Redis cache</li>
+        <li>message queue for downstream settlement</li>
+        <li>multi-zone deployment</li>
+      </ul>
+
+      <h3>Normal flow</h3>
+      <div class="flow">
+        <div class="flow-step"><strong>Client</strong> sends payment request</div>
+        <div class="flow-step"><strong>Load balancer</strong> routes to healthy instance</div>
+        <div class="flow-step"><strong>Service</strong> validates request and stores transaction</div>
+        <div class="flow-step"><strong>Event</strong> emitted to async settlement queue</div>
+        <div class="flow-step"><strong>Response</strong> returned to user</div>
+      </div>
+
+      <h3>Failure scenario: one zone fails</h3>
+      <div class="flow">
+        <div class="flow-step"><strong>Zone becomes unreachable</strong></div>
+        <div class="flow-step"><strong>Health checks fail</strong></div>
+        <div class="flow-step"><strong>Traffic routed to remaining zones</strong></div>
+        <div class="flow-step"><strong>Database remains available via surviving replicas / leader failover</strong></div>
+        <div class="flow-step"><strong>System continues with reduced headroom but remains available</strong></div>
+      </div>
+
+      <h3>Failure scenario: fraud scoring dependency is down</h3>
+      <p>
+        The payment service may:
+      </p>
+      <ul>
+        <li>use cached fraud profiles</li>
+        <li>apply stricter default rules</li>
+        <li>queue manual review for borderline cases</li>
+      </ul>
+
+      <div class="callout good">
+        <strong>This is a classic availability design move:</strong> preserve core payment acceptance path even if a secondary enrichment dependency is degraded.
+      </div>
+    </section>
+
+    <section id="deepdive">
+      <h2>9. Production Deep Dive</h2>
+
+      <h3>9.1 Availability Is End-to-End</h3>
+      <p>
+        Many teams overfocus on application replicas and underfocus on dependencies.
+        If authentication, DNS, configuration, or storage is unavailable, the service may still be effectively down.
+      </p>
+
+      <h3>9.2 Planned vs Unplanned Downtime</h3>
+      <p>
+        Strong availability practice reduces both:
+      </p>
+      <ul>
+        <li><strong>Planned:</strong> deploys, maintenance, schema migration</li>
+        <li><strong>Unplanned:</strong> crashes, zone outages, operator mistakes, bad releases</li>
+      </ul>
+
+      <h3>9.3 Deployment Safety as Availability Work</h3>
+      <p>
+        Blue-green deployments, canary releases, feature flags, and automated rollback all improve availability by reducing self-inflicted outages.
+      </p>
+
+      <h3>9.4 Avoiding Shared Fate</h3>
+      <p>
+        Shared fate means supposedly independent components fail together because they share a dependency.
+      </p>
+      <p>Examples:</p>
+      <ul>
+        <li>all services depend on one auth service</li>
+        <li>all regions depend on one control-plane database</li>
+        <li>all instances rely on one configuration server</li>
+      </ul>
+
+      <h3>9.5 Availability Budget Thinking</h3>
+      <p>
+        High-availability systems treat downtime as a budget.
+        Every planned operation, schema change, dependency risk, and release consumes part of that budget.
+      </p>
+
+      <h3>9.6 Read Availability vs Write Availability</h3>
+      <p>
+        Some systems are architected to preserve reads during partial failure while temporarily reducing write capability.
+      </p>
+      <p>
+        This is common in:
+      </p>
+      <ul>
+        <li>search systems</li>
+        <li>content delivery</li>
+        <li>social feeds</li>
+        <li>analytics dashboards</li>
+      </ul>
+    </section>
+
+    <section id="tradeoffs">
+      <h2>10. Trade-offs</h2>
+
+      <table>
+        <thead>
+          <tr>
+            <th>Technique</th>
+            <th>Availability benefit</th>
+            <th>Cost / trade-off</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Replication</td>
+            <td>Survives node failure</td>
+            <td>Replication lag, more infra cost</td>
+          </tr>
+          <tr>
+            <td>Multi-zone deployment</td>
+            <td>Survives zone outage</td>
+            <td>Cross-zone cost and complexity</td>
+          </tr>
+          <tr>
+            <td>Multi-region deployment</td>
+            <td>Survives regional outage</td>
+            <td>Higher latency, consistency complexity</td>
+          </tr>
+          <tr>
+            <td>Graceful degradation</td>
+            <td>Prevents hard outages</td>
+            <td>Reduced functionality / stale data</td>
+          </tr>
+          <tr>
+            <td>Retries</td>
+            <td>Mask transient failure</td>
+            <td>Retry storms if poorly controlled</td>
+          </tr>
+          <tr>
+            <td>Active-active</td>
+            <td>Fast failover</td>
+            <td>Conflict resolution, distributed complexity</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="callout warn">
+        <strong>Senior lesson:</strong> availability engineering frequently trades simplicity and consistency for resilience.
+      </div>
+    </section>
+
+    <section id="failures">
+      <h2>11. Failure Scenarios</h2>
+
+      <h3>11.1 Single Instance Crash</h3>
+      <p>
+        Usually masked well by stateless replicas behind a load balancer.
+      </p>
+
+      <h3>11.2 Dependency Timeout Cascade</h3>
+      <p>
+        One slow dependency causes worker threads to block, queues grow, and upstream services also become unavailable.
+      </p>
+
+      <h3>11.3 Partial Region Outage</h3>
+      <p>
+        Some components in the region are reachable, some are not. This is harder than a clean failure because systems can hang in half-broken states.
+      </p>
+
+      <h3>11.4 Split Brain</h3>
+      <p>
+        In active-passive or leader-based systems, network partitions can cause multiple nodes to think they are primary.
+      </p>
+
+      <h3>11.5 Control Plane Outage</h3>
+      <p>
+        Service discovery, configuration, auth, or DNS failure can make healthy workloads effectively unavailable.
+      </p>
+
+      <h3>11.6 Bad Deployment</h3>
+      <p>
+        One of the most common availability incidents is self-inflicted: code rollout, schema migration, or configuration mistake.
+      </p>
+
+      <div class="callout danger">
+        <strong>Reality check:</strong> many major outages are not caused by hardware failure.
+        They are caused by misconfiguration, bad deploys, unsafe migrations, and overload amplification.
+      </div>
+    </section>
+
+    <section id="metrics">
+      <h2>12. Metrics and Observability</h2>
+
+      <h3>12.1 Primary Metrics</h3>
+      <ul>
+        <li>successful request rate</li>
+        <li>availability percentage over SLA window</li>
+        <li>error rate by endpoint / tenant / region</li>
+        <li>timeout rate</li>
+        <li>dependency success rate</li>
+        <li>health check status</li>
+        <li>failover time</li>
+        <li>mean time to detect (MTTD)</li>
+        <li>mean time to recover (MTTR)</li>
+      </ul>
+
+      <h3>12.2 Supporting Metrics</h3>
+      <ul>
+        <li>queue depth</li>
+        <li>replica lag</li>
+        <li>connection pool exhaustion</li>
+        <li>load balancer backend health</li>
+        <li>cache hit ratio</li>
+        <li>regional traffic distribution</li>
+      </ul>
+
+      <h3>12.3 SLO Thinking</h3>
+      <p>
+        Availability is often formalized using:
+      </p>
+      <ul>
+        <li><strong>SLI:</strong> actual measured successful request ratio</li>
+        <li><strong>SLO:</strong> target availability, e.g. 99.95%</li>
+        <li><strong>SLA:</strong> contractual or external commitment</li>
+      </ul>
+
+      <h3>12.4 Alerting Guidance</h3>
+      <p>
+        Alert on symptoms, not just infrastructure signals:
+      </p>
+      <ul>
+        <li>user-visible error rate spikes</li>
+        <li>regional request success degradation</li>
+        <li>rising timeout percentages</li>
+        <li>failover not completing in expected time</li>
+      </ul>
+    </section>
+
+    <section id="interview">
+      <h2>13. Interview Framing</h2>
+
+      <h3>13.1 Strong Definition</h3>
+      <div class="muted-box">
+        <p>
+          Availability is the likelihood that a system can successfully serve requests when needed.
+          In distributed systems, it is achieved through redundancy, fast failure detection, failover,
+          isolation, and graceful degradation.
+        </p>
+      </div>
+
+      <h3>13.2 Interview Answer Structure</h3>
+      <ol>
+        <li>Clarify required uptime target or nines.</li>
+        <li>Identify user-critical paths.</li>
+        <li>Describe redundancy model for each layer.</li>
+        <li>Explain how failures are detected and traffic is rerouted.</li>
+        <li>Discuss dependency isolation and graceful degradation.</li>
+        <li>Mention metrics and recovery time.</li>
+      </ol>
+
+      <h3>13.3 Strong Senior-Level Phrases</h3>
+      <ul>
+        <li>“I want to remove single points of failure.”</li>
+        <li>“Availability must be reasoned about end to end, including dependencies.”</li>
+        <li>“I’d separate failure detection from failover policy.”</li>
+        <li>“I’d design degraded-mode behavior for secondary dependencies.”</li>
+        <li>“The target number of nines determines whether multi-zone or multi-region is justified.”</li>
+      </ul>
+
+      <h3>13.4 Common Interview Mistakes</h3>
+      <ul>
+        <li>Confusing availability with reliability or durability</li>
+        <li>Ignoring dependency chain availability</li>
+        <li>Not discussing failover speed</li>
+        <li>Assuming replicas alone solve availability</li>
+        <li>Ignoring bad deployments as a major source of downtime</li>
+      </ul>
+    </section>
+
+    <section id="compare">
+      <h2>14. Related Concepts</h2>
+
+      <h3>Availability vs Reliability</h3>
+      <p>
+        Availability asks whether the service is accessible now.
+        Reliability asks whether it behaves correctly over time.
+      </p>
+
+      <h3>Availability vs Durability</h3>
+      <p>
+        Availability is about serving requests.
+        Durability is about not losing committed data.
+      </p>
+
+      <h3>Availability vs Scalability</h3>
+      <p>
+        Scalability is about handling more load.
+        Availability is about continuing to serve despite failures or disruptions.
+      </p>
+
+      <h3>Availability vs Fault Tolerance</h3>
+      <p>
+        Fault tolerance is one of the means to achieve availability.
+        Availability is the higher-level outcome.
+      </p>
+    </section>
+
+    <section id="summary">
+      <h2>15. Summary</h2>
+      <div class="card">
+        <p>
+          Availability is a system’s ability to remain usable under real-world conditions:
+          node failures, dependency slowness, zone outages, bad deploys, and traffic spikes.
+        </p>
+        <ul>
+          <li>It is measured as successful request serving over time.</li>
+          <li>High availability requires redundancy, failure detection, failover, and isolation.</li>
+          <li>Dependencies matter as much as the primary service.</li>
+          <li>Graceful degradation often matters more than perfect behavior.</li>
+          <li>Each extra “nine” becomes dramatically harder and more expensive.</li>
+          <li>Observability and operational practice are critical to sustaining availability.</li>
+        </ul>
+      </div>
+
+      <div class="callout good">
+        <strong>Final senior takeaway:</strong> availability is the art of making failures routine,
+        local, and survivable instead of global and user-visible.
+      </div>
+
+      <h3>30-Second Revision Sheet</h3>
+      <pre>
+Availability:
+- Probability system is operational and usable when needed
+- Usually measured as uptime percentage
+- More nines = less allowable downtime
+- Achieved using:
+  - redundancy
+  - health checks
+  - failover
+  - isolation
+  - graceful degradation
+- Common threats:
+  - dependency outages
+  - bad deploys
+  - regional failures
+  - retry storms
+  - split brain
+- Metrics:
+  - success rate
+  - timeout rate
+  - failover time
+  - MTTR
+  - SLI/SLO
+      </pre>
+    </section>
+
+    <div class="footer">
+      Prepared as a deep HTML study note for Availability. Save this file as <strong>availability.html</strong>.
+    </div>
+  </div>
+</body>
+</html>
